@@ -11,16 +11,31 @@ const timecardSchema = new mongoose.Schema({
         type: Date,
         required: true
     },
-    timeIn: Date,
-    timeOut: Date,
+    timeIn: {
+        type: Date,
+        default: () => new Date
+    },
+    timeOut: {
+        type: Date,
+        default: null
+    },
     breaks: [{
         start: Date,
         end: Date,
         duration: Number
     }],
-    totalHours: Number,
-    totalBreak: Number,
-    totalWork: Number,
+    totalHours: {
+        type: Number,
+        default: 0
+    },
+    totalBreaks: {
+        type: Number,
+        default: 0
+    },
+    totalWorkHours: {
+        type: Number,
+        default: 0
+    },
     status: {
         type: String,
         enum: ["Draft", "Pending", "Approved", "Rejected"],

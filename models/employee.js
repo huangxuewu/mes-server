@@ -33,8 +33,6 @@ const employeeSchema = new mongoose.Schema({
     },
     dob: {
         type: Date,
-
-
         required: true,
         validate: {
             validator: dob => dob < new Date(new Date().setFullYear(new Date().getFullYear() - 18)),

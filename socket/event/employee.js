@@ -1,3 +1,5 @@
+const db = require("../../models");
+
 module.exports = (socket, io) => {
 
     //
@@ -18,8 +20,25 @@ module.exports = (socket, io) => {
     });
 
     // Timecard
-    socket.on('timecard:clockIn', (data) => {
-        console.log(data);
+    socket.on('timecard:clockIn', async ({ _id, image }, callback) => {
+        try {
+            const employee = await db.employee.findById(_id);
+
+            if (!employee) return callback({ status: "error", message: "Employee not found" });
+
+            const timecard = await db.timecard.create({
+                employee: _id,
+                date: new Date(),
+                timeIn: new Date(),
+                // image: image.path,
+                
+            })
+
+            callback({ status: "success", message: "Timecard created successfully", payload: timecard });
+
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     socket.on('timecard:clockOut', (data) => {
