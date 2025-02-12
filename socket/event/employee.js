@@ -31,10 +31,11 @@ module.exports = (socket, io) => {
                 date: new Date(),
                 timeIn: new Date(),
                 // image: image.path,
-                
-            })
+            });
 
-            callback({ status: "success", message: "Timecard created successfully", payload: timecard });
+            const profile = await employee.clockIn(timecard._id);
+
+            callback({ status: "success", message: "Timecard created successfully", payload: profile });
 
         } catch (error) {
             callback({ status: "error", message: error.message });

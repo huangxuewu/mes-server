@@ -39,7 +39,7 @@ const timecardSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ["Draft", "Pending", "Approved", "Rejected"],
-        default: "Draft"
+        default: "Pending"
     },
     review: {
         authorizer: {
@@ -61,7 +61,5 @@ const timecardSchema = new mongoose.Schema({
     timestamps: true
 });
 
-const Timecard = database.model("timecard", timecardSchema);
-
-module.exports = Timecard;
+module.exports = database.model("Timecard", timecardSchema, 'timecard');
 

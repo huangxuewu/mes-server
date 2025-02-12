@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const database = require("../config/database");
 
 const userSchema = new mongoose.Schema({
     username: String,
@@ -12,4 +13,4 @@ const userSchema = new mongoose.Schema({
     }
 });
 
-module.exports = mongoose.model("user", userSchema);
+module.exports = database.model("User", userSchema, 'user');

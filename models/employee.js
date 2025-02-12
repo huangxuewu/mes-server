@@ -82,6 +82,22 @@ const employeeSchema = new mongoose.Schema({
         enum: ["Active", "On Leave", "Resigned", "Terminated"],
         default: "Active"
     },
+    timecard: {
+        _id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "timecard"
+        },
+        date: Date,
+        status: {
+            type: String,
+            enum: ["Clocked In", "Clocked Out", "On Break"],
+            default: "Clocked In"
+        },
+        disabled: {
+            type: Boolean,
+            default: false
+        }
+    },
     contact: {
         phone: String,
         address: String,
@@ -101,7 +117,7 @@ const employeeSchema = new mongoose.Schema({
 });
 
 
-const Employee = database.model("employee", employeeSchema);
+
 
 employeeSchema.virtual("fullName").get(function () {
     return `${this.firstName} ${this.lastName}`;
@@ -111,4 +127,17 @@ employeeSchema.virtual("age").get(function () {
     return new Date().getFullYear() - this.dob.getFullYear();
 });
 
-module.exports = Employee;
+employeeSchema.methods.clockIn = async function (timecardId) {
+    const employee = await this.model("Employee").findByIdAndUpdate(this._id, {
+        timecard: {
+            _id: timecardId,
+            date: new Date(),
+            status: "Clocked In",
+            disabled: false
+        }
+    }, { new: true });
+
+    return employee;
+}
+
+module.exports = database.model("Employee", employeeSchema, 'employee');
