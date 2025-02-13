@@ -128,10 +128,10 @@ employeeSchema.virtual("age").get(function () {
 });
 
 employeeSchema.methods.clockIn = async function (timecardId) {
-    const employee = await this.model("Employee").findByIdAndUpdate(this._id, {
+    const employee = await this.model("employee").findByIdAndUpdate(this._id, {
         timecard: {
             _id: timecardId,
-            date: new Date(),
+            date: new Date().toISOString().split('T')[0],
             status: "Clocked In",
             disabled: false
         }
@@ -140,4 +140,4 @@ employeeSchema.methods.clockIn = async function (timecardId) {
     return employee;
 }
 
-module.exports = database.model("Employee", employeeSchema, 'employee');
+module.exports = database.model("employee", employeeSchema, 'employee');

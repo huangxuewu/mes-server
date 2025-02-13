@@ -28,14 +28,14 @@ module.exports = (socket, io) => {
 
             const timecard = await db.timecard.create({
                 employee: _id,
-                date: new Date(),
+                date: new Date().toISOString().split('T')[0],
                 timeIn: new Date(),
-                // image: image.path,
+                timeInImage: image,
             });
 
             const profile = await employee.clockIn(timecard._id);
 
-            callback({ status: "success", message: "Timecard created successfully", payload: profile });
+            callback({ status: "success", message: "Timecard created successfully", payload: timecard });
 
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -43,19 +43,37 @@ module.exports = (socket, io) => {
     });
 
     socket.on('timecard:clockOut', (data) => {
+
         console.log(data);
     });
 
-    socket.on('timecard:breakStart', (data) => {
-        console.log(data);
+    socket.on('timecard:breakStart', async ({ _id, image }, callback) => {
+        try {
+            const timecard = await db.timecard.findById(_id);
+
+            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
+
+            const updatedTimecard = await timecard.breakStart(image);
+
+            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
+
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     socket.on('timecard:breakEnd', (data) => {
         console.log(data);
     });
 
-    socket.on('timecard:get', (data) => {
-        console.log(data);
+    socket.on('timecard:get', async ({ _id }, callback) => {
+        try {
+            const timecard = await db.timecard.findById(_id).populate("employee");
+            callback({ status: "success", message: "Timecard fetched successfully", payload: timecard });
+
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     socket.on('timecard:update', (data) => {

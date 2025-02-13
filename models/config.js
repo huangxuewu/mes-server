@@ -27,5 +27,5 @@ const configSchema = new mongoose.Schema({
     product: [productSchema],
 });
 
-module.exports = database.model("Config", configSchema, 'config');
+module.exports = database.model("config", configSchema, 'config');
 
