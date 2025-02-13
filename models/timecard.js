@@ -88,6 +88,43 @@ timecardSchema.methods.breakStart = async function (imageURL) {
 
     await this.save();
 
+    // update employee timecard status
+    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "On Break" } });
+
+    return this;
+}
+
+timecardSchema.methods.breakEnd = async function (imageURL) {
+    const lastBreak = this.breaks[this.breaks.length - 1];
+    lastBreak.end = new Date();
+    lastBreak.endImage = imageURL;
+    // calculate duration in minutes
+    lastBreak.duration = Math.round((lastBreak.end.getTime() - lastBreak.start.getTime()) / 60000);
+
+    await this.save();
+
+    // update employee timecard status
+    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "Clocked In" } });
+
+    return this;
+}
+
+timecardSchema.methods.clockOut = async function (imageURL) {
+    this.timeOut = new Date();
+    this.timeOutImage = imageURL;
+
+    // calculate total hours in minutes 
+    this.totalHours = Math.round((this.timeOut.getTime() - this.timeIn.getTime()) / 60000);
+    // calculate total breaks in minutes
+    this.totalBreaks = this.breaks.reduce((acc, breakObj) => acc + breakObj.duration, 0);
+    // calculate total work hours in minutes
+    this.totalWorkHours = this.totalHours - this.totalBreaks;
+
+    await this.save();
+
+    // update employee timecard status
+    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "Clocked Out" } });
+
     return this;
 }
 

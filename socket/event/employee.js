@@ -33,7 +33,14 @@ module.exports = (socket, io) => {
                 timeInImage: image,
             });
 
-            const profile = await employee.clockIn(timecard._id);
+            // update employee timecard status
+            await db.employee.updateOne({ _id }, { $set: {
+                timecard: {
+                    _id: timecard._id,
+                    date: timecard.date,
+                    status: "Clocked In",
+                }
+            }});
 
             callback({ status: "success", message: "Timecard created successfully", payload: timecard });
 
@@ -42,9 +49,19 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:clockOut', (data) => {
+    socket.on('timecard:clockOut', async ({ _id, image }, callback) => {
+        try {
+            const timecard = await db.timecard.findById(_id);
 
-        console.log(data);
+            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
+
+            const updatedTimecard = await timecard.clockOut(image);
+
+            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
+
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     socket.on('timecard:breakStart', async ({ _id, image }, callback) => {
@@ -62,13 +79,24 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:breakEnd', (data) => {
-        console.log(data);
+    socket.on('timecard:breakEnd', async ({ _id, image }, callback) => {
+        try {
+            const timecard = await db.timecard.findById(_id);
+
+            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
+
+            const updatedTimecard = await timecard.breakEnd(image);
+
+            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
+
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
-    socket.on('timecard:get', async ({ _id }, callback) => {
+    socket.on('timecard:get', async (query, callback) => {
         try {
-            const timecard = await db.timecard.findById(_id).populate("employee");
+            const timecard = await db.timecard.findOne(query).populate("employee");
             callback({ status: "success", message: "Timecard fetched successfully", payload: timecard });
 
         } catch (error) {
