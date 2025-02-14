@@ -34,13 +34,15 @@ module.exports = (socket, io) => {
             });
 
             // update employee timecard status
-            await db.employee.updateOne({ _id }, { $set: {
-                timecard: {
-                    _id: timecard._id,
-                    date: timecard.date,
-                    status: "Clocked In",
+            await db.employee.updateOne({ _id }, {
+                $set: {
+                    timecard: {
+                        _id: timecard._id,
+                        date: timecard.date,
+                        status: "Clocked In",
+                    }
                 }
-            }});
+            });
 
             callback({ status: "success", message: "Timecard created successfully", payload: timecard });
 
@@ -122,5 +124,14 @@ module.exports = (socket, io) => {
 
     socket.on('timecard:review', (data) => {
         console.log(data);
+    });
+
+    socket.on('timecards:get', async (query, callback) => {
+        try {
+            const timecards = await db.timecard.find(query).populate("employee");
+            callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 };
