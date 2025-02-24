@@ -2,13 +2,24 @@ const db = require("../../models");
 
 module.exports = (socket, io) => {
 
-    //
+    // get single employee data
     socket.on('employee:get', (data) => {
         console.log(data);
     });
 
+    // get all employees data
+    socket.on('employees:get', async (query, callback) => {
+        try {
+            const employees = await db.employee.find(query);
+            callback({ status: "success", message: "Employees fetched successfully", payload: employees });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    // create new employee
     socket.on('employee:create', (data) => {
-        console.log(data);
+
     });
 
     socket.on('employee:update', (data) => {

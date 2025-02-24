@@ -18,6 +18,9 @@ const employeeSchema = new mongoose.Schema({
     displayName: {
         type: String
     },
+    portrait: {
+        type: String
+    },
     pin: {
         type: String,
         required: true,
@@ -57,12 +60,11 @@ const employeeSchema = new mongoose.Schema({
     department: {
         type: String,
         required: true,
-        enum: ["Office", "Quality Control", "Logistic", "Sales", "Warehouse", "Production", "Finance", "Security", "Other"]
+        enum: ["Office", "Quality Control", "Quality Assurance", "Logistic", "Sales", "Warehouse", "Production", "Finance", "Security", "Maintenance", "Other"]
     },
-    position: {
+    role: {
         type: String,
-        required: true,
-        enum: ["Admin", "Owner", "Manager", "Supervisor", "Staff", "Operator", "Other"]
+        required: true
     },
     skills: [{
         name: String,
