@@ -20,7 +20,7 @@ const buyerSchema = new mongoose.Schema({
 const orderSchema = new mongoose.Schema({
     poDate: { type: String, required: true },
     poNumber: { type: String, required: true },
-    cancelDate: { type: Date, default: null },
+    cancelDate: { type: String, default: null },
     scheduledAt: { type: Date, default: null },
     inProductionAt: { type: Date, default: null },
     fulfilledAt: { type: Date, default: null },
