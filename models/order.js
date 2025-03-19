@@ -14,6 +14,11 @@ const buyerSchema = new mongoose.Schema({
     shipWindow: {
         start: String,
         end: String
+    },
+    done: {
+        type: Boolean,
+        default: false,
+        description: "Shipping status, true when carrier picked up"
     }
 });
 
@@ -53,6 +58,13 @@ orderSchema.methods.checkDuplication = async function () {
 
     if (record) throw new Error("Order PO number already exists");
 }
+
+orderSchema.statics.updateShipmentStatus = async function ({ status, poNumber }) {
+    if (status !== "Picked Up") return;
+
+    await this.updateOne({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
+}
+
 
 module.exports = database.model("order", orderSchema, 'order');
 

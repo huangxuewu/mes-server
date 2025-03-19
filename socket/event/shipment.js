@@ -23,10 +23,14 @@ module.exports = (socket, io) => {
 
     socket.on("shipment:replace", async (payload, callback) => {
         const { _id, ...data } = payload;
-        
+
         try {
-            await db.shipment.updateOne({ _id }, { $set: data });
-            callback?.({ status: "success", message: "Shipment updated successfully" });
+            const shipment = await db.shipment.findOneAndUpdate({ _id }, { $set: data }, { new: true });
+
+            // update order status if shipment is picked up
+            await db.order.updateShipmentStatus(data);
+
+            callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }

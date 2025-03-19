@@ -33,7 +33,11 @@ const shipmentSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-    scac: {
+    assignedSCAC: {
+        type: String,
+        default: null
+    },
+    executingSCAC: {
         type: String,
         default: null
     },
@@ -53,41 +57,58 @@ const shipmentSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    chRobinsonNumber: {
+        type: String,
+        default: null
+    },
     pickupGate: {
         type: String,
         default: null
     },
+    shipDate: {
+        type: String,
+        default: null,
+        description: "Date system originally scheduled for shipment"
+    },
     pickupDate: {
-        type: Date,
-        default: null
+        type: String,
+        default: null,
+        description: "Date system scheduled for pickup"
     },
     schedulePickupAt: {
         type: Date,
-        default: null
+        default: null,
+        description: "Date we & dispatch scheduled for pickup"
     },
     actualPickupAt: {
         type: Date,
-        default: null
+        default: null,
+        description: "Date we actually shipped the shipment"
     },
     onPremisesDate: {
-        type: Date,
-        default: null
+        type: String,
+        default: null,
+        description: "Date that the buyer expected the shipment to be on their premises"
     },
     cartons: {
         type: Number,
-        default: null
+        default: null,
+        description: "Number of cartons in the shipment"
     },
     pallets: {
         type: Number,
-        default: null
+        default: null,
+        description: "Number of pallets in the shipment"
     },
     weight: {
         type: Number,
-        default: null
+        default: null,
+        description: "Weight of the shipment"
     },
     commodity: {
         type: String,
-        default: null
+        default: null,
+        description: "Commodity of the shipment"
     },
     status: {
         type: String,
