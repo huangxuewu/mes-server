@@ -145,4 +145,31 @@ module.exports = (socket, io) => {
             callback({ status: "error", message: error.message });
         }
     });
+
+    socket.on('enrollment:get', async (query, callback) => {
+        try {
+            const enrollment = await db.enrollment.findOne(query);
+            callback({ status: "success", message: "Enrollment fetched successfully", payload: enrollment });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('enrollments:get', async (query, callback) => {
+        try {
+            const enrollments = await db.enrollment.find(query);
+            callback({ status: "success", message: "Enrollments fetched successfully", payload: enrollments });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('enrollment:create', (data) => {
+        console.log(data);
+    });
+
+    socket.on('enrollment:update', (data) => {
+        console.log(data);
+    });
+
 };
