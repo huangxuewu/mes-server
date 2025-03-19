@@ -58,7 +58,7 @@ const shipmentSchema = new mongoose.Schema({
         default: null
     },
     pickupDate: {
-        type: Date,
+        type: String,
         default: null
     },
     schedulePickupAt: {
@@ -70,7 +70,7 @@ const shipmentSchema = new mongoose.Schema({
         default: null
     },
     onPremisesDate: {
-        type: Date,
+        type: String,
         default: null
     },
     cartons: {
