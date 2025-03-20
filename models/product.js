@@ -50,6 +50,13 @@ const casePackSchema = new mongoose.Schema({
     },
 });
 
+const storagingSchema = new mongoose.Schema({
+    location: String,
+    maxHeight: Number,
+    allowOverHang: Boolean,
+    boxesPerPallet: Number,
+});
+
 const productSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -86,14 +93,19 @@ const productSchema = new mongoose.Schema({
     },
     version: String,
     revisionHistory: [revisionHistorySchema],
-    specification: [specificationSchema],
     qualityChecks: [qualityControlSchema],
+    specification: [specificationSchema],
+    storaging: [storagingSchema],
     casePack: casePackSchema,
+    packaging: {
+        pillowsPerBag: Number,
+        bagsPerBox: Number,
+        boxesPerPallet: Number,
+    },
     status: {
         type: String,
         enum: ['Active', 'Development', 'Discontinued']
     },
-
 });
 
 module.exports = database.model("product", productSchema, 'product');
