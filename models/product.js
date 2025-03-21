@@ -104,7 +104,7 @@ const productSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['Active', 'Development', 'Discontinued']
+        enum: ['Active', 'Development', 'Discontinued', 'Pre-Production']
     },
 });
 

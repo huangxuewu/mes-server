@@ -17,6 +17,7 @@ const shipmentSchema = new mongoose.Schema({
         number: { type: String, default: null },
         thumbnail: { type: String, default: null },
         url: { type: String, default: null },
+        uploadedAt: { type: Date, default: null },
     },
     name: String,
     address: String,
@@ -109,6 +110,11 @@ const shipmentSchema = new mongoose.Schema({
         type: String,
         default: null,
         description: "Commodity of the shipment"
+    },
+    staging: {
+        area: { type: String, default: null },
+        ready: { type: Boolean, default: false },
+        readyAt: { type: Date, default: null },
     },
     status: {
         type: String,
