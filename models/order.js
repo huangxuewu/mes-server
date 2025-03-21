@@ -71,24 +71,22 @@ const Order = database.model("order", orderSchema, 'order');
 
 Order.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
+
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                const doc = change.fullDocument;
+                const doc = change?.fullDocument;
 
                 // if order is completed, do not update
-                if (doc.orderStatus === "Completed") return;
+                if (doc.orderStatus === "Completed") return io.emit("update:order", doc);
 
                 const allDone = doc.buyers.every(buyer => buyer.done);
-
                 allDone && database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed" }).exec();
 
                 break;
         }
 
-        // emit event to socket
-        io.emit("update:order", doc);
     })
 
 module.exports = Order;
