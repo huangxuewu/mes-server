@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const itemSchema = new mongoose.Schema({
@@ -51,10 +52,6 @@ const shipmentSchema = new mongoose.Schema({
         default: null
     },
     proNumber: {
-        type: String,
-        default: null
-    },
-    bolNumber: {
         type: String,
         default: null
     },
@@ -124,4 +121,29 @@ const shipmentSchema = new mongoose.Schema({
     timestamps: true
 });
 
-module.exports = database.model("shipment", shipmentSchema, "shipment");
+const Shipment = database.model("shipment", shipmentSchema, "shipment");
+
+Shipment.createIndexes({
+    "masterPO": 1,
+    "poNumber": 1,
+});
+
+Shipment
+    .watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("update:shipment", change.fullDocument);
+
+                break;
+            case "delete":
+
+                break;
+        }
+    })
+
+module.exports = Shipment;
+
+
