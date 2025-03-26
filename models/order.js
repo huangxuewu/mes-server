@@ -31,7 +31,7 @@ const orderSchema = new mongoose.Schema({
     inProductionAt: { type: Date, default: null },
     fulfilledAt: { type: Date, default: null },
     transitAt: { type: Date, default: null },
-    deliveredAt: { type: Date, default: null },
+    shippedAt: { type: Date, default: null },
     invoicedAt: { type: Date, default: null },
     paidAt: { type: Date, default: null },
     creator: { type: mongoose.Schema.Types.ObjectId, ref: 'user', default: null },
@@ -63,7 +63,7 @@ orderSchema.methods.checkDuplication = async function () {
 orderSchema.statics.updateShipmentStatus = async function ({ status, poNumber }) {
     if (status !== "Picked Up") return;
 
-    await this.updateOne({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
+    await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
 }
 
 
@@ -82,7 +82,7 @@ Order.watch([], { fullDocument: "updateLookup" })
                 if (doc.orderStatus === "Completed") return io.emit("update:order", doc);
 
                 const allDone = doc.buyers.every(buyer => buyer.done);
-                allDone && database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed" }).exec();
+                allDone && database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }).exec();
 
                 break;
         }
