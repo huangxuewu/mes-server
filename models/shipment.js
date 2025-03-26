@@ -10,6 +10,13 @@ const itemSchema = new mongoose.Schema({
     description: String,
 });
 
+const memoSchema = new mongoose.Schema({
+    type: { type: String, default: 'Note', enum: ['Note', 'Reschedule'] },
+    content: { type: String, default: null },
+    createdAt: { type: Date, default: null },
+    createdBy: { type: String, default: null },
+});
+
 const shipmentSchema = new mongoose.Schema({
     masterPO: String,
     poNumber: { type: String, required: true },
@@ -19,6 +26,7 @@ const shipmentSchema = new mongoose.Schema({
         thumbnail: { type: String, default: null },
         url: { type: String, default: null },
         uploadedAt: { type: Date, default: null },
+        rawData: { type: Object, default: null },
     },
     name: String,
     address: String,
@@ -113,6 +121,7 @@ const shipmentSchema = new mongoose.Schema({
         ready: { type: Boolean, default: false },
         readyAt: { type: Date, default: null },
     },
+    memos: [memoSchema],
     status: {
         type: String,
         default: "Pending"
