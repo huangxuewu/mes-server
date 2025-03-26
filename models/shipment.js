@@ -25,7 +25,6 @@ const shipmentSchema = new mongoose.Schema({
         number: { type: String, default: null },
         thumbnail: { type: String, default: null },
         url: { type: String, default: null },
-        rawData: { type: Object, default: null },
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
