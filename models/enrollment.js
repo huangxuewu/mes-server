@@ -60,6 +60,6 @@ const enrollmentSchema = new mongoose.Schema({
     comments: []
 }, { timestamps: true });
 
-const Enrollment = mongoose.model("Enrollment", enrollmentSchema);
+const Enrollment = mongoose.model("enrollment", enrollmentSchema, "enrollment");
 
 module.exports = Enrollment;
