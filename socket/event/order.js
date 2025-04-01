@@ -41,7 +41,7 @@ module.exports = (socket, io) => {
 
     socket.on('orders:get', async (query, callback) => {
         try {
-            db.order.find(query).then(orders => {
+            db.order.find(query).sort({ cancelDate: 1 }).then(orders => {
                 callback({ status: "success", message: "Orders fetched successfully", payload: orders })
             }).catch(error => {
                 callback({ status: "error", message: error.message })

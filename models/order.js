@@ -23,6 +23,26 @@ const buyerSchema = new mongoose.Schema({
     }
 });
 
+const productionLogSchema = new mongoose.Schema({
+    date: { type: Date, default: null },
+    note: { type: String, default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', default: null },
+    createdAt: { type: Date, default: null },
+    startedAt: { type: Date, default: null },
+    finishedAt: { type: Date, default: null },
+    totalCount: { type: Number, default: 0 },
+});
+
+const inspectionSchema = new mongoose.Schema({
+    date: { type: Date, default: null },
+    note: { type: String, default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', default: null },
+    createdAt: { type: Date, default: null },
+    inspectionType: { type: String, enum: ['Pre-Production', 'In-Production', 'Post-Production'], default: 'Pre-Production' },
+    result: { type: String, enum: ['Pass', 'Fail'], default: 'Pass' },
+    images: [String],
+});
+
 const orderSchema = new mongoose.Schema({
     poDate: { type: String, required: true },
     poNumber: { type: String, required: true },
@@ -41,6 +61,8 @@ const orderSchema = new mongoose.Schema({
     note: String,
     items: {},
     buyers: [buyerSchema],
+    productionLogs: [productionLogSchema],
+    inspections: [inspectionSchema],
     priority: {
         type: Number,
         default: 0
@@ -77,7 +99,6 @@ Order.watch([], { fullDocument: "updateLookup" })
             case "update":
             case "replace":
                 const doc = change?.fullDocument;
-
                 // if order is completed, do not update
                 if (doc.orderStatus === "Completed") return io.emit("update:order", doc);
 
