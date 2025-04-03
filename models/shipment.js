@@ -21,6 +21,7 @@ const shipmentSchema = new mongoose.Schema({
     masterPO: String,
     poNumber: { type: String, required: true },
     poDate: { type: String, default: null },
+    client: { type: String, default: "Target" },
     bol: {
         number: { type: String, default: null },
         thumbnail: { type: String, default: null },

@@ -50,6 +50,7 @@ const orderSchema = new mongoose.Schema({
     scheduledAt: { type: Date, default: null },
     inProductionAt: { type: Date, default: null },
     fulfilledAt: { type: Date, default: null },
+    inspectedAt: { type: Date, default: null },
     transitAt: { type: Date, default: null },
     shippedAt: { type: Date, default: null },
     invoicedAt: { type: Date, default: null },
