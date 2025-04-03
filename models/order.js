@@ -75,6 +75,10 @@ const orderSchema = new mongoose.Schema({
     timestamps: true
 });
 
+orderSchema.virtual('itemCount').get(function () {
+    return Object.values(this.items).reduce((acc, [key, item]) => acc + item.quantity, 0);
+});
+
 // check if order po number already exists
 orderSchema.methods.checkDuplication = async function () {
     const record = await this.constructor.findOne({ poNumber: this.poNumber });
@@ -100,10 +104,14 @@ Order.watch([], { fullDocument: "updateLookup" })
             case "replace":
                 const doc = change?.fullDocument;
                 // if order is completed, do not update
-                if (doc.orderStatus === "Completed") return io.emit("update:order", doc);
+                if (doc.orderStatus === "Completed") return io.emit("order:update", doc);
 
                 const allDone = doc.buyers.every(buyer => buyer.done);
-                allDone && database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }).exec();
+
+                if (allDone) {
+                    database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }).exec();
+                    io.emit("order:update", doc);
+                }
 
                 break;
         }

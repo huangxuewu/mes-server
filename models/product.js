@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const revisionHistorySchema = new mongoose.Schema({
@@ -108,4 +109,24 @@ const productSchema = new mongoose.Schema({
     },
 });
 
-module.exports = database.model("product", productSchema, 'product');
+
+const Product = database.model("product", productSchema, 'product');
+
+Product.createIndexes({ "styleName": 1 });
+
+Product.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("product:update", change.fullDocument);
+
+                break;
+            case "delete":
+
+                break;
+        }
+    });
+
+module.exports = Product;
