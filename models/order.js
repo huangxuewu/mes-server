@@ -75,10 +75,6 @@ const orderSchema = new mongoose.Schema({
     timestamps: true
 });
 
-orderSchema.virtual('itemCount').get(function () {
-    return Object.values(this.items).reduce((acc, [key, item]) => acc + item.quantity, 0);
-});
-
 // check if order po number already exists
 orderSchema.methods.checkDuplication = async function () {
     const record = await this.constructor.findOne({ poNumber: this.poNumber });
