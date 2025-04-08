@@ -145,7 +145,7 @@ Shipment
             case "insert":
             case "update":
             case "replace":
-                io.emit("update:shipment", change.fullDocument);
+                io.emit("shipment:update", change.fullDocument);
 
                 break;
             case "delete":

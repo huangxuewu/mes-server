@@ -9,17 +9,20 @@ module.exports = (socket, io) => {
             await order.checkDuplication();
             await order.save();
 
-            callback({ status: "success", message: "Order created successfully", payload: order })
+            callback?.({ status: "success", message: "Order created successfully", payload: order })
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message })
         }
     });
 
-    socket.on('order:update', async (data, callback) => {
+    socket.on('order:update', async (payload, callback) => {
         try {
+            const { _id, ...data } = payload
+            const order = await db.order.findByIdAndUpdate(_id, { $set: data }, { new: true });
 
+            callback?.({ status: "success", message: "Order updated successfully", payload: order })
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message })
         }
     });
 
@@ -27,7 +30,7 @@ module.exports = (socket, io) => {
         try {
 
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message })
         }
     });
 
@@ -35,19 +38,19 @@ module.exports = (socket, io) => {
         try {
 
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message })
         }
     });
 
     socket.on('orders:get', async (query, callback) => {
         try {
             db.order.find(query).sort({ cancelDate: 1 }).then(orders => {
-                callback({ status: "success", message: "Orders fetched successfully", payload: orders })
+                callback?.({ status: "success", message: "Orders fetched successfully", payload: orders })
             }).catch(error => {
-                callback({ status: "error", message: error.message })
+                callback?.({ status: "error", message: error.message })
             })
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message })
         }
     });
 }

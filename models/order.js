@@ -101,15 +101,17 @@ Order.watch([], { fullDocument: "updateLookup" })
             case "replace":
                 const doc = change?.fullDocument;
                 // if order is completed, do not update
-                if (doc.orderStatus === "Completed") return io.emit("order:update", doc);
+                if (doc.orderStatus !== "Completed") {
+                    const allDone = doc.buyers.every(buyer => buyer.done);
 
-                const allDone = doc.buyers.every(buyer => buyer.done);
-
-                if (allDone) {
-                    database.model('order').updateOne({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }).exec();
-                    io.emit("order:update", doc);
+                    if (allDone)
+                        return database.model('order')
+                            .findOneAndUpdate({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }, { new: true })
+                            .then(updatedOrder => io.emit("order:update", updatedOrder)
+                            .catch(error => console.log(error)))
                 }
-
+                
+                io.emit("order:update", doc);
                 break;
         }
 

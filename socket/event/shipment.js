@@ -83,6 +83,28 @@ module.exports = (socket, io) => {
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
+    });
+
+    socket.on("shipments:update", async (payload, callback) => {
+        try {
+            const { masterPO, ...data } = payload;
+
+            await db.shipment.updateMany({ masterPO }, { $set: data });
+
+            callback?.({ status: "success", message: "Shipments updated successfully" });
+
+            // update order status
+            // if all shipments are completed, update order status to completed
+            const shipments = await db.shipment.find({ masterPO });
+            const allCompleted = shipments.every(shipment => shipment.status === "Completed" || shipment.bol.link);
+
+            if (!allCompleted) return;
+
+            await db.order.updateOne({ poNumber: masterPO }, { $set: { orderStatus: "Completed", 'buyers.$[].done': true } });
+
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
     })
 
     // return true if bill of lading already exists
