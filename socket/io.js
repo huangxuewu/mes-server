@@ -6,10 +6,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { path: '/socket', cors: { origin: '*' } });
 
-module.exports = {
-    io,
-    app,
-    server
-};
+module.exports = { io, app, server };
 
 
