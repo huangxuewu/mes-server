@@ -10,7 +10,7 @@ app.get("/", (req, res) => {
     res.send("Hello World");
 });
 
-server.listen(3000, "0.0.0.0", () => {
+server.listen(PORT, HOST, () => {
     //print the local ip address
     const os = require("os");
     const interfaces = os.networkInterfaces();
@@ -24,5 +24,5 @@ server.listen(3000, "0.0.0.0", () => {
         }
     }
 
-    console.log("Server is running on ", "http://" + ipAddress + ":3000");
+    console.log("Server is running on ", "http://" + ipAddress + ":" + PORT);
 });
