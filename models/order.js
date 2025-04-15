@@ -113,6 +113,9 @@ Order.watch([], { fullDocument: "updateLookup" })
                 
                 io.emit("order:update", doc);
                 break;
+            case "delete":
+                io.emit("order:delete", change.documentKey._id);
+                break;
         }
 
     })

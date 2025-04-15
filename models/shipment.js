@@ -149,7 +149,7 @@ Shipment
 
                 break;
             case "delete":
-
+                io.emit("shipment:delete", change.documentKey._id);
                 break;
         }
     })
