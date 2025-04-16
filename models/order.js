@@ -84,7 +84,7 @@ orderSchema.methods.checkDuplication = async function () {
 }
 
 orderSchema.statics.updateShipmentStatus = async function ({ status, poNumber }) {
-    if (status !== "Picked Up") return;
+    if (!["Picked Up", "Completed"].includes(status)) return;
 
     await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
 }
