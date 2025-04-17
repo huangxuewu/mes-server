@@ -38,11 +38,12 @@ module.exports = (socket, io) => {
         }
     })
 
-    socket.on("shipment:delete", async (data, callback) => {
+    socket.on("shipment:delete", async (query, callback) => {
         try {
-
+            await db.shipment.deleteOne(query);
+            callback?.({ status: "success", message: "Shipment deleted successfully" });
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback?.({ status: "error", message: error.message });
         }
     })
 
