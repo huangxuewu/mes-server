@@ -108,6 +108,19 @@ module.exports = (socket, io) => {
         }
     })
 
+    socket.on("loads:update", async (payload, callback) => {
+        try {
+            const { loadNumber, ...data } = payload;
+
+            await db.shipment.updateMany({ loadNumber }, { $set: data });
+
+            callback?.({ status: "success", message: "Loads updated successfully" });
+
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
+
     // return true if bill of lading already exists
     socket.on("bill-of-lading:check", async (data, callback) => {
         try {
