@@ -11,7 +11,6 @@ const itemSchema = new mongoose.Schema({
 });
 
 const memoSchema = new mongoose.Schema({
-    type: { type: String, default: 'Note', enum: ['Note', 'Reschedule'] },
     content: { type: String, default: null },
     createdAt: { type: Date, default: null },
     createdBy: { type: String, default: null },
@@ -85,12 +84,12 @@ const shipmentSchema = new mongoose.Schema({
     schedulePickupAt: {
         type: Date,
         default: null,
-        description: "Date we & dispatch scheduled for pickup"
+        description: "Date carrier scheduled for pickup"
     },
     actualPickupAt: {
         type: Date,
         default: null,
-        description: "Date we actually shipped the shipment"
+        description: "Date carrier actually came to pickup the shipment"
     },
     onPremisesDate: {
         type: String,

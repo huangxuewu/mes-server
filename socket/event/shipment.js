@@ -110,9 +110,11 @@ module.exports = (socket, io) => {
 
     socket.on("loads:update", async (payload, callback) => {
         try {
-            const { loadNumber, ...data } = payload;
+            const { loadNumber, note, operator, ...data } = payload;
 
-            await db.shipment.updateMany({ loadNumber }, { $set: data });
+            note?.length
+                ? await db.shipment.updateMany({ loadNumber }, { $set: data, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
+                : await db.shipment.updateMany({ loadNumber }, { $set: data });
 
             callback?.({ status: "success", message: "Loads updated successfully" });
 
