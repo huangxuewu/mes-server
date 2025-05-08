@@ -16,11 +16,23 @@ const memoSchema = new mongoose.Schema({
     createdBy: { type: String, default: null },
 });
 
-const shipmentSchema = new mongoose.Schema({
-    masterPO: String,
-    poNumber: { type: String, required: true },
-    poDate: { type: String, default: null },
-    client: { type: String, default: "Target" },
+const loadSchema = new mongoose.Schema({
+    pickupDate: { type: Date, default: null, description: "Date Ship IQ assigned for pickup" },
+    pickupGate: { type: String, default: null, description: "Gate code for pickup" },
+    onPremisesDate: { type: Date, default: null, description: "Date buyer expected shipment to be on their premises" },
+    schedulePickupAt: { type: Date, default: null, description: "Date carrier scheduled for pickup" },
+    actualPickupAt: { type: Date, default: null, description: "Date carrier actually came to pickup the shipment" },
+    shipmentId: { type: String, default: null },
+    loadNumber: { type: String, default: null },
+    proNumber: { type: String, default: null },
+    assignedSCAC: { type: String, default: null },
+    executingSCAC: { type: String, default: null },
+    chRobinsonNumber: { type: String, default: null },
+    weight: { type: Number, default: null },
+    cartons: { type: Number, default: null },
+    pallets: { type: Number, default: null },
+    commodity: { type: String, default: null },
+    staging: { type: String, default: null },
     bol: {
         number: { type: String, default: null },
         thumbnail: { type: String, default: null },
@@ -28,6 +40,13 @@ const shipmentSchema = new mongoose.Schema({
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
+});
+
+const shipmentSchema = new mongoose.Schema({
+    masterPO: String,
+    poNumber: { type: String, required: true },
+    poDate: { type: String, default: null },
+    client: { type: String, default: "Target" },
     name: String,
     address: String,
     city: String,
@@ -35,91 +54,10 @@ const shipmentSchema = new mongoose.Schema({
     zip: String,
     country: String,
     items: [itemSchema],
+    loads: [loadSchema],
     shipWindow: {
         start: String,
         end: String
-    },
-    shipmentId: {
-        type: String,
-        default: null
-    },
-    assignedSCAC: {
-        type: String,
-        default: null
-    },
-    executingSCAC: {
-        type: String,
-        default: null
-    },
-    carrier: {
-        type: String,
-        default: null
-    },
-    loadNumber: {
-        type: String,
-        default: null
-    },
-    proNumber: {
-        type: String,
-        default: null
-    },
-    chRobinsonNumber: {
-        type: String,
-        default: null
-    },
-    pickupGate: {
-        type: String,
-        default: null
-    },
-    shipDate: {
-        type: String,
-        default: null,
-        description: "Date system originally scheduled for shipment"
-    },
-    pickupDate: {
-        type: String,
-        default: null,
-        description: "Date system scheduled for pickup"
-    },
-    schedulePickupAt: {
-        type: Date,
-        default: null,
-        description: "Date carrier scheduled for pickup"
-    },
-    actualPickupAt: {
-        type: Date,
-        default: null,
-        description: "Date carrier actually came to pickup the shipment"
-    },
-    onPremisesDate: {
-        type: String,
-        default: null,
-        description: "Date that the buyer expected the shipment to be on their premises"
-    },
-    cartons: {
-        type: Number,
-        default: null,
-        description: "Number of cartons in the shipment"
-    },
-    pallets: {
-        type: Number,
-        default: null,
-        description: "Number of pallets in the shipment"
-    },
-    weight: {
-        type: Number,
-        default: null,
-        description: "Weight of the shipment"
-    },
-    commodity: {
-        type: String,
-        default: null,
-        description: "Commodity of the shipment"
-    },
-    staging: {
-        area: { type: String, default: null },
-        ready: { type: Boolean, default: false },
-        readyAt: { type: Date, default: null },
     },
     memos: [memoSchema],
     status: {
