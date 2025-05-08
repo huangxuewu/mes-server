@@ -107,10 +107,10 @@ Order.watch([], { fullDocument: "updateLookup" })
                     if (allDone)
                         return database.model('order')
                             .findOneAndUpdate({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }, { new: true })
-                            .then(updatedOrder => io.emit("order:update", updatedOrder)
-                            .catch(error => console.log(error)))
+                            .then(updatedOrder => io.emit("order:update", updatedOrder))
+                            .catch(error => console.log(error))
                 }
-                
+
                 io.emit("order:update", doc);
                 break;
             case "delete":
