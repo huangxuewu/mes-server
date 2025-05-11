@@ -4,6 +4,7 @@ const database = require("../config/database");
 
 const buyerSchema = new mongoose.Schema({
     poDate: { type: String, required: true },
+    masterPO: { type: String, default: null },
     poNumber: { type: String, required: true },
     name: String,
     address: String,

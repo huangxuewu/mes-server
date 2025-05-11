@@ -6,8 +6,8 @@ module.exports = (socket, io) => {
     socket.on("shipment:create", async (data, callback) => {
         try {
             await db.order.updateOne({ _id: data._id }, { $set: { transitAt: new Date, orderStatus: "In Transit" } });
-            await db.shipment.create(data.buyers);
-
+            const shipments = await db.shipment.create(data.buyers);
+            console.log(shipments);
             callback({ status: "success", message: "Shipment created successfully" })
         } catch (error) {
             callback({ status: "error", message: error.message })
@@ -98,29 +98,41 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("load:add", async (payload, callback) => {
+        try {
+            const { _id, load } = payload;
+
+            await db.shipment.updateOne({ _id }, { $push: { loads: load } });
+
+            callback?.({ status: "success", message: "Load added successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
+
     // only update shipment that is not completed
     socket.on("load:replace", async (payload, callback) => {
-        const { _id, loads } = payload;
+        const { _id, load } = payload;
 
         try {
-            for (const load of loads) {
-                const update = Object.keys(load).reduce((acc, key) =>
-                    Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
-                    , {});
+            load.status = load.bol?.url ? "Completed" : load.status;
 
-                // ignore if shipment is completed
-                const shipment = await db.shipment.findOneAndUpdate(
-                    { _id },
-                    { $set: update },
-                    { arrayFilters: [{ 'elem.status': { $ne: 'Completed' } }], new: true }
-                );
+            const update = Object.keys(load).reduce((acc, key) =>
+                Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
+                , {});
 
-                callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
+            // ignore if shipment is completed
+            const shipment = await db.shipment.findOneAndUpdate(
+                { _id },
+                { $set: update },
+                { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
+            );
 
-                // update order status if shipment is picked up
-                if (['Picked Up', 'Completed'].includes(load.status))
-                    db.order.updateShipmentStatus(shipment);
-            }
+            callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
+
+            // update order status if shipment is picked up
+            if (['Picked Up', 'Completed'].includes(load.status))
+                db.order.updateShipmentStatus(shipment);
 
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -129,11 +141,12 @@ module.exports = (socket, io) => {
 
     socket.on("loads:query", async (query, callback) => {
         // hack query if it contains _id, since the mongoose is not auto converting it to object id
-        if (query._id) query._id = new mongoose.Types.ObjectId(query._id);
+        if (query._id) query._id = mongoose.Types.ObjectId(query._id);
+
 
         try {
             const shipments = await db.shipment.aggregate([
-                { $unwind: "$loads" },
+                { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                 { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                 { $project: { loads: 0 } },
                 { $match: query }

@@ -88,7 +88,7 @@ Shipment
                 io.emit("shipment:delete", change.documentKey._id);
                 break;
         }
-    })
+    });
 
 module.exports = Shipment;
 
