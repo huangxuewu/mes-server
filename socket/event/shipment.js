@@ -1,4 +1,5 @@
 const db = require("../../models");
+const mongoose = require("mongoose");
 
 module.exports = (socket, io) => {
 
@@ -27,22 +28,6 @@ module.exports = (socket, io) => {
         }
     })
 
-    // only update shipment that is not completed
-    socket.on("shipment:replace", async (payload, callback) => {
-        const { _id, ...data } = payload;
-
-        try {
-            // ignore if shipment is completed
-            const shipment = await db.shipment.findOneAndUpdate({ _id, status: { $ne: 'Completed' } }, { $set: data }, { new: true });
-            // update order status if shipment is picked up
-            await db.order.updateShipmentStatus(data);
-
-            callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
-        } catch (error) {
-            callback?.({ status: "error", message: error.message });
-        }
-    });
-
     socket.on("shipment:delete", async (query, callback) => {
         try {
             await db.shipment.deleteOne(query);
@@ -52,44 +37,16 @@ module.exports = (socket, io) => {
         }
     })
 
-    socket.on("shipment:get", async (query, callback) => {
-        try {
-            db.shipment.findOne(query).then(shipment => {
-                callback({ status: "success", message: "Shipment fetched successfully", payload: shipment })
-            }).catch(error => {
-                callback({ status: "error", message: error.message })
-            })
-        } catch (error) {
-            callback({ status: "error", message: error.message })
-        }
-    })
+    // socket.on("shipment:get", async (query, callback) => {
+    //     try {
+    //         //return shipment it self
+    //         const shipment = await db.shipment.findOne(query).lean();
 
-    socket.on("shipments:get", async (query, callback) => {
-        try {
-            db.shipment.find(query).then(shipments => {
-                callback({ status: "success", message: "Shipments fetched successfully", payload: shipments })
-            }).catch(error => {
-                callback({ status: "error", message: error.message })
-            })
-        } catch (error) {
-            callback({ status: "error", message: error.message })
-        }
-    });
-
-    socket.on("shipments:replace", async (payload, callback) => {
-        const { loadNumber, ...data } = payload;
-
-        try {
-            await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: { 'loads.$': data } });
-            await db.order.updateShipmentStatus(data);
-
-            const shipments = await db.shipment.find({ loadNumber });
-
-            callback?.({ status: "success", message: "Shipments updated successfully", payload: shipments });
-        } catch (error) {
-            callback?.({ status: "error", message: error.message });
-        }
-    });
+    //         callback({ status: "success", message: "Shipment fetched successfully", payload: shipment });
+    //     } catch (error) {
+    //         callback({ status: "error", message: error.message })
+    //     }
+    // })
 
     socket.on("shipments:update", async (payload, callback) => {
         try {
@@ -103,7 +60,11 @@ module.exports = (socket, io) => {
         try {
             const { masterPO, ...data } = payload;
 
-            await db.shipment.updateMany({ masterPO }, { $set: { 'loads.$[]': data } }); // [] update all loads
+            const update = Object.keys(data).reduce((acc, key) =>
+                Object.assign(acc, { [`loads.$[].${key}`]: data[key] })
+                , {});
+
+            await db.shipment.updateMany({ masterPO }, { $set: update }); // [] update all loads
 
             callback?.({ status: "success", message: "Shipments updated successfully" });
 
@@ -125,7 +86,11 @@ module.exports = (socket, io) => {
         try {
             const { shipmentId, ...data } = payload;
 
-            await db.shipment.updateOne({ 'loads.shipmentId': shipmentId }, { $set: { 'loads.$': data } });
+            const update = Object.keys(data).reduce((acc, key) =>
+                Object.assign(acc, { [`loads.$.${key}`]: data[key] })
+                , {});
+
+            await db.shipment.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update });
 
             callback?.({ status: "success", message: "Load updated successfully" });
         } catch (error) {
@@ -133,13 +98,64 @@ module.exports = (socket, io) => {
         }
     });
 
+    // only update shipment that is not completed
+    socket.on("load:replace", async (payload, callback) => {
+        const { _id, loads } = payload;
+
+        try {
+            for (const load of loads) {
+                const update = Object.keys(load).reduce((acc, key) =>
+                    Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
+                    , {});
+
+                // ignore if shipment is completed
+                const shipment = await db.shipment.findOneAndUpdate(
+                    { _id },
+                    { $set: update },
+                    { arrayFilters: [{ 'elem.status': { $ne: 'Completed' } }], new: true }
+                );
+
+                callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
+
+                // update order status if shipment is picked up
+                if (['Picked Up', 'Completed'].includes(load.status))
+                    db.order.updateShipmentStatus(shipment);
+            }
+
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("loads:query", async (query, callback) => {
+        // hack query if it contains _id, since the mongoose is not auto converting it to object id
+        if (query._id) query._id = new mongoose.Types.ObjectId(query._id);
+
+        try {
+            const shipments = await db.shipment.aggregate([
+                { $unwind: "$loads" },
+                { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
+                { $project: { loads: 0 } },
+                { $match: query }
+            ]);
+
+            callback({ status: "success", message: "Shipments fetched successfully", payload: shipments });
+        } catch (error) {
+            callback({ status: "error", message: error.message })
+        }
+    });
+
     socket.on("loads:update", async (payload, callback) => {
         try {
             const { loadNumber, note, operator, ...data } = payload;
 
+            const update = Object.keys(data).reduce((acc, key) =>
+                Object.assign(acc, { [`loads.$.${key}`]: data[key] })
+                , {});
+
             note?.length
-                ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: { 'loads.$': data }, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
-                : await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: { 'loads.$': data } });
+                ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
+                : await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             callback?.({ status: "success", message: "Loads updated successfully" });
 

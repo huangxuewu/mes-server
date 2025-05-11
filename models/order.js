@@ -83,10 +83,14 @@ orderSchema.methods.checkDuplication = async function () {
     if (record) throw new Error("Order PO number already exists");
 }
 
-orderSchema.statics.updateShipmentStatus = async function ({ status, poNumber }) {
-    if (!["Picked Up", "Completed"].includes(status)) return;
+orderSchema.statics.updateShipmentStatus = async function (shipment) {
+    const { poNumber, loads } = shipment;
 
-    await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
+    for (const load of loads) {
+        if (!["Picked Up", "Completed"].includes(load.status)) continue;
+
+        await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
+    }
 }
 
 

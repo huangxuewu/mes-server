@@ -22,7 +22,7 @@ const loadSchema = new mongoose.Schema({
     onPremisesDate: { type: String, default: null, description: "Date buyer expected shipment to be on their premises" },
     schedulePickupAt: { type: Date, default: null, description: "Date carrier scheduled for pickup" },
     actualPickupAt: { type: Date, default: null, description: "Date carrier actually came to pickup the shipment" },
-    shipmentId: { type: String, default: null },
+    shipmentId: { type: String, default: "" },
     loadNumber: { type: String, default: "" },
     proNumber: { type: String, default: "" },
     assignedSCAC: { type: String, default: "" },
@@ -32,13 +32,18 @@ const loadSchema = new mongoose.Schema({
     cartons: { type: Number, default: 0 },
     pallets: { type: Number, default: 0 },
     commodity: { type: String, default: "" },
+    status: { type: String, default: "Pending" },
     bol: {
         number: { type: String, default: null },
         url: { type: String, default: null },
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
-}, { _id: false });
+    checklist: {
+        type: [mongoose.Schema.Types.Mixed],
+        default: []
+    }
+}, { _id: false, });
 
 const shipmentSchema = new mongoose.Schema({
     masterPO: String,
@@ -58,10 +63,6 @@ const shipmentSchema = new mongoose.Schema({
         end: String
     },
     memos: [memoSchema],
-    status: {
-        type: String,
-        default: "Pending"
-    },
 }, {
     timestamps: true
 });
