@@ -22,13 +22,14 @@ const inventorySchema = new mongoose.Schema({
     category: {
         type: String,
         required: true,
-        enum: ['Finished Goods', 'Raw Material', 'Supply', 'Packaging', 'Equipment'],
+        enum: ['Finished Goods', 'Raw Material', 'Tool', 'Accessory'],
         index: true
     },
     subcategory: {
         type: String,
         enum: [
             // Packaging specific subcategories
+            'Pillow',
             'Corrugated Box', 'Pallet', 'Poly Bag', 'Label', 'Tape',
             'Container', 'Wrap', 'Divider', 'Other Packaging',
             // Other subcategories
@@ -49,4 +50,22 @@ const inventorySchema = new mongoose.Schema({
 }, { timestamps: true });
 
 
-module.exports = mongoose.model("Inventory", inventorySchema, 'inventory');
+const Inventory = mongoose.model("Inventory", inventorySchema, 'inventory');
+
+Inventory.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("inventory:update", change.fullDocument);
+                break;
+            case "delete":
+                io.emit("inventory:delete", change.documentKey._id);
+                break;
+        }
+
+    });
+
+module.exports = Inventory;
