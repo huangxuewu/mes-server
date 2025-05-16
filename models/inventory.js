@@ -9,7 +9,7 @@ const inventorySchema = new mongoose.Schema({
     styleName: { type: String },
     color: { type: String },
     size: { type: String },
-    quantity: {
+    totalQuantity: {
         type: Number,
         required: true,
         default: 0,
@@ -17,6 +17,14 @@ const inventorySchema = new mongoose.Schema({
             validator: Number.isInteger,
             message: 'Quantity must be an integer'
         }
+    },
+    availableQuantity: {
+        type: Number,
+        default: 0
+    },
+    reservedQuantity: {
+        type: Number,
+        default: 0
     },
     description: { type: String },
     category: {
@@ -47,6 +55,13 @@ const inventorySchema = new mongoose.Schema({
     minStockLevel: { type: Number, default: 0 },
     reorderPoint: { type: Number, default: 0 },
     leadTime: { type: Number, description: 'Lead time in days' },
+    status: {
+        type: String,
+        enum: ['Active', 'Inactive', 'Discontinued', 'On Order', 'Low Stock', 'Out of Stock'],
+        default: 'Active'
+    },
+    documents: [],
+    customFields: { type: Map, of: mongoose.Schema.Types.Mixed }
 }, { timestamps: true });
 
 
