@@ -4,7 +4,7 @@ module.exports = (socket, io) => {
 
     socket.on("inventory:list", async (query, callback) => {
         try {
-            const inventory = await db.inventory.find(query);
+            const inventory = await db.inventory.find(query).sort({ subcategory: 1 });
             callback({ status: "success", message: "Inventory fetched successfully", payload: inventory });
         } catch (error) {
             callback({ status: "error", message: error.message });
