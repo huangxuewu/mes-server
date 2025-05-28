@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const employeeSchema = new mongoose.Schema({

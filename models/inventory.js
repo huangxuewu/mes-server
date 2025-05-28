@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const inventorySchema = new mongoose.Schema({
@@ -59,6 +60,10 @@ const inventorySchema = new mongoose.Schema({
         type: String,
         enum: ['Active', 'Inactive', 'Discontinued', 'On Order', 'Low Stock', 'Out of Stock'],
         default: 'Active'
+    },
+    property: {
+        type: String,
+        description: "Down Home"
     },
     documents: [],
     customFields: { type: Map, of: mongoose.Schema.Types.Mixed }
