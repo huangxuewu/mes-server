@@ -6,8 +6,8 @@ module.exports = (socket, io) => {
     socket.on("shipment:create", async (data, callback) => {
         try {
             await db.order.updateOne({ _id: data._id }, { $set: { transitAt: new Date, orderStatus: "In Transit" } });
-            const shipments = await db.shipment.create(data.buyers);
-            console.log(shipments);
+            await db.shipment.create(data.buyers);
+
             callback({ status: "success", message: "Shipment created successfully" })
         } catch (error) {
             callback({ status: "error", message: error.message })

@@ -26,13 +26,10 @@ const lineSchema = new mongoose.Schema({
     },
     picture: String,
     location: String,
-    capacity: {
-        output: Number, // output capacity per hour
-        unit: {
-            type: String,
-            enum: ["kg", "g", "pcs"]
-        },
-        efficiencyRate: Number // efficiency rate of the line , default is 85%
+    capacity: {}, // proudction capacity per hour
+    efficiencyRate: {
+        type: Number,
+        default: 85
     },
     staffs: [staffSchema],
     products: [],             // products that can be produced on this line
