@@ -2,8 +2,18 @@ const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
 
-const scheduleSchema = new mongoose.Schema({
+const productionLog = new mongoose.Schema({
+    date: String,
+    from: Date,
+    to: Date,
 
+})
+
+const scheduleSchema = new mongoose.Schema({
+    scheduleFrom: Date,
+    scheduleTo: Date,
+    quantity: Number,
+    logs: [productionLog]
 });
 
-module.exports = mongoose.model("Schedule", scheduleSchema,"schedule");
+module.exports = mongoose.model("Schedule", scheduleSchema, "schedule");

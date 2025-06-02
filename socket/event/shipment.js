@@ -1,5 +1,6 @@
 const db = require("../../models");
 const mongoose = require("mongoose");
+const { Types: { ObjectId } } = mongoose;
 
 module.exports = (socket, io) => {
 
@@ -141,7 +142,7 @@ module.exports = (socket, io) => {
 
     socket.on("loads:query", async (query, callback) => {
         // hack query if it contains _id, since the mongoose is not auto converting it to object id
-        if (query._id) query._id = mongoose.Types.ObjectId(query._id);
+        if (query._id) query._id = new ObjectId(query._id);
 
 
         try {
