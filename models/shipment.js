@@ -41,7 +41,7 @@ const loadSchema = new mongoose.Schema({
     },
     checklist: {
         type: [mongoose.Schema.Types.Mixed],
-        default: []
+        default: () => []
     }
 }, { _id: false, });
 
