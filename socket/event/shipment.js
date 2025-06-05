@@ -144,6 +144,18 @@ module.exports = (socket, io) => {
         // hack query if it contains _id, since the mongoose is not auto converting it to object id
         if (query._id) query._id = new ObjectId(query._id);
 
+        query.$or?.forEach(condition => {
+            if (condition.schedulePickupAt?.$gte) {
+                condition.schedulePickupAt.$gte = new Date(condition.schedulePickupAt.$gte);
+            }
+            // Handle nested $or conditions
+            condition.$or?.forEach(nestedCondition => {
+                if (nestedCondition.schedulePickupAt?.$gte) {
+                    nestedCondition.schedulePickupAt.$gte = new Date(nestedCondition.schedulePickupAt.$gte);
+                }
+            });
+        });
+
 
         try {
             const shipments = await db.shipment.aggregate([
