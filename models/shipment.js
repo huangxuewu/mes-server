@@ -41,19 +41,23 @@ const loadSchema = new mongoose.Schema({
     },
     checklist: {
         printed: {
-            status: { type: Boolean, default: false },
+            status: { type: Boolean, default: false, description: "Whether the shipping labels are printed" },
             timestamp: { type: Date, default: null },
         },
         picked: {
-            status: { type: Boolean, default: false },
+            status: { type: Boolean, default: false, description: "Whether all the boxes are picked and ready to be labeled" },
             timestamp: { type: Date, default: null },
         },
         labeled: {
-            status: { type: Boolean, default: false },
+            status: { type: Boolean, default: false, description: "Whether all the boxes are labeled" },
+            timestamp: { type: Date, default: null },
+        },
+        loading: {
+            status: { type: Boolean, default: false, description: "Whether the truck is here and shipment is loading" },
             timestamp: { type: Date, default: null },
         },
         loaded: {
-            status: { type: Boolean, default: false },
+            status: { type: Boolean, default: false, description: "Whether the shipment is completely loaded on the truck" },
             timestamp: { type: Date, default: null },
         },
     }
