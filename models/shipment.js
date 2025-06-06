@@ -40,10 +40,24 @@ const loadSchema = new mongoose.Schema({
         rawData: { type: Object, default: null },
     },
     checklist: {
-        type: [mongoose.Schema.Types.Mixed],
-        default: () => []
+        printed: {
+            status: { type: Boolean, default: false },
+            timestamp: { type: Date, default: null },
+        },
+        picked: {
+            status: { type: Boolean, default: false },
+            timestamp: { type: Date, default: null },
+        },
+        labeled: {
+            status: { type: Boolean, default: false },
+            timestamp: { type: Date, default: null },
+        },
+        loaded: {
+            status: { type: Boolean, default: false },
+            timestamp: { type: Date, default: null },
+        },
     }
-}, { _id: false, });
+}, { _id: false, timestamps: true });
 
 const shipmentSchema = new mongoose.Schema({
     masterPO: String,
