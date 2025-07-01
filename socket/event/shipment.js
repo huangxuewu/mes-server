@@ -156,7 +156,6 @@ module.exports = (socket, io) => {
             });
         });
 
-
         try {
             const shipments = await db.shipment.aggregate([
                 { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
@@ -174,10 +173,7 @@ module.exports = (socket, io) => {
     socket.on("loads:update", async (payload, callback) => {
         try {
             const { loadNumber, note, operator, ...data } = payload;
-
-            const update = Object.keys(data).reduce((acc, key) =>
-                Object.assign(acc, { [`loads.$.${key}`]: data[key] })
-                , {});
+            const update = Object.keys(data).reduce((acc, key) => Object.assign(acc, { [`loads.$.${key}`]: data[key] }), {});
 
             note?.length
                 ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
@@ -188,7 +184,7 @@ module.exports = (socket, io) => {
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
-    })
+    });
 
     // return true if bill of lading already exists
     socket.on("bill-of-lading:check", async (data, callback) => {
@@ -202,5 +198,43 @@ module.exports = (socket, io) => {
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
-    })
+    });
+
+    socket.on("bill-of-lading:link", async (payload, callback) => {
+        try {
+            const { shipmentIdArray, loadNumber, updatedAt, link } = payload;
+
+            await db.shipment.updateMany(
+                { 'loads.shipmentId': { $in: shipmentIdArray } },
+                {
+                    $set: {
+                        'loads.$[shipment].bol.url': link,
+                        'loads.$[shipment].bol.updatedAt': updatedAt,
+                        'loads.$[shipment].status': 'Completed'
+                    }
+                },
+                { arrayFilters: [{ 'shipment.shipmentId': { $in: shipmentIdArray } }] }
+            );
+
+            await db.shipment.updateMany(
+                { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
+                {
+                    $set: {
+                        'loads.$[shipment].bol': { number: null, url: null, updatedAt: null, rawData: null },
+                        'loads.$[shipment].status': 'Leftover Shipment, Reschedule Needed'
+                    }
+                },
+                {
+                    arrayFilters: [{
+                        'shipment.loadNumber': loadNumber,
+                        'shipment.shipmentId': { $nin: shipmentIdArray }
+                    }]
+                }
+            );
+
+            callback?.({ status: "success", message: "Bill of Lading linked successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
 }
