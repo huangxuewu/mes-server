@@ -38,6 +38,16 @@ module.exports = (socket, io) => {
         }
     })
 
+    socket.on("shipment:query", async (query, callback) => {
+        try {
+            const shipment = await db.shipment.findOne(query).lean();
+
+            callback?.({ status: "success", message: "Shipment fetched successfully", payload: shipment });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
+
     // socket.on("shipment:get", async (query, callback) => {
     //     try {
     //         //return shipment it self
@@ -178,9 +188,28 @@ module.exports = (socket, io) => {
             // note?.length
             //     ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
-                await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             callback?.({ status: "success", message: "Loads updated successfully" });
+
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("loads:breakdown:update", async (payload, callback) => {
+        try {
+            const { loadNumber, breakdown } = payload;
+
+            for (const [poNumber, { items }] of Object.entries(breakdown)) {
+                await db.shipment.updateOne(
+                    { poNumber },
+                    { $set: { 'loads.$[target].items': items } },
+                    { arrayFilters: [{ 'target.loadNumber': loadNumber }] }
+                );
+            }
+
+            callback?.({ status: "success", message: `Breakdown for load ${loadNumber} updated successfully` });
 
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -238,4 +267,20 @@ module.exports = (socket, io) => {
             callback?.({ status: "error", message: error.message });
         }
     });
+
+    socket.on("search:keyword", async (payload, callback) => {
+        try {
+            const { query } = payload;
+
+            const results = await Promise.all([
+                db.order.find({ $or: [{ poNumber: { $regex: query, $options: "i" } }, { 'buyers.poNumber': { $regex: query, $options: "i" } }] }).lean(),
+                db.shipment.find({ 'loads.loadNumber': { $regex: query, $options: "i" } }).lean(),
+                db.shipment.find({ 'loads.bol.number': { $regex: query, $options: "i" } }).lean(),
+            ]);
+
+            callback?.({ status: "success", message: "Search results fetched successfully", payload: results });
+        } catch {
+            callback?.({ status: "error", message: "Search failed" });
+        }
+    })
 }

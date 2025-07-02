@@ -44,6 +44,7 @@ const loadSchema = new mongoose.Schema({
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
+    items: [itemSchema],
     auditLog: [auditLogSchema],
     checklist: {
         printed: {
