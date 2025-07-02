@@ -175,9 +175,10 @@ module.exports = (socket, io) => {
             const { loadNumber, note, operator, ...data } = payload;
             const update = Object.keys(data).reduce((acc, key) => Object.assign(acc, { [`loads.$.${key}`]: data[key] }), {});
 
-            note?.length
-                ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
-                : await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            // note?.length
+            //     ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
+            //     : 
+                await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             callback?.({ status: "success", message: "Loads updated successfully" });
 

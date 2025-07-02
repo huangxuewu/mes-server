@@ -10,8 +10,13 @@ const itemSchema = new mongoose.Schema({
     description: String,
 });
 
-const memoSchema = new mongoose.Schema({
-    content: { type: String, default: null },
+const auditLogSchema = new mongoose.Schema({
+    action: { type: String, default: null, enum: ["create", "update", "delete"] },
+    changes: [{
+        field: { type: String, default: null },
+        oldValue: { type: String, default: null },
+        newValue: { type: String, default: null },
+    }],
     createdAt: { type: Date, default: null },
     createdBy: { type: String, default: null },
 });
@@ -39,6 +44,7 @@ const loadSchema = new mongoose.Schema({
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
+    auditLog: [auditLogSchema],
     checklist: {
         printed: {
             status: { type: Boolean, default: false, description: "Whether the shipping labels are printed" },
@@ -79,8 +85,7 @@ const shipmentSchema = new mongoose.Schema({
     shipWindow: {
         start: String,
         end: String
-    },
-    memos: [memoSchema],
+    }
 }, {
     timestamps: true
 });
