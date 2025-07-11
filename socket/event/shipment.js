@@ -171,12 +171,18 @@ module.exports = (socket, io) => {
 
                 if (cartonMismatch) {
                     load.items = getCartonBreakdown(shipment, load.cartons);
+                } else {
+                    delete load.items;
                 }
 
                 index === -1
                     ? shipment.loads.push(load)
                     : Object.assign(shipment.loads[index], load);
 
+                //check if load is completed
+                if (index !== -1)
+                    shipment.loads[index].status = shipment.loads[index].bol?.url ? "Completed" : shipment.loads[index].status;
+                
                 await db.shipment.updateOne({ poNumber }, { $set: { loads: shipment.loads } });
             }
 

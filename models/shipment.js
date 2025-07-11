@@ -8,7 +8,7 @@ const itemSchema = new mongoose.Schema({
     casePack: Number,
     styleCode: String,
     description: String,
-});
+},);
 
 const auditLogSchema = new mongoose.Schema({
     action: { type: String, default: null, enum: ["create", "update", "delete"] },
@@ -45,7 +45,7 @@ const loadSchema = new mongoose.Schema({
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
-    items: [itemSchema],
+    items: [],
     auditLog: [auditLogSchema],
     checklist: {
         printed: {
@@ -69,7 +69,16 @@ const loadSchema = new mongoose.Schema({
             timestamp: { type: Date, default: null },
         },
     }
-}, { _id: false, timestamps: true });
+}, {
+    _id: false,
+    timestamps: true,
+    transform: (doc, ret) => {
+        if (ret?.items.length === 0)
+            delete ret.items;
+
+        return ret;
+    }
+});
 
 const shipmentSchema = new mongoose.Schema({
     masterPO: String,
