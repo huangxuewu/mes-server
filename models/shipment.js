@@ -33,6 +33,7 @@ const loadSchema = new mongoose.Schema({
     assignedSCAC: { type: String, default: "" },
     executingSCAC: { type: String, default: "" },
     chRobinsonNumber: { type: String, default: "" },
+    cube: { type: Number, default: 0 },
     weight: { type: Number, default: 0 },
     cartons: { type: Number, default: 0 },
     pallets: { type: Number, default: 0 },

@@ -150,6 +150,84 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("load:sync", async (payloads, callback) => {
+        try {
+
+            const result = {
+                create: [],
+                update: [],
+            }
+
+            for (const payload of payloads) {
+                const { poNumber, load } = payload;
+
+                const shipment = await db.shipment.findOne({ poNumber }).lean();
+
+                if (!shipment) continue;
+                // //check if load is already in shipment
+                const index = shipment.loads.findIndex(l => l.shipmentId === load.shipmentId);
+                const totalCartonCount = shipment.items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
+                const cartonMismatch = load.cartons !== totalCartonCount;
+
+                if (cartonMismatch) {
+                    load.items = getCartonBreakdown(shipment, load.cartons);
+                }
+
+                index === -1
+                    ? shipment.loads.push(load)
+                    : Object.assign(shipment.loads[index], load);
+
+                await db.shipment.updateOne({ poNumber }, { $set: { loads: shipment.loads } });
+            }
+
+            callback?.({ status: "success", message: "Load synced successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    const getCartonBreakdown = (shipment, cartons) => {
+        const shipmentItems = [...shipment.items].sort((a, b) => a.quantity / a.casePack - b.quantity / b.casePack);
+
+        const remainItems = shipment.loads.reduce((items, load) => {
+            if (!load?.items) return items;
+
+            load.items.forEach(item => {
+                const index = items.findIndex(i => i.item === item.item && i.quantity > 0);
+
+                if (index === -1) return;
+
+                items[index].quantity -= item.quantity;
+            });
+
+            return items;
+
+        }, shipmentItems).filter(item => item.quantity > 0);
+
+        const result = [];
+        let totalCarton = 0;
+
+        for (const item of remainItems) {
+            const carton = item.quantity / item.casePack;
+
+            if (totalCarton === cartons) break;
+
+            if (totalCarton + carton <= cartons) {
+                result.push(item);
+                totalCarton += carton;
+            } else {
+                const remainingCarton = Math.min(cartons - totalCarton, item.quantity / item.casePack);
+                result.push({
+                    ...item,
+                    quantity: remainingCarton * item.casePack
+                });
+                totalCarton += remainingCarton;
+            }
+        }
+
+        return result;
+    }
+
     socket.on("loads:query", async (query, callback) => {
         // hack query if it contains _id, since the mongoose is not auto converting it to object id
         if (query._id) query._id = new ObjectId(query._id);
@@ -268,19 +346,54 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("search:keyword", async (payload, callback) => {
+    socket.on("search:cache", async (callback) => {
         try {
-            const { query } = payload;
 
             const results = await Promise.all([
-                db.order.find({ $or: [{ poNumber: { $regex: query, $options: "i" } }, { 'buyers.poNumber': { $regex: query, $options: "i" } }] }).lean(),
-                db.shipment.find({ 'loads.loadNumber': { $regex: query, $options: "i" } }).lean(),
-                db.shipment.find({ 'loads.bol.number': { $regex: query, $options: "i" } }).lean(),
+                // First aggregation - unique orders with buyers
+                db.order.aggregate([
+                    { $project: { _id: 1, buyers: 1 } },
+                    { $unwind: { path: "$buyers", preserveNullAndEmptyArrays: true } },
+                    { $addFields: { poNumber: '$buyers.poNumber', done: '$buyers.done' } },
+                    { $project: { poNumber: 1, done: 1, _id: 1 } }
+                ]),
+
+                // Second aggregation - unique load numbers
+                db.shipment.aggregate([
+                    { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
+                    { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
+                    { $project: { loadNumber: 1, status: 1, _id: 1 } },
+                    {
+                        $group: {
+                            _id: "$loadNumber",
+                            loadNumber: { $first: "$loadNumber" },
+                            status: { $first: "$status" },
+                            docId: { $first: "$_id" }
+                        }
+                    },
+                    { $project: { loadNumber: 1, status: 1, _id: "$docId" } }
+                ]),
+
+                // Third aggregation - unique BOL numbers
+                db.shipment.aggregate([
+                    { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
+                    { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
+                    { $addFields: { 'bol': { $toString: '$bol.number' } } },
+                    { $project: { 'bol': 1, status: 1, _id: 1 } },
+                    {
+                        $group: {
+                            _id: "$bol",
+                            status: { $first: "$status" },
+                            docId: { $first: "$_id" }
+                        }
+                    },
+                    { $project: { bol: 1, status: 1, _id: "$docId" } }
+                ]),
             ]);
 
             callback?.({ status: "success", message: "Search results fetched successfully", payload: results });
-        } catch {
-            callback?.({ status: "error", message: "Search failed" });
+        } catch (error) {
+            callback?.({ status: "error", message: "Search failed", error: error.message });
         }
     })
 }
