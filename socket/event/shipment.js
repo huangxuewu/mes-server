@@ -165,25 +165,28 @@ module.exports = (socket, io) => {
 
                 if (!shipment) continue;
                 // //check if load is already in shipment
-                const index = shipment.loads.findIndex(l => l.shipmentId === load.shipmentId);
-                const totalCartonCount = shipment.items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
-                const cartonMismatch = load.cartons !== totalCartonCount;
+                const { loads, items } = shipment;
+                const index = loads.findIndex(doc => doc.shipmentId === load.shipmentId);
 
-                if (cartonMismatch) {
-                    load.items = getCartonBreakdown(shipment, load.cartons);
-                } else {
-                    delete load.items;
-                }
+                //update load and get object reference
+                index !== -1 ? Object.assign(loads[index], load) : loads.push(load);
 
-                index === -1
-                    ? shipment.loads.push(load)
-                    : Object.assign(shipment.loads[index], load);
+                const loadRef = loads.find(l => l.shipmentId === load.shipmentId);
 
-                //check if load is completed
-                if (index !== -1)
-                    shipment.loads[index].status = shipment.loads[index].bol?.url ? "Completed" : shipment.loads[index].status;
-                
-                await db.shipment.updateOne({ poNumber }, { $set: { loads: shipment.loads } });
+                if (loadRef.status === 'Completed') continue; // skip if load is already completed
+
+                // check if the reference cartons are the same as the shipment cartons
+                const shipmentCartonCount = items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
+                const cartonMismatch = loadRef.cartons !== shipmentCartonCount;
+
+                if (cartonMismatch)
+                    loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
+
+                loadRef.status = !!loadRef.bol?.url ? "Completed" : loadRef.status;
+
+                if (!loadRef?.items?.length) delete loadRef.items;
+
+                await db.shipment.updateOne({ poNumber }, { $set: { loads } });
             }
 
             callback?.({ status: "success", message: "Load synced successfully" });
@@ -193,13 +196,17 @@ module.exports = (socket, io) => {
     });
 
     const getCartonBreakdown = (shipment, cartons) => {
+
+        // 1. Sort items small to large by carton count
         const shipmentItems = [...shipment.items].sort((a, b) => a.quantity / a.casePack - b.quantity / b.casePack);
 
+        // 2. Calculate remaining items after subtracting already allocated loads
         const remainItems = shipment.loads.reduce((items, load) => {
+
             if (!load?.items) return items;
 
             load.items.forEach(item => {
-                const index = items.findIndex(i => i.item === item.item && i.quantity > 0);
+                const index = items.findIndex(i => i.styleCode === item.styleCode && i.quantity > 0);
 
                 if (index === -1) return;
 
@@ -207,28 +214,31 @@ module.exports = (socket, io) => {
             });
 
             return items;
-
         }, shipmentItems).filter(item => item.quantity > 0);
 
+        // 3. Allocate items to fit the target carton count
         const result = [];
         let totalCarton = 0;
 
         for (const item of remainItems) {
             const carton = item.quantity / item.casePack;
 
+            //Target reached, break the loop
             if (totalCarton === cartons) break;
 
             if (totalCarton + carton <= cartons) {
                 result.push(item);
                 totalCarton += carton;
             } else {
-                const remainingCarton = Math.min(cartons - totalCarton, item.quantity / item.casePack);
+                const remainingCarton = cartons - totalCarton;
+
                 result.push({
                     ...item,
                     quantity: remainingCarton * item.casePack
                 });
                 totalCarton += remainingCarton;
             }
+
         }
 
         return result;

@@ -40,12 +40,12 @@ const loadSchema = new mongoose.Schema({
     commodity: { type: String, default: "" },
     status: { type: String, default: "Pending" },
     bol: {
-        number: { type: String, default: null },
-        url: { type: String, default: null },
+        url: { type: String, default: "" },
+        number: { type: String, default: "" },
         uploadedAt: { type: Date, default: null },
         rawData: { type: Object, default: null },
     },
-    items: [],
+    items: mongoose.Mixed,
     auditLog: [auditLogSchema],
     checklist: {
         printed: {
