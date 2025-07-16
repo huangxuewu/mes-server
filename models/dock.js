@@ -3,15 +3,7 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const dockSchema = new mongoose.Schema({
-    alias: { type: String, required: true },
-    position: {
-        x: { type: Number, required: true },
-        y: { type: Number, required: true },
-        z: { type: Number, required: true },
-        scale: { type: Number, required: true },
-        facing: { type: String, required: true, enum: ["north", "south", "east", "west"] },
-        rotation: { type: Number, required: true },
-    },
+    name: { type: String, required: true },
     maintenance: {
         lastMaintenance: { type: Date },
         nextMaintenance: { type: Date },
@@ -24,10 +16,31 @@ const dockSchema = new mongoose.Schema({
             notes: { type: String, required: true },
         }]
     },
+    truck:{},
     status: {
         type: String,
-        enum: ["active", "inactive", "maintenance"],
+        enum: ["Available", "Unavailable", "Maintenance", "Occupied"],
+        default: "Available",
     },
-})
+});
 
-module.exports = database.model("Dock", dockSchema, "dock");
+
+
+const Dock = database.model("Dock", dockSchema, "dock");
+
+Dock.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("dock:update", change.fullDocument);
+                break;
+                
+            case "delete":
+                io.emit("dock:delete", change.documentKey._id);
+                break;
+        }
+    })
+
+module.exports = Dock;

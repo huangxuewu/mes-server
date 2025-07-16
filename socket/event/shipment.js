@@ -98,10 +98,10 @@ module.exports = (socket, io) => {
             const { shipmentId, ...data } = payload;
 
             const update = Object.keys(data).reduce((acc, key) =>
-                Object.assign(acc, { [`loads.$.${key}`]: data[key] })
+                Object.assign(acc, { [`loads.$[target].${key}`]: data[key] })
                 , {});
 
-            await db.shipment.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update });
+            await db.shipment.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update }, { arrayFilters: [{ 'target.shipmentId': shipmentId }] });
 
             callback?.({ status: "success", message: "Load updated successfully" });
         } catch (error) {
@@ -412,4 +412,23 @@ module.exports = (socket, io) => {
             callback?.({ status: "error", message: "Search failed", error: error.message });
         }
     })
+
+    socket.on("dock:fetch", async (callback) => {
+        try {
+            const docks = await db.dock.find({});
+            callback?.({ status: "success", message: "Docks fetched successfully", payload: docks });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("dock:update", async (payload, callback) => {
+        try {
+            const { _id, ...data } = payload;
+            await db.dock.updateOne({ _id }, { $set: data });
+            callback?.({ status: "success", message: "Dock updated successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
 }
