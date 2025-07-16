@@ -431,4 +431,42 @@ module.exports = (socket, io) => {
             callback?.({ status: "error", message: error.message });
         }
     });
+
+    socket.on("hauler:fetch", async (query, callback) => {
+        try {
+            const haulers = await db.hauler.find(query);
+            callback?.({ status: "success", message: "Haulers fetched successfully", payload: haulers });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("hauler:create", async (payload, callback) => {
+        try {
+            const doc = await db.hauler.create(payload);
+            callback?.({ status: "success", message: "Hauler created successfully", payload: doc });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("hauler:update", async (payload, callback) => {
+        try {
+            const { _id, ...data } = payload;
+            await db.hauler.updateOne({ _id }, { $set: data });
+            callback?.({ status: "success", message: "Hauler updated successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("hauler:delete", async (query, callback) => {
+        try {
+            await db.hauler.deleteOne(query);
+            callback?.({ status: "success", message: "Hauler deleted successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
 }
