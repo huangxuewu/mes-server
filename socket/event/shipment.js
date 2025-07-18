@@ -1,6 +1,7 @@
 const db = require("../../models");
 const mongoose = require("mongoose");
 const { Types: { ObjectId } } = mongoose;
+const { performance } = require('node:perf_hooks');
 
 module.exports = (socket, io) => {
 
@@ -152,45 +153,85 @@ module.exports = (socket, io) => {
 
     socket.on("load:sync", async (payloads, callback) => {
         try {
-
-            const result = {
-                create: [],
-                update: [],
+            if (!Array.isArray(payloads) || !payloads.length) {
+                return callback?.({ status: "error", message: "Invalid or empty payloads" });
             }
+
+            const startTime = performance.now();
+
+            // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
+            const last2Month = new Date(Date.now() - 2 * 30 * 24 * 60 * 60 * 1000);
+            const shipments = await db.shipment
+                .find(
+                    {
+                        $or: [
+                            { 'loads.status': { $ne: 'Completed' } },
+                            { 'loads.pickupDate': { $gte: last2Month } }
+                        ]
+                    },
+                    { poNumber: 1, loads: 1, items: 1 } // Projection to reduce data
+                )
+                .lean();
+
+            // Create a lookup map for shipments
+            const shipmentMap = new Map(shipments.map(s => [s.poNumber, s]));
+
+            // Prepare bulk operations
+            const bulkOps = [];
 
             for (const payload of payloads) {
                 const { poNumber, load } = payload;
+                if (!poNumber || !load?.shipmentId) continue; // Validate input
 
-                const shipment = await db.shipment.findOne({ poNumber }).lean();
-
+                const shipment = shipmentMap.get(poNumber);
                 if (!shipment) continue;
-                // //check if load is already in shipment
+
                 const { loads, items } = shipment;
-                const index = loads.findIndex(doc => doc.shipmentId === load.shipmentId);
+                const loadIndex = loads.findIndex(doc => doc.shipmentId === load.shipmentId);
 
-                //update load and get object reference
-                index !== -1 ? Object.assign(loads[index], load) : loads.push(load);
+                // Update or add load
+                if (loadIndex !== -1) {
+                    loads[loadIndex] = { ...loads[loadIndex], ...load }; // Merge load data
+                } else {
+                    loads.push(load);
+                }
 
-                const loadRef = loads.find(l => l.shipmentId === load.shipmentId);
+                const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
+                if (loadRef.status === 'Completed') continue;
 
-                if (loadRef.status === 'Completed') continue; // skip if load is already completed
-
-                // check if the reference cartons are the same as the shipment cartons
+                // Calculate carton count only if necessary
                 const shipmentCartonCount = items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
-                const cartonMismatch = loadRef.cartons !== shipmentCartonCount;
-
-                if (cartonMismatch)
+                if (loadRef.cartons !== shipmentCartonCount) {
                     loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
+                }
 
-                loadRef.status = !!loadRef.bol?.url ? "Completed" : loadRef.status;
+                // Update status if BOL exists
+                loadRef.status = loadRef.bol?.url ? "Completed" : loadRef.status;
 
+                // Clean up items if empty
                 if (!loadRef?.items?.length) delete loadRef.items;
 
-                await db.shipment.updateOne({ poNumber }, { $set: { loads } });
+                // Add update operation to bulk
+                bulkOps.push({
+                    updateOne: {
+                        filter: { poNumber },
+                        update: { $set: { loads } }
+                    }
+                });
             }
 
-            callback?.({ status: "success", message: "Load synced successfully" });
+            // Execute bulk updates if any
+            if (bulkOps.length > 0) {
+                await db.shipment.bulkWrite(bulkOps);
+            }
+
+            const endTime = performance.now();
+            const elapsedTimeMs = endTime - startTime;
+
+            console.log(`Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`);
+            callback?.({ status: "success", message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms` });
         } catch (error) {
+            console.error("Load Sync Error:", error);
             callback?.({ status: "error", message: error.message });
         }
     });
