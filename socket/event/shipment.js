@@ -1,3 +1,4 @@
+const dayjs = require("dayjs");
 const db = require("../../models");
 const mongoose = require("mongoose");
 const { Types: { ObjectId } } = mongoose;
@@ -160,7 +161,7 @@ module.exports = (socket, io) => {
             const startTime = performance.now();
 
             // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
-            const last2Month = new Date(Date.now() - 2 * 30 * 24 * 60 * 60 * 1000);
+            const last2Month = dayjs().subtract(2, 'month').format('YYYY-MM-DD');
             const shipments = await db.shipment
                 .find(
                     {
@@ -180,10 +181,13 @@ module.exports = (socket, io) => {
             const bulkOps = [];
 
             for (const payload of payloads) {
+
                 const { poNumber, load } = payload;
+
                 if (!poNumber || !load?.shipmentId) continue; // Validate input
 
                 const shipment = shipmentMap.get(poNumber);
+
                 if (!shipment) continue;
 
                 const { loads, items } = shipment;
@@ -197,10 +201,11 @@ module.exports = (socket, io) => {
                 }
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
-                if (loadRef.status === 'Completed') continue;
+                // if (loadRef.status === 'Completed') continue;
 
                 // Calculate carton count only if necessary
                 const shipmentCartonCount = items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
+
                 if (loadRef.cartons !== shipmentCartonCount) {
                     loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
                 }
@@ -396,6 +401,10 @@ module.exports = (socket, io) => {
                     }]
                 }
             );
+
+            // update load dock status
+            await db.dock.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
+            await db.hauler.updateOne({ loadNumber, 'status': 'Loading' }, { $set: { finishLoadAt: new Date(), status: 'Available' } });
 
             callback?.({ status: "success", message: "Bill of Lading linked successfully" });
         } catch (error) {
