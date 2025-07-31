@@ -386,21 +386,22 @@ module.exports = (socket, io) => {
                 { arrayFilters: [{ 'shipment.shipmentId': { $in: shipmentIdArray } }] }
             );
 
-            await db.shipment.updateMany(
-                { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
-                {
-                    $set: {
-                        'loads.$[shipment].bol': { number: null, url: null, updatedAt: null, rawData: null },
-                        'loads.$[shipment].status': 'Leftover Shipment, Reschedule Needed'
+            shipmentIdArray.length > 1 &&
+                await db.shipment.updateMany(
+                    { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
+                    {
+                        $set: {
+                            'loads.$[shipment].bol': { number: null, url: null, updatedAt: null, rawData: null },
+                            'loads.$[shipment].status': 'Leftover, Reschedule Needed'
+                        }
+                    },
+                    {
+                        arrayFilters: [{
+                            'shipment.loadNumber': loadNumber,
+                            'shipment.shipmentId': { $nin: shipmentIdArray }
+                        }]
                     }
-                },
-                {
-                    arrayFilters: [{
-                        'shipment.loadNumber': loadNumber,
-                        'shipment.shipmentId': { $nin: shipmentIdArray }
-                    }]
-                }
-            );
+                );
 
             // update load dock status
             await db.dock.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
