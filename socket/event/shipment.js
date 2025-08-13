@@ -379,7 +379,7 @@ module.exports = (socket, io) => {
                 {
                     $set: {
                         'loads.$[shipment].bol.url': link,
-                        'loads.$[shipment].bol.updatedAt': updatedAt,
+                        'loads.$[shipment].bol.updatedAt': updatedAt || new Date(),
                         'loads.$[shipment].status': 'Completed'
                     }
                 },
