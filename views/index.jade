@@ -1,5 +1,278 @@
 extends layout
 
 block content
-  h1= title
-  p Welcome to #{title}
+  if isAuthenticated
+    .container
+      h1= title
+      p Welcome to the Manufacturing Execution System, #{user ? user.username : 'User'}!
+      
+      .dashboard
+        .card
+          h3 Inventory Management
+          p Manage inbound and outbound inventory
+          a(href="/api/inventory") View Inventory API
+          
+        .card
+          h3 Production Management
+          p Track production orders and schedules
+          a(href="/api/production") View Production API
+          
+        .card
+          h3 System Health
+          p Check system status and connectivity
+          a(href="/health") Health Check
+          
+      .api-info
+        h3 API Endpoints
+        ul
+          li
+            strong GET /api/health
+            span - System health check
+          li
+            strong GET /api/inventory
+            span - Get all inventory items
+          li
+            strong GET /api/inventory/inbound
+            span - Get inbound inventory
+          li
+            strong GET /api/inventory/outbound
+            span - Get outbound inventory
+          li
+            strong GET /api/production
+            span - Get production orders
+      
+      .logout-section
+        a.logout-btn(href="/api/login/logout") Logout
+  else
+    .login-container
+      .login-card
+        .login-header
+          h1 Manufacturing Execution System
+          h2 Login Required
+        
+        form.login-form#loginForm
+          .form-group
+            label(for="username") Username
+            input#username(type="text" name="username" required placeholder="Enter your username")
+          
+          .form-group
+            label(for="password") Password
+            input#password(type="password" name="password" required placeholder="Enter your password")
+          
+          .form-group
+            button.login-btn(type="submit") Login
+          
+          if error
+            .error-message= error
+          
+          .loading-spinner(style="display: none;")
+            | Logging in...
+
+  style.
+    .login-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+    }
+    
+    .login-card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+    }
+    
+    .login-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .login-header h1 {
+      color: #333;
+      font-size: 24px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    
+    .login-header h2 {
+      color: #666;
+      font-size: 18px;
+      font-weight: 400;
+      margin: 0;
+    }
+    
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .form-group label {
+      font-weight: 500;
+      color: #333;
+      font-size: 14px;
+    }
+    
+    .form-group input {
+      padding: 12px 16px;
+      border: 2px solid #e1e5e9;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s ease;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .login-btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+    
+    .login-btn:hover {
+      transform: translateY(-2px);
+    }
+    
+    .error-message {
+      background: #fee;
+      color: #c33;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      text-align: center;
+      border: 1px solid #fcc;
+    }
+    
+    .logout-section {
+      text-align: center;
+      margin-top: 30px;
+    }
+    
+    .logout-btn {
+      display: inline-block;
+      background: #dc3545;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 500;
+      transition: background-color 0.3s ease;
+    }
+    
+    .logout-btn:hover {
+      background: #c82333;
+      text-decoration: none;
+    }
+    
+    .loading-spinner {
+      text-align: center;
+      color: #667eea;
+      font-weight: 500;
+      margin-top: 10px;
+    }
+    
+    .login-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+  script.
+    document.addEventListener('DOMContentLoaded', function() {
+      const loginForm = document.getElementById('loginForm');
+      const loginBtn = loginForm.querySelector('.login-btn');
+      const loadingSpinner = loginForm.querySelector('.loading-spinner');
+      
+      loginForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        
+        // Validate inputs
+        if (!username || !password) {
+          showError('Username and password are required');
+          return;
+        }
+        
+        // Show loading state
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Logging in...';
+        loadingSpinner.style.display = 'block';
+        
+        try {
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              username: username,
+              password: password
+            })
+          });
+          
+          const data = await response.json();
+          
+          if (data.success) {
+            // Login successful - redirect to main page
+            window.location.href = '/';
+          } else {
+            // Show error message
+            showError(data.message || 'Login failed');
+          }
+          
+        } catch (error) {
+          console.error('Login error:', error);
+          showError('Network error. Please try again.');
+        } finally {
+          // Reset loading state
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Login';
+          loadingSpinner.style.display = 'none';
+        }
+      });
+      
+      function showError(message) {
+        // Remove existing error message
+        const existingError = loginForm.querySelector('.error-message');
+        if (existingError) {
+          existingError.remove();
+        }
+        
+        // Create new error message
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-message';
+        errorDiv.textContent = message;
+        
+        // Insert after the form
+        loginForm.appendChild(errorDiv);
+        
+        // Auto-remove error after 5 seconds
+        setTimeout(() => {
+          if (errorDiv.parentNode) {
+            errorDiv.remove();
+          }
+        }, 5000);
+      }
+    });

@@ -124,6 +124,19 @@ Shipment
         }
     });
 
+Shipment.getActiveLoads = async () => {
+    const loads = await Shipment.aggregate([
+        { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
+        { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
+        { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
+        { $project: { loads: 0 } },
+        { $group: { _id: "$loadNumber", loads: { $push: "$$ROOT" } } },
+        { $project: { _id: 0, loadNumber: "$_id", loads: 1 } }
+    ]);
+
+    return loads;
+};
+
 module.exports = Shipment;
 
 
