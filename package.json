@@ -6,6 +6,10 @@
     "dev": "node index.js",
     "start": "node ./bin/www"
   },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  },
   "dependencies": {
     "canvas": "^2.11.2",
     "cookie-parser": "~1.4.4",
