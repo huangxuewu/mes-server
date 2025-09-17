@@ -4,15 +4,14 @@ const database = require("../config/database");
 
 const dockSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    maintenance: {
-        lastMaintenance: { type: Date },
-        nextMaintenance: { type: Date },
-        maintenanceHistory: [{
+    maintennance: {
+        lastAt: { type: Date },
+        nextAt: { type: Date },
+        history: [{
             date: { type: Date, required: true },
             description: { type: String, required: true },
             contractor: { type: String, required: true },
             duration: { type: Number, required: true },
-            cost: { type: Number, required: true },
             notes: { type: String, required: true },
         }]
     },
@@ -21,7 +20,7 @@ const dockSchema = new mongoose.Schema({
         type: String,
         enum: ["Available", "Unavailable", "Maintenance", "Occupied"],
         default: "Available",
-    },
+    }
 });
 
 
