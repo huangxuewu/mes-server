@@ -23,8 +23,6 @@ const dockSchema = new mongoose.Schema({
     }
 });
 
-
-
 const Dock = database.model("Dock", dockSchema, "dock");
 
 Dock.watch([], { fullDocument: "updateLookup" })
