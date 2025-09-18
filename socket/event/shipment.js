@@ -50,6 +50,15 @@ module.exports = (socket, io) => {
         }
     })
 
+    socket.on("shipments:get", async (query, callback) => {
+        try {
+            const shipments = await db.shipment.find(query).lean();
+            callback?.({ status: "success", message: "Shipments fetched successfully", payload: shipments });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
+
     // socket.on("shipment:get", async (query, callback) => {
     //     try {
     //         //return shipment it self
@@ -288,11 +297,26 @@ module.exports = (socket, io) => {
         }
 
         return result;
-    }
+    };
+
+    // socket.on("loads:history", async (query, callback) => {
+    //     try {
+    //         const loads = await db.shipment.aggregate([
+    //             { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
+    //             { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
+    //             { $project: { loads: 0 } },
+    //             { $match: query }
+    //         ]).lean();
+
+    //         callback?.({ status: "success", message: "Loads history fetched successfully", payload: loads });
+    //     } catch (error) {
+    //         callback?.({ status: "error", message: error.message });
+    //     }
+    // })
 
     socket.on("loads:query", async (query, callback) => {
         // hack query if it contains _id, since the mongoose is not auto converting it to object id
-        if (query._id) query._id = new ObjectId(query._id);
+        if (query._id) query._id = ObjectId.createFromHexString(query._id);
 
         query.$or?.forEach(condition => {
             if (condition.schedulePickupAt?.$gte) {
