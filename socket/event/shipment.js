@@ -427,8 +427,8 @@ module.exports = (socket, io) => {
                     }
                 );
 
-            // update load dock status
-            await db.dock.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
+            // update outbound gate status
+            await db.gate.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
             await db.hauler.updateOne({ loadNumber, 'status': 'Loading' }, { $set: { finishLoadAt: new Date(), status: 'Available' } });
 
             callback?.({ status: "success", message: "Bill of Lading linked successfully" });
@@ -488,20 +488,20 @@ module.exports = (socket, io) => {
         }
     })
 
-    socket.on("dock:fetch", async (callback) => {
+    socket.on("gate:fetch", async (callback) => {
         try {
-            const docks = await db.dock.find({});
-            callback?.({ status: "success", message: "Docks fetched successfully", payload: docks });
+            const gates = await db.gate.find({});
+            callback?.({ status: "success", message: "Gates fetched successfully", payload: gates });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     });
 
-    socket.on("dock:update", async (payload, callback) => {
+    socket.on("gate:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
-            await db.dock.updateOne({ _id }, { $set: data });
-            callback?.({ status: "success", message: "Dock updated successfully" });
+            await db.gate.updateOne({ _id }, { $set: data });
+            callback?.({ status: "success", message: "Gate updated successfully" });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }

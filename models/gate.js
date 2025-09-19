@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
 
-const dockSchema = new mongoose.Schema({
+const gateSchema = new mongoose.Schema({
     name: { type: String, required: true },
     maintennance: {
         lastAt: { type: Date },
@@ -15,7 +15,7 @@ const dockSchema = new mongoose.Schema({
             notes: { type: String, required: true },
         }]
     },
-    truck:{},
+    truck: {},
     status: {
         type: String,
         enum: ["Available", "Unavailable", "Maintenance", "Occupied"],
@@ -23,21 +23,21 @@ const dockSchema = new mongoose.Schema({
     }
 });
 
-const Dock = database.model("Dock", dockSchema, "dock");
+const Gate = database.model("Gate", gateSchema, "gate");
 
-Dock.watch([], { fullDocument: "updateLookup" })
+Gate.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.emit("dock:update", change.fullDocument);
+                io.emit("gate:update", change.fullDocument);
                 break;
-                
+
             case "delete":
-                io.emit("dock:delete", change.documentKey._id);
+                io.emit("gate:delete", change.documentKey._id);
                 break;
         }
     })
 
-module.exports = Dock;
+module.exports = Gate;

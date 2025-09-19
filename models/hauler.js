@@ -18,7 +18,7 @@ const haulerSchema = new mongoose.Schema({
     parkedAt: { type: Date },
     startLoadAt: { type: Date },
     finishLoadAt: { type: Date },
-    assignedDock: { type: mongoose.Schema.Types.ObjectId, ref: "Dock" },
+    assignedGate: { type: mongoose.Schema.Types.ObjectId, ref: "Gate" },
     priority: { type: String, enum: ["High", "Normal", "Low"], default: "Normal" },
     status: { type: String, enum: ["Available", "Loading", "Unloading", "Completed", "Cancelled"], default: "Available" },
     note: { type: String },
