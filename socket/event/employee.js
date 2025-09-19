@@ -3,8 +3,13 @@ const db = require("../../models");
 module.exports = (socket, io) => {
 
     // get single employee data
-    socket.on('employee:get', (data) => {
-        console.log(data);
+    socket.on('employee:get', async (data, callback) => {
+        try {
+            const employee = await db.employee.findOne(data);
+            callback({ status: "success", message: "Employee fetched successfully", payload: employee });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     // get all employees data
@@ -18,16 +23,31 @@ module.exports = (socket, io) => {
     });
 
     // create new employee
-    socket.on('employee:create', (data) => {
-
+    socket.on('employee:create', async (data, callback) => {
+        try {
+            const employee = await db.employee.create(data);
+            callback({ status: "success", message: "Employee created successfully", payload: employee });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
-    socket.on('employee:update', (data) => {
-        console.log(data);
+    socket.on('employee:update', async (data, callback) => {
+        try {
+            const employee = await db.employee.updateOne(data);
+            callback({ status: "success", message: "Employee updated successfully", payload: employee });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
-    socket.on('employee:delete', (data) => {
-        console.log(data);
+    socket.on('employee:delete', async (data, callback) => {
+        try {
+            const employee = await db.employee.deleteOne(data);
+            callback({ status: "success", message: "Employee deleted successfully", payload: employee });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     // Timecard
