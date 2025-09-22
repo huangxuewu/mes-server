@@ -23,6 +23,12 @@ const generatePalletId = async function () {
     }
 }
 
+const traceSchema = new mongoose.Schema({
+    date: { type: Date, default: null },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    action: { type: String, default: null },
+});
+
 const palletSchema = new mongoose.Schema({
     _id: {
         type: String,
@@ -52,11 +58,13 @@ const palletSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
     },
+    trace: traceSchema,
     status: {
         type: String,
     }
 }, {
     _id: false,
+    timestamps: true
 })
 
 const Pallet = database.model("Pallet", palletSchema, "pallet");
@@ -69,6 +77,7 @@ Pallet.watch([], { fullDocument: "updateLookup" })
             case "replace":
                 io.emit("pallet:update", change.fullDocument);
                 break;
+
             case "delete":
                 io.emit("pallet:delete", change.fullDocument);
                 break;

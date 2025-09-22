@@ -128,18 +128,19 @@ employeeSchema.methods.clockIn = async function (timecardId) {
 
 const Employee = mongoose.model("employee", employeeSchema, 'employee');
 
-Employee.watch().on('change', (change) => {
-    switch (change.operationType) {
-        case "insert":
-        case "update":
-        case "replace":
-            io.emit("employee:update", change.fullDocument);
-            break;
+Employee.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("employee:update", change.fullDocument);
+                break;
 
-        case "delete":
-            io.emit("employee:delete", change.documentKey._id);
-            break;
-    }
-});
+            case "delete":
+                io.emit("employee:delete", change.documentKey._id);
+                break;
+        }
+    });
 
 module.exports = Employee;

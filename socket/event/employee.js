@@ -32,18 +32,18 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('employee:update', async (data, callback) => {
+    socket.on('employee:update', async ({ _id, ...data }, callback) => {
         try {
-            const employee = await db.employee.updateOne(data);
+            const employee = await db.employee.findByIdAndUpdate({ _id }, { $set: data }, { new: true });
             callback({ status: "success", message: "Employee updated successfully", payload: employee });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
     });
 
-    socket.on('employee:delete', async (data, callback) => {
+    socket.on('employee:delete', async (_id, callback) => {
         try {
-            const employee = await db.employee.deleteOne(data);
+            const employee = await db.employee.deleteOne({ _id });
             callback({ status: "success", message: "Employee deleted successfully", payload: employee });
         } catch (error) {
             callback({ status: "error", message: error.message });
