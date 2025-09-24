@@ -126,7 +126,7 @@ employeeSchema.methods.clockIn = async function (timecardId) {
     return employee;
 }
 
-const Employee = mongoose.model("employee", employeeSchema, 'employee');
+const Employee = database.model("employee", employeeSchema, 'employee');
 
 Employee.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {

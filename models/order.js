@@ -27,7 +27,7 @@ const buyerSchema = new mongoose.Schema({
 const productionLogSchema = new mongoose.Schema({
     date: { type: Date, default: null },
     note: { type: String, default: null },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
     createdAt: { type: Date, default: null },
     startedAt: { type: Date, default: null },
     finishedAt: { type: Date, default: null },
@@ -37,7 +37,7 @@ const productionLogSchema = new mongoose.Schema({
 const inspectionSchema = new mongoose.Schema({
     date: { type: Date, default: null },
     note: { type: String, default: null },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
     createdAt: { type: Date, default: null },
     inspectionType: { type: String, enum: ['Pre-Production', 'In-Production', 'Post-Production'], default: 'Pre-Production' },
     result: { type: String, enum: ['Pass', 'Fail'], default: 'Pass' },

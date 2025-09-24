@@ -6,4 +6,4 @@ const purchaseSchema = new mongoose.Schema({
 
 });
 
-module.exports = mongoose.model("Purchase", purchaseSchema,"purchase");
+module.exports = database.model("Purchase", purchaseSchema,"purchase");

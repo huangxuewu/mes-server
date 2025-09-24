@@ -10,10 +10,10 @@ const productionLog = new mongoose.Schema({
 })
 
 const scheduleSchema = new mongoose.Schema({
-    scheduleFrom: Date,
-    scheduleTo: Date,
+    date:String,
     quantity: Number,
+    shift: String,
     logs: [productionLog]
 });
 
-module.exports = mongoose.model("Schedule", scheduleSchema, "schedule");
+module.exports = database.model("schedule", scheduleSchema, "schedule");

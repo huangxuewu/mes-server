@@ -34,9 +34,16 @@ const storageSchema = new mongoose.Schema({
 
     },
     contents: [{
+        // Reference to the appropriate inventory collection
         inventoryId: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'Inventory'
+            required: true
+        },
+        inventoryType: {
+            type: String,
+            required: true,
+            enum: ['finishedGoods', 'rawMaterials', 'tools', 'accessories'],
+            description: "Type of inventory collection this references"
         },
         sku: {
             type: String,
@@ -97,7 +104,45 @@ const storageSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
-const Storage = mongoose.model("Storage", storageSchema, 'storage');
+// Add virtual to get the correct inventory model reference based on inventoryType
+storageSchema.path('contents').schema.virtual('inventoryRef').get(function() {
+    const models = {
+        'finishedGoods': require('./finishedGoods'),
+        'rawMaterials': require('./rawMaterials'),
+        'tools': require('./tools'),
+        'accessories': require('./accessories')
+    };
+    return models[this.inventoryType];
+});
+
+// Instance method to get inventory details for a content item
+storageSchema.path('contents').schema.methods.getInventoryDetails = async function() {
+    const Model = this.inventoryRef;
+    return await Model.findById(this.inventoryId);
+};
+
+// Static method to get storage with populated inventory details
+storageSchema.statics.getStorageWithInventory = async function(storageId) {
+    const storage = await this.findById(storageId);
+    if (!storage) return null;
+    
+    const populatedContents = await Promise.all(
+        storage.contents.map(async (content) => {
+            const inventoryDetails = await content.getInventoryDetails();
+            return {
+                ...content.toObject(),
+                inventoryDetails
+            };
+        })
+    );
+    
+    return {
+        ...storage.toObject(),
+        contents: populatedContents
+    };
+};
+
+const Storage = database.model("Storage", storageSchema, 'storage');
 
 Storage.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {

@@ -2,27 +2,6 @@ const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
 
-const generatePalletId = async function () {
-    try {
-        const [YYYY, MM, DD] = new Date().toISOString().split("T")[0].split("-");
-        const target = `PLT-${YYYY.slice(-2)}${MM}${DD}`;
-
-        const counterDoc = await mongoose.model("Counter").findOneAndUpdate(
-            { _id: target },
-            { $inc: { sequence: 1 } },
-            { new: true, upsert: true, lean: true }
-        );
-
-        const sequence = String(counterDoc.sequence).padStart(4, "0");
-        const palletId = `${target}-${sequence}`;
-
-        return palletId;
-    } catch (error) {
-        console.error("Error generating pallet ID:", error);
-        return null;
-    }
-}
-
 const traceSchema = new mongoose.Schema({
     date: { type: Date, default: null },
     by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -32,7 +11,6 @@ const traceSchema = new mongoose.Schema({
 const palletSchema = new mongoose.Schema({
     _id: {
         type: String,
-        default: generatePalletId,
     },
     productId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -58,7 +36,7 @@ const palletSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
     },
-    trace: traceSchema,
+    trace: [traceSchema],
     status: {
         type: String,
     }
