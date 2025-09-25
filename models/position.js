@@ -1,0 +1,75 @@
+const mongoose = require("mongoose");
+const database = require("../config/database");
+const { io } = require("../socket/io");
+
+const positionSchema = new mongoose.Schema({
+    title: {
+        type: String,
+        required: true
+    },
+    description: String,
+    department: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'department',
+        required: true
+    },
+    level: {
+        type: String,
+        enum: ["Intern", "Entry", "Mid", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"],
+        default: "Entry"
+    },
+    salaryRange: {
+        min: { type: Number, min: 0 },
+        max: { type: Number, min: 0 }
+    },
+    reportsTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'position'
+    },
+    jobDescription: String,
+    requirements: [String],
+    responsibilities: [String],
+    employmentType: {
+        type: String,
+        enum: ["Full Time", "Part Time", "Contract", "Intern"],
+        default: "Full Time"
+    },
+    workType: {
+        type: String,
+        enum: ["On Site", "Remote"],
+        default: "On Site"
+    },
+    probationPeriod: {
+        type: Number,
+        default: 12,
+        description: "Probation period in weeks"
+    },
+    status: {
+        type: String,
+        enum: ["Active", "Inactive", "Filled"],
+        default: "Active"
+    }
+}, {
+    timestamps: true
+});
+
+const Position = database.model("position", positionSchema, 'position');
+
+/**
+ * Change stream to emit via socket.io
+ */
+Position.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("position:update", change.fullDocument);
+                break;
+            case "delete":
+                io.emit("position:delete", change.documentKey._id);
+                break;
+        }
+    });
+
+module.exports = Position;

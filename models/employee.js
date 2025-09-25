@@ -90,7 +90,8 @@ const employeeSchema = new Schema({
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
     displayName: { type: String },
-    department: { type: String },
+    department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
+    position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
     role: { type: String },
     pin: { type: String },
 

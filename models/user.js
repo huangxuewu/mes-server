@@ -15,11 +15,11 @@ const userSchema = new mongoose.Schema({
         enum: ["Active", "Inactive", "Disabled", "Deleted"],
         default: "Active"
     },
-    permissions: {
+    permission: {
         access: [String],
         create: [String],
         update: [String],
-        delete: [String],
+        remove: [String],
         view: [String],
     }
 });
