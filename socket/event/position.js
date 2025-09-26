@@ -47,6 +47,15 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("position:srot", async (payload, callback) => {
+        try {
+            await Promise.all(payload.map(({ _id, index }) => db.position.updateOne({ _id }, { $set: { index } })));
+            callback({ status: "success", message: "Position sorted successfully" });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
     // Get single position
     socket.on("position:get", async (data, callback) => {
         try {
@@ -72,6 +81,15 @@ module.exports = (socket, io) => {
         try {
             const positions = await db.position.find({ department: departmentId });
             callback({ status: "success", message: "Positions fetched successfully", payload: positions });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("position:deleteByDepartment", async (departmentId, callback) => {
+        try {
+            await db.position.deleteMany({ department: departmentId });
+            callback({ status: "success", message: "Positions deleted successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
