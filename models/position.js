@@ -53,6 +53,11 @@ const positionSchema = new mongoose.Schema({
         type: String,
         enum: ["Active", "Inactive", "Filled"],
         default: "Active"
+    },
+    index:{
+        type: Number,
+        default: 0,
+        description: "Index for sorting"
     }
 }, {
     timestamps: true

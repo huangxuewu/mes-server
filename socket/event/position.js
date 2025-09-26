@@ -47,7 +47,7 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("position:srot", async (payload, callback) => {
+    socket.on("position:sort", async (payload, callback) => {
         try {
             await Promise.all(payload.map(({ _id, index }) => db.position.updateOne({ _id }, { $set: { index } })));
             callback({ status: "success", message: "Position sorted successfully" });
