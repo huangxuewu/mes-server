@@ -8,6 +8,11 @@ const positionSchema = new mongoose.Schema({
         required: true
     },
     description: String,
+    index: {
+        type: Number,
+        default: 0,
+        description: "Index for sorting"
+    },
     department: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'department',

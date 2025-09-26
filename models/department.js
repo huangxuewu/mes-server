@@ -9,6 +9,11 @@ const departmentSchema = new mongoose.Schema({
         unique: true
     },
     description: String,
+    index: {
+        type: Number,
+        default: 0,
+        description: "Index for sorting"
+    },
     manager: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'position'

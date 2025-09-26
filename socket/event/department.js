@@ -6,7 +6,7 @@ module.exports = (socket, io) => {
         try {
             const department = await db.department.create(data);
             callback({ status: "success", message: "Department created successfully", payload: department });
-            
+
             // Broadcast to all connected clients
             io.emit("department:created", department);
         } catch (error) {
@@ -22,7 +22,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Department not found" });
             }
             callback({ status: "success", message: "Department updated successfully", payload: department });
-            
+
             // Broadcast to all connected clients
             io.emit("department:updated", department);
         } catch (error) {
@@ -38,9 +38,19 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Department not found" });
             }
             callback({ status: "success", message: "Department deleted successfully" });
-            
+
             // Broadcast to all connected clients
             io.emit("department:deleted", { _id });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("department:sort", async (payload, callback) => {
+        try {
+            await Promise.all(payload.map(({ _id, index }) => db.department.updateOne({ _id }, { $set: { index } })));
+         
+            callback({ status: "success", message: "Department sorted successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
