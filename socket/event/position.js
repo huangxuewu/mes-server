@@ -5,7 +5,7 @@ module.exports = (socket, io) => {
     socket.on("position:create", async (data, callback) => {
         try {
             const position = await db.position.create(data);
-            const populatedPosition = await db.position.findById(position._id).populate('department');
+            const populatedPosition = await db.position.findById(position._id);
             callback({ status: "success", message: "Position created successfully", payload: populatedPosition });
             
             // Broadcast to all connected clients
@@ -18,7 +18,7 @@ module.exports = (socket, io) => {
     // Update position
     socket.on("position:update", async ({ _id, ...data }, callback) => {
         try {
-            const position = await db.position.findByIdAndUpdate(_id, { $set: data }, { new: true }).populate('department');
+            const position = await db.position.findByIdAndUpdate(_id, { $set: data }, { new: true });
             if (!position) {
                 return callback({ status: "error", message: "Position not found" });
             }
@@ -50,7 +50,7 @@ module.exports = (socket, io) => {
     // Get single position
     socket.on("position:get", async (data, callback) => {
         try {
-            const position = await db.position.findOne(data).populate('department');
+            const position = await db.position.findOne(data);
             callback({ status: "success", message: "Position fetched successfully", payload: position });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -60,7 +60,7 @@ module.exports = (socket, io) => {
     // Get all positions
     socket.on("positions:get", async (query, callback) => {
         try {
-            const positions = await db.position.find(query).populate('department');
+            const positions = await db.position.find(query);
             callback({ status: "success", message: "Positions fetched successfully", payload: positions });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -70,7 +70,7 @@ module.exports = (socket, io) => {
     // Get positions by department
     socket.on("positions:getByDepartment", async (departmentId, callback) => {
         try {
-            const positions = await db.position.find({ department: departmentId }).populate('department');
+            const positions = await db.position.find({ department: departmentId });
             callback({ status: "success", message: "Positions fetched successfully", payload: positions });
         } catch (error) {
             callback({ status: "error", message: error.message });

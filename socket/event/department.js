@@ -49,7 +49,7 @@ module.exports = (socket, io) => {
     // Get single department
     socket.on("department:get", async (data, callback) => {
         try {
-            const department = await db.department.findOne(data).populate('manager');
+            const department = await db.department.findOne(data);
             callback({ status: "success", message: "Department fetched successfully", payload: department });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -59,7 +59,7 @@ module.exports = (socket, io) => {
     // Get all departments
     socket.on("departments:get", async (query, callback) => {
         try {
-            const departments = await db.department.find(query).populate('manager');
+            const departments = await db.department.find(query);
             callback({ status: "success", message: "Departments fetched successfully", payload: departments });
         } catch (error) {
             callback({ status: "error", message: error.message });

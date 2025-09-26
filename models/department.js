@@ -21,7 +21,11 @@ const departmentSchema = new mongoose.Schema({
         type: String,
         enum: ["Active", "Inactive"],
         default: "Active"
-    }
+    },
+    teamMembers:[{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'employee'
+    }]
 }, {
     timestamps: true
 });
