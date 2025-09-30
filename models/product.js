@@ -75,6 +75,11 @@ const storagingSchema = new mongoose.Schema({
     boxesPerPallet: Number
 }, { _id: false });
 
+const productionSchema = new mongoose.Schema({
+    lineId: { type: mongoose.Schema.Types.ObjectId, ref: 'line' },
+    bufferRate: Number,
+}, { _id: false });
+
 /**
  * Product schema
  */
@@ -110,6 +115,7 @@ const productSchema = new mongoose.Schema({
     specification: [specificationSchema],
     storaging: [storagingSchema],
     casePack: casePackSchema,
+    production: productionSchema,
     packaging: {
         pillowsPerBag: Number,
         bagsPerBox: Number,
