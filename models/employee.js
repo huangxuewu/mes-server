@@ -13,7 +13,7 @@ const emergencySchema = new Schema({
 
 const personalSchema = new Schema({
     ssn: { type: String },
-    dob: { type: Date },
+    dob: { type: String },
     race: { type: String },
     gender: { type: String },
     address: { type: String },
@@ -32,6 +32,32 @@ const preferredSchema = new Schema({
     payRate: { type: Number },
     position: { type: String },
     language: { type: String, default: "English" }
+}, { _id: false });
+
+const employmentSchema = new Schema({
+    hire: {
+        date: { type: String },
+        type: { type: String, enum: ["Full Time", "Part Time", "Contract", "Intern"], default: "Full Time" },
+        reason: { type: String },
+        notes: { type: String },
+        approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
+    },
+    probation: {
+        date: { type: String },
+        type: { type: String, enum: ["Resignation", "Layoff", "Termination", "Retirement", "Other"], default: "Other" },
+        reason: { type: String },
+        notes: { type: String },
+        approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
+    },
+    termination: {
+        date: { type: String },
+        type: { type: String, enum: ["Resignation", "Layoff", "Termination", "Retirement", "Other"], default: "Other" },
+        reason: { type: String },
+        notes: { type: String },
+        approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
+    },
+    status: { type: String, enum: ["Active", "Inactive", "Probation", "Terminated"], default: "Active" }
+
 }, { _id: false });
 
 const workHistorySchema = new Schema({
@@ -81,7 +107,7 @@ const documentLinksSchema = new Schema({
 const timecardSchema = new Schema({
     _id: { type: mongoose.Schema.Types.ObjectId, ref: "timecard" },
     date: { type: String },
-    status: { type: String, enum: ["Clocked In", "Clocked Out", "On Break"], default: "Clocked In" },
+    status: { type: String, enum: ["Clocked In", "Clocked Out", "On Break", "Absent", "Leave", "PTO", "Holiday", "Off Day"], default: "Clocked In" },
     disabled: { type: Boolean, default: false }
 });
 
@@ -92,16 +118,16 @@ const employeeSchema = new Schema({
     displayName: { type: String },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
+    skillLevel: { type: String, enum: ["Intern", "Entry", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"], default: "Entry" },
     role: { type: String },
     pin: { type: String },
-
     personal: personalSchema,
     preferred: preferredSchema,
     emergency: emergencySchema,
+    employment: employmentSchema,
     documents: documentLinksSchema,
     workHistory: [workHistorySchema],
     timecard: timecardSchema,
-
     status: { type: String, enum: ["Draft", "Pending", "Probation", "Active", "Inactive"], default: "Draft" }
 }, { timestamps: true });
 
