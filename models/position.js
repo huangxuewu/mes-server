@@ -20,8 +20,8 @@ const positionSchema = new mongoose.Schema({
     },
     level: {
         type: String,
-        enum: ["Intern", "Entry", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"],
-        default: "Entry"
+        enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"],
+        default: "Junior"
     },
     salaryRange: {
         min: { type: Number, min: 0 },

@@ -37,27 +37,28 @@ const preferredSchema = new Schema({
 const employmentSchema = new Schema({
     hire: {
         date: { type: String },
-        type: { type: String, enum: ["Full Time", "Part Time", "Contract", "Intern"], default: "Full Time" },
         reason: { type: String },
         notes: { type: String },
+        workType: { type: String, enum: ["Full Time", "Part Time", "Contract", "Intern", "Temporary"], default: "Full Time" },
+        payType: { type: String, enum: ["Hourly", "Salary", "Commission"], default: "Hourly" },
         approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
     },
     probation: {
         date: { type: String },
-        type: { type: String, enum: ["Resignation", "Layoff", "Termination", "Retirement", "Other"], default: "Other" },
+        duration: { type: Number, default: 12, description: "Probation period in weeks" },
+        result: { type: String, enum: ["Passed", "Failed", "Pending"], default: "Pending" },
         reason: { type: String },
         notes: { type: String },
         approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
     },
     termination: {
         date: { type: String },
-        type: { type: String, enum: ["Resignation", "Layoff", "Termination", "Retirement", "Other"], default: "Other" },
+        type: { type: String, enum: ["Resignation", "Layoff", "Termination", "Retirement", "Other"], default: "" },
         reason: { type: String },
         notes: { type: String },
         approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
     },
-    status: { type: String, enum: ["Active", "Inactive", "Probation", "Terminated"], default: "Active" }
-
+    status: { type: String, enum: ["Active", "Inactive", "Probation", "On Leave", "Terminated"], default: "Active" }
 }, { _id: false });
 
 const workHistorySchema = new Schema({
@@ -113,12 +114,12 @@ const timecardSchema = new Schema({
 
 const employeeSchema = new Schema({
     portrait: { type: String }, // url
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    displayName: { type: String },
+    displayName: { type: String, trim: true },
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
-    skillLevel: { type: String, enum: ["Intern", "Entry", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"], default: "Entry" },
+    skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"], default: "Junior" },
     role: { type: String },
     pin: { type: String },
     personal: personalSchema,
