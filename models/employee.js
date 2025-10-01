@@ -108,7 +108,7 @@ const documentLinksSchema = new Schema({
 const timecardSchema = new Schema({
     _id: { type: mongoose.Schema.Types.ObjectId, ref: "timecard" },
     date: { type: String },
-    status: { type: String, enum: ["Clocked In", "Clocked Out", "On Break", "Absent", "Leave", "PTO", "Holiday", "Off Day"], default: "Clocked In" },
+    status: { type: String, enum: ["Clocked In", "Clocked Out", "On Break", "Absent", "Leave", "PTO", "Holiday", "Off Day", ""], default: "" },
     disabled: { type: Boolean, default: false }
 });
 
@@ -119,7 +119,7 @@ const employeeSchema = new Schema({
     lastName: { type: String, required: true, trim: true },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
-    skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", "Custom"], default: "Junior" },
+    skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", ""], default: "Junior" },
     role: { type: String },
     pin: { type: String },
     personal: personalSchema,
