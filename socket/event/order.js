@@ -29,7 +29,7 @@ module.exports = (socket, io) => {
     socket.on('order:delete', async (data, callback) => {
         try {
             const order = await db.order.findOneAndDelete(data);
-            await db.shipment.deleteMany({ masterPO: order.poNumber });
+            await db.inbound.deleteMany({ masterPO: order.poNumber });
 
             callback?.({ status: "success", message: "Order deleted successfully" })
         } catch (error) {

@@ -6,8 +6,9 @@ module.exports = (socket, io) => {
         try {
             const position = await db.position.create(data);
             const populatedPosition = await db.position.findById(position._id);
+
             callback({ status: "success", message: "Position created successfully", payload: populatedPosition });
-            
+
             // Broadcast to all connected clients
             io.emit("position:created", populatedPosition);
         } catch (error) {
@@ -23,7 +24,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Position not found" });
             }
             callback({ status: "success", message: "Position updated successfully", payload: position });
-            
+
             // Broadcast to all connected clients
             io.emit("position:updated", position);
         } catch (error) {
@@ -39,7 +40,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Position not found" });
             }
             callback({ status: "success", message: "Position deleted successfully" });
-            
+
             // Broadcast to all connected clients
             io.emit("position:deleted", { _id });
         } catch (error) {

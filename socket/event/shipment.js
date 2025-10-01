@@ -6,79 +6,61 @@ const { performance } = require('node:perf_hooks');
 
 module.exports = (socket, io) => {
 
-    socket.on("shipment:create", async (data, callback) => {
+    socket.on("outbound:create", async (data, callback) => {
         try {
             await db.order.updateOne({ _id: data._id }, { $set: { transitAt: new Date, orderStatus: "In Transit" } });
-            await db.shipment.create(data.buyers);
+            await db.inbound.create(data.buyers);
 
-            callback({ status: "success", message: "Shipment created successfully" })
+            callback({ status: "success", message: "Outbound shipment created successfully" })
         } catch (error) {
             callback({ status: "error", message: error.message })
         }
     })
 
     // update shipment itself regardless of status
-    socket.on("shipment:update", async (payload, callback) => {
+    socket.on("outbound:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
 
-            await db.shipment.updateOne({ _id }, { $set: data });
+            await db.inbound.updateOne({ _id }, { $set: data });
 
-            callback({ status: "success", message: "Shipment updated successfully" });
+            callback({ status: "success", message: "Outbound shipment updated successfully" });
 
         } catch (error) {
             callback({ status: "error", message: error.message })
         }
     })
 
-    socket.on("shipment:delete", async (query, callback) => {
+    socket.on("outbound:delete", async (query, callback) => {
         try {
-            await db.shipment.deleteOne(query);
-            callback?.({ status: "success", message: "Shipment deleted successfully" });
+            await db.inbound.deleteOne(query);
+            callback?.({ status: "success", message: "Outbound shipment deleted successfully" });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     })
 
-    socket.on("shipment:query", async (query, callback) => {
+    socket.on("outbound:query", async (query, callback) => {
         try {
-            const shipment = await db.shipment.findOne(query).lean();
+            const shipment = await db.inbound.findOne(query).lean();
 
-            callback?.({ status: "success", message: "Shipment fetched successfully", payload: shipment });
+            callback?.({ status: "success", message: "Outbound shipment fetched successfully", payload: shipment });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     })
 
-    socket.on("shipments:get", async (query, callback) => {
+    socket.on("outbound:get", async (query, callback) => {
         try {
-            const shipments = await db.shipment.find(query).lean();
-            callback?.({ status: "success", message: "Shipments fetched successfully", payload: shipments });
+            const shipments = await db.inbound.find(query).lean();
+            callback?.({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     })
 
-    // socket.on("shipment:get", async (query, callback) => {
-    //     try {
-    //         //return shipment it self
-    //         const shipment = await db.shipment.findOne(query).lean();
 
-    //         callback({ status: "success", message: "Shipment fetched successfully", payload: shipment });
-    //     } catch (error) {
-    //         callback({ status: "error", message: error.message })
-    //     }
-    // })
-
-    socket.on("shipments:update", async (payload, callback) => {
-        try {
-
-        } catch (error) {
-            callback?.({ status: "error", message: error.message });
-        }
-    })
-
-    socket.on("shipments:complete", async (payload, callback) => {
+    socket.on("outbound:complete", async (payload, callback) => {
         try {
             const { masterPO, ...data } = payload;
 
@@ -86,13 +68,13 @@ module.exports = (socket, io) => {
                 Object.assign(acc, { [`loads.$[].${key}`]: data[key] })
                 , {});
 
-            await db.shipment.updateMany({ masterPO }, { $set: update }); // [] update all loads
+            await db.inbound.updateMany({ masterPO }, { $set: update }); // [] update all loads
 
-            callback?.({ status: "success", message: "Shipments updated successfully" });
+            callback?.({ status: "success", message: "Outbound shipments updated successfully" });
 
             // update order status
             // if all shipments are completed, update order status to completed
-            const shipments = await db.shipment.find({ masterPO });
+            const shipments = await db.inbound.find({ masterPO });
             const allCompleted = shipments.every(shipment => shipment.status === "Completed" || shipment.bol.link);
 
             if (!allCompleted) return;
@@ -112,7 +94,7 @@ module.exports = (socket, io) => {
                 Object.assign(acc, { [`loads.$[target].${key}`]: data[key] })
                 , {});
 
-            await db.shipment.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update }, { arrayFilters: [{ 'target.shipmentId': shipmentId }] });
+            await db.inbound.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update }, { arrayFilters: [{ 'target.shipmentId': shipmentId }] });
 
             callback?.({ status: "success", message: "Load updated successfully" });
         } catch (error) {
@@ -124,7 +106,7 @@ module.exports = (socket, io) => {
         try {
             const { _id, load } = payload;
 
-            await db.shipment.updateOne({ _id }, { $push: { loads: load } });
+            await db.inbound.updateOne({ _id }, { $push: { loads: load } });
 
             callback?.({ status: "success", message: "Load added successfully" });
         } catch (error) {
@@ -144,13 +126,13 @@ module.exports = (socket, io) => {
                 , {});
 
             // ignore if shipment is completed
-            const shipment = await db.shipment.findOneAndUpdate(
+            const shipment = await db.inbound.findOneAndUpdate(
                 { _id },
                 { $set: update },
                 { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
             );
 
-            callback?.({ status: "success", message: "Shipment updated successfully", payload: shipment });
+            callback?.({ status: "success", message: "Outbound shipment updated successfully", payload: shipment });
 
             // update order status if shipment is picked up
             if (['Picked Up', 'Completed'].includes(load.status))
@@ -171,7 +153,7 @@ module.exports = (socket, io) => {
 
             // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
             const last2Month = dayjs().subtract(2, 'month').format('YYYY-MM-DD');
-            const shipments = await db.shipment
+            const shipments = await db.inbound
                 .find(
                     {
                         $or: [
@@ -236,7 +218,7 @@ module.exports = (socket, io) => {
 
             // Execute bulk updates if any
             if (bulkOps.length > 0) {
-                await db.shipment.bulkWrite(bulkOps);
+                await db.inbound.bulkWrite(bulkOps);
             }
 
             const endTime = performance.now();
@@ -301,7 +283,7 @@ module.exports = (socket, io) => {
 
     // socket.on("loads:history", async (query, callback) => {
     //     try {
-    //         const loads = await db.shipment.aggregate([
+    //         const loads = await db.inbound.aggregate([
     //             { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
     //             { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
     //             { $project: { loads: 0 } },
@@ -331,14 +313,14 @@ module.exports = (socket, io) => {
         });
 
         try {
-            const shipments = await db.shipment.aggregate([
+            const shipments = await db.inbound.aggregate([
                 { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                 { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                 { $project: { loads: 0 } },
                 { $match: query }
             ]);
 
-            callback({ status: "success", message: "Shipments fetched successfully", payload: shipments });
+            callback({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
             callback({ status: "error", message: error.message })
         }
@@ -350,9 +332,9 @@ module.exports = (socket, io) => {
             const update = Object.keys(data).reduce((acc, key) => Object.assign(acc, { [`loads.$.${key}`]: data[key] }), {});
 
             // note?.length
-            //     ? await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
+            //     ? await db.inbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
-            await db.shipment.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            await db.inbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             callback?.({ status: "success", message: "Loads updated successfully" });
 
@@ -366,7 +348,7 @@ module.exports = (socket, io) => {
             const { loadNumber, breakdown } = payload;
 
             for (const [poNumber, { items }] of Object.entries(breakdown)) {
-                await db.shipment.updateOne(
+                await db.inbound.updateOne(
                     { poNumber },
                     { $set: { 'loads.$[target].items': items } },
                     { arrayFilters: [{ 'target.loadNumber': loadNumber }] }
@@ -384,7 +366,7 @@ module.exports = (socket, io) => {
     socket.on("bill-of-lading:check", async (data, callback) => {
         try {
             const { number } = data;
-            const shipment = await db.shipment.findOne({ 'bol.number': number });
+            const shipment = await db.inbound.findOne({ 'bol.number': number });
             const message = shipment ? "Bill of Lading already exists" : "Bill of Lading does not exist";
 
             callback?.({ status: "success", message, payload: !!shipment });
@@ -398,7 +380,7 @@ module.exports = (socket, io) => {
         try {
             const { shipmentIdArray, loadNumber, updatedAt, link } = payload;
 
-            await db.shipment.updateMany(
+            await db.inbound.updateMany(
                 { 'loads.shipmentId': { $in: shipmentIdArray } },
                 {
                     $set: {
@@ -411,7 +393,7 @@ module.exports = (socket, io) => {
             );
 
             shipmentIdArray.length > 1 &&
-                await db.shipment.updateMany(
+                await db.inbound.updateMany(
                     { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
                     {
                         $set: {
@@ -450,7 +432,7 @@ module.exports = (socket, io) => {
                 ]),
 
                 // Second aggregation - unique load numbers
-                db.shipment.aggregate([
+                db.inbound.aggregate([
                     { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                     { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                     { $project: { loadNumber: 1, status: 1, _id: 1 } },
@@ -466,7 +448,7 @@ module.exports = (socket, io) => {
                 ]),
 
                 // Third aggregation - unique BOL numbers
-                db.shipment.aggregate([
+                db.inbound.aggregate([
                     { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                     { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                     { $addFields: { 'bol': { $toString: '$bol.number' } } },

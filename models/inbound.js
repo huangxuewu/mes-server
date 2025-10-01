@@ -80,7 +80,7 @@ const loadSchema = new mongoose.Schema({
     }
 });
 
-const shipmentSchema = new mongoose.Schema({
+const inboundSchema = new mongoose.Schema({
     masterPO: String,
     poNumber: { type: String, required: true },
     poDate: { type: String, default: null },
@@ -101,31 +101,31 @@ const shipmentSchema = new mongoose.Schema({
     timestamps: true
 });
 
-const Shipment = database.model("shipment", shipmentSchema, "shipment");
+const Inbound = database.model("shipment", inboundSchema, "shipment");
 
-Shipment.createIndexes({
+Inbound.createIndexes({
     "masterPO": 1,
     "poNumber": 1,
 });
 
-Shipment
+Inbound
     .watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.emit("shipment:update", change.fullDocument);
+                io.emit("outbound:update", change.fullDocument);
 
                 break;
             case "delete":
-                io.emit("shipment:delete", change.documentKey._id);
+                io.emit("outbound:delete", change.documentKey._id);
                 break;
         }
     });
 
-Shipment.getActiveLoads = async () => {
-    const loads = await Shipment.aggregate([
+Inbound.getActiveLoads = async () => {
+    const loads = await Inbound.aggregate([
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
         { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
         { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
@@ -137,6 +137,6 @@ Shipment.getActiveLoads = async () => {
     return loads;
 };
 
-module.exports = Shipment;
+module.exports = Inbound;
 
 

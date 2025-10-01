@@ -11,7 +11,7 @@ router.get('/', (req, res) => {
 router.get('/loads', async (req, res) => {
     console.log("Get all outbound loads");
     
-    const loads = await db.shipment.getActiveLoads();
+    const loads = await db.outbound.getActiveLoads();
 
     res.json(loads);
 });
