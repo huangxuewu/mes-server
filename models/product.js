@@ -35,6 +35,14 @@ const specificationSchema = new mongoose.Schema({
     fields: [specFieldSchema]
 }, { _id: false });
 
+const bomSchema = new mongoose.Schema({
+    materialId: { type: mongoose.Schema.Types.ObjectId, ref: "rawMaterials" },
+    quantity: Number,
+    unit: String,
+    coversQuantity: Number,
+    coversUnit: String,
+}, { _id: false });
+
 /**
  * Quality control schema
  */
@@ -114,8 +122,9 @@ const productSchema = new mongoose.Schema({
     qualityChecks: [qualityControlSchema],
     specification: [specificationSchema],
     storaging: [storagingSchema],
-    casePack: casePackSchema,
     production: productionSchema,
+    casePack: casePackSchema,
+    bom: [bomSchema],
     packaging: {
         pillowsPerBag: Number,
         bagsPerBox: Number,

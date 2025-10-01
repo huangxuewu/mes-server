@@ -419,6 +419,71 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("inbound:get", async (query, callback) => {
+        try {
+            const inbound = await db.inbound.findOne(query);
+            callback?.({ status: "success", message: "Inbound shipment fetched successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("inbound:create", async (payload, callback) => {
+        try {
+            const inbound = await db.inbound.create(payload);
+            callback?.({ status: "success", message: "Inbound shipment created successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("inbound:update", async (payload, callback) => {
+        try {
+            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $set: payload });
+            callback?.({ status: "success", message: "Inbound shipment updated successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("inbound:add_event", async (payload, callback) => {
+        try {
+            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $push: { trackingEvents: payload } });
+            callback?.({ status: "success", message: "Inbound shipment event added successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("inbound:update_event", async (payload, callback) => {
+        try {
+            // update existing event
+            const inbound = await db.inbound.updateOne({
+                _id: payload._id,
+                'trackingEvents._id': payload._id
+            }, {
+                $set: {
+                    'trackingEvents.$.note': payload.note,
+                    'trackingEvents.$.event': payload.event,
+                    'trackingEvents.$.location': payload.location,
+                }
+            });
+            callback?.({ status: "success", message: "Inbound shipment event updated successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("inbound:add_document", async (payload, callback) => {
+
+        try {
+            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $push: { documents: payload } });
+            callback?.({ status: "success", message: "Inbound shipment document added successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
     socket.on("search:cache", async (callback) => {
         try {
 

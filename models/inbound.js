@@ -8,100 +8,56 @@ const itemSchema = new mongoose.Schema({
     casePack: Number,
     styleCode: String,
     description: String,
-},);
+    vendor: String,
+}, { _id: false });
 
-const auditLogSchema = new mongoose.Schema({
-    action: { type: String, default: null, enum: ["create", "update", "delete"] },
-    changes: [{
-        field: { type: String, default: null },
-        oldValue: { type: String, default: null },
-        newValue: { type: String, default: null },
-    }],
-    createdAt: { type: Date, default: null },
-    createdBy: { type: String, default: null },
-});
+const trackingEventsSchema = new mongoose.Schema({
+    date: String,
+    event: String,
+    location: String,
+    note: String,
+}, { _id: false });
 
-const loadSchema = new mongoose.Schema({
-    pickupDate: { type: String, default: null, description: "Date Ship IQ assigned for pickup" },
-    pickupGate: { type: String, default: null, description: "Gate code for pickup" },
-    onPremisesDate: { type: String, default: null, description: "Date buyer expected shipment to be on their premises" },
-    schedulePickupAt: { type: Date, default: null, description: "Date carrier scheduled for pickup" },
-    actualPickupAt: { type: Date, default: null, description: "Date carrier actually came to pickup the shipment" },
-    shipmentId: { type: String, default: "" },
-    loadNumber: { type: String, default: "" },
-    proNumber: { type: String, default: "" },
-    assignedSCAC: { type: String, default: "" },
-    executingSCAC: { type: String, default: "" },
-    chRobinsonNumber: { type: String, default: "" },
-    cube: { type: Number, default: 0 },
-    weight: { type: Number, default: 0 },
-    cartons: { type: Number, default: 0 },
-    pallets: { type: Number, default: 0 },
-    commodity: { type: String, default: "" },
-    status: { type: String, default: "Pending" },
-    bol: {
-        url: { type: String, default: "" },
-        number: { type: String, default: "" },
-        uploadedAt: { type: Date, default: null },
-        rawData: { type: Object, default: null },
-    },
-    items: mongoose.Mixed,
-    auditLog: [auditLogSchema],
-    checklist: {
-        printed: {
-            status: { type: Boolean, default: false, description: "Whether the shipping labels are printed" },
-            timestamp: { type: Date, default: null },
-        },
-        picked: {
-            status: { type: Boolean, default: false, description: "Whether all the boxes are picked and ready to be labeled" },
-            timestamp: { type: Date, default: null },
-        },
-        labeled: {
-            status: { type: Boolean, default: false, description: "Whether all the boxes are labeled" },
-            timestamp: { type: Date, default: null },
-        },
-        loading: {
-            status: { type: Boolean, default: false, description: "Whether the truck is here and shipment is loading" },
-            timestamp: { type: Date, default: null },
-        },
-        loaded: {
-            status: { type: Boolean, default: false, description: "Whether the shipment is completely loaded on the truck" },
-            timestamp: { type: Date, default: null },
-        },
-    }
-}, {
-    _id: false,
-    timestamps: true,
-    transform: (doc, ret) => {
-        if (ret?.items.length === 0)
-            delete ret.items;
-
-        return ret;
-    }
-});
+const documentSchema = new mongoose.Schema({
+    type: String,
+    url: String,
+    documentId: { type: mongoose.Schema.Types.ObjectId, ref: "document" },
+    formData: mongoose.Schema.Types.Mixed,
+}, { _id: false });
 
 const inboundSchema = new mongoose.Schema({
-    masterPO: String,
     poNumber: { type: String, required: true },
     poDate: { type: String, default: null },
-    client: { type: String, default: "Target" },
-    name: String,
-    address: String,
-    city: String,
-    state: String,
-    zip: String,
-    country: String,
+    shipmentType: {
+        type: String,
+        enum: ["Overseas", "Domestic"]
+    },
+    containerNumber: String,
+    sealNumber: String,
+    vesselNumber: String,
+    voyageNumber: String,
+    bolNumber: String,
+    truckNumber: String,
+    deliveryNote: String,
+    receiveNote: String,
+    shipDate: String,
+    etaDate: String,
+    ataDate: String,
+    receivedAt: Date,
+    originPort: String,
+    dischargePort: String,
+    destination: {
+        type: String,
+        default: "Down Home"
+    },
     items: [itemSchema],
-    loads: [loadSchema],
-    shipWindow: {
-        start: String,
-        end: String
-    }
+    trackingEvents: [trackingEventsSchema],
+    documents: [documentSchema],
 }, {
     timestamps: true
 });
 
-const Inbound = database.model("shipment", inboundSchema, "shipment");
+const Inbound = database.model("inbound", inboundSchema, "inbound");
 
 Inbound.createIndexes({
     "masterPO": 1,
