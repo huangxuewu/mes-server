@@ -313,7 +313,7 @@ module.exports = (socket, io) => {
         });
 
         try {
-            const shipments = await db.inbound.aggregate([
+            const shipments = await db.outbound.aggregate([
                 { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                 { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                 { $project: { loads: 0 } },
