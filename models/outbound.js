@@ -103,7 +103,7 @@ const outboundSchema = new mongoose.Schema({
     timestamps: true
 });
 
-const Outbound = database.model("shipment", outboundSchema, "shipment");
+const Outbound = database.model("outbound", outboundSchema, "outbound");
 
 Outbound.createIndexes({
     "masterPO": 1,
