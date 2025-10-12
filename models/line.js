@@ -41,4 +41,22 @@ const lineSchema = new mongoose.Schema({
     },
 })
 
-module.exports = database.model("line", lineSchema, 'line');
+const Line = database.model("line", lineSchema, "line");
+
+Line.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("line:update", change.fullDocument);
+                break;
+            case "delete":
+                io.emit("line:delete", change.documentKey._id);
+                break;
+        }
+    })
+
+module.exports = Line;
+
+
