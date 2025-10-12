@@ -36,9 +36,8 @@ const lineSchema = new mongoose.Schema({
     procedures: [],           // procedures that can be performed on this line
     maintenanceSchedule: [],  // maintenance schedule for this line
     status: {
-        type: String,
-        enum: ["Active", "Inactive", "Maintenance"],
-        default: "Active"
+        code: Number,
+        updatedAt: Date
     },
 })
 
