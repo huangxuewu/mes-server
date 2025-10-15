@@ -11,8 +11,11 @@ const staffSchema = new mongoose.Schema({
     manning: Number,
     isSupportRole: Boolean,
     description: String,
-    skills: []
-})
+    staffs: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'employee'
+    }]
+});
 
 // config for production line
 const lineSchema = new mongoose.Schema({
@@ -24,9 +27,17 @@ const lineSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    picture: String,
+    pictures: {
+        floorPlan: String,          // floor plan picture of the line
+        overview: String,           // overview picture of the line
+        closeUp: String,            // close up picture of the line
+        birdEye: String,            // bird eye view picture of the line
+        layout: String,             // layout picture of the line
+        crews: String,              // crews picture of the line
+        schematicDiagram: String,   // schematic diagram picture of the line
+    },
     location: String,
-    capacity: {}, // proudction capacity per hour
+    capacity: {},            // proudction capacity per hour
     efficiencyRate: {
         type: Number,
         default: 85
