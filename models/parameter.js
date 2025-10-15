@@ -3,9 +3,9 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const settingSchema = new mongoose.Schema({
-    name: String,
-    description: String,
+    key: String,
     value: String,
+    description: String,
 })
 
 const parameterSchema = new mongoose.Schema({
