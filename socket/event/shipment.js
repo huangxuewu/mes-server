@@ -484,6 +484,15 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("inbound:fetch", async (query, callback) => {
+        try {
+            const inbound = await db.inbound.find(query);
+            callback?.({ status: "success", message: "Inbound shipments fetched successfully", payload: inbound });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
+
     socket.on("search:cache", async (callback) => {
         try {
 
