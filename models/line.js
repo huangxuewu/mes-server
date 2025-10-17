@@ -20,8 +20,9 @@ const staffSchema = new mongoose.Schema({
 const stepsSchema = new mongoose.Schema({
     sequence: Number,
     name: String,
+    stage: String,
     description: String,
-    sopReferences: [{
+    documents: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'document'
     }],
@@ -33,7 +34,7 @@ const stepsSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'tools'
     }],
-    workers: [{
+    qualifiedWorkers: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'employee'
     }],
@@ -59,7 +60,6 @@ const lineSchema = new mongoose.Schema({
         schematicDiagram: String,   // schematic diagram picture of the line
     },
     location: String,
-    capacity: {},            // proudction capacity per hour
     efficiencyRate: {
         type: Number,
         default: 85

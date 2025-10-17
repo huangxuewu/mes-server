@@ -9,8 +9,11 @@ module.exports = (socket, io) => {
         }
     })
 
-    socket.on('line:update', async (data, callback) => {
+    socket.on('line:update', async (payload, callback) => {
         try {
+            const { _id, ...data } = payload;
+            const line = await db.line.findByIdAndUpdate(_id, { $set: data }, { new: true });
+            callback({ status: "success", message: "Line updated successfully", payload: line })
 
         } catch (error) {
             callback({ status: "error", message: error.message })
