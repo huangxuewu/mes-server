@@ -17,6 +17,28 @@ const staffSchema = new mongoose.Schema({
     }]
 });
 
+const stepsSchema = new mongoose.Schema({
+    sequence: Number,
+    name: String,
+    description: String,
+    sopReferences: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'document'
+    }],
+    machines: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'machine'
+    }],
+    tools: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'tools'
+    }],
+    workers: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'employee'
+    }],
+});
+
 // config for production line
 const lineSchema = new mongoose.Schema({
     name: {
@@ -42,9 +64,8 @@ const lineSchema = new mongoose.Schema({
         type: Number,
         default: 85
     },
-    staffs: [staffSchema],
     products: [],             // products that can be produced on this line
-    procedures: [],           // procedures that can be performed on this line
+    steps: [stepsSchema],               // steps to produce a product
     maintenanceSchedule: [],  // maintenance schedule for this line
     status: {
         code: Number,

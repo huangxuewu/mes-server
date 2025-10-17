@@ -89,9 +89,6 @@ timecardSchema.methods.breakStart = async function (imageURL) {
 
     await this.save();
 
-    // update employee timecard status
-    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "On Break" } });
-
     return this;
 }
 
@@ -104,9 +101,6 @@ timecardSchema.methods.breakEnd = async function (imageURL) {
 
     await this.save();
 
-    // update employee timecard status
-    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "Clocked In" } });
-
     return this;
 }
 
@@ -117,17 +111,29 @@ timecardSchema.methods.clockOut = async function (imageURL) {
     // calculate total hours in minutes 
     this.totalHours = Math.round((this.timeOut.getTime() - this.timeIn.getTime()) / 60000);
     // calculate total breaks in minutes
-    this.totalBreaks = this.breaks.reduce((acc, breakObj) => acc + breakObj.duration, 0);
+    this.totalBreaks = this.breaks.reduce((acc, breakTime) => acc + breakTime.duration, 0);
     // calculate total work hours in minutes
     this.totalWorkHours = this.totalHours - this.totalBreaks;
 
     await this.save();
 
-    // update employee timecard status
-    await this.model("employee").updateOne({ _id: this.employee._id }, { $set: { 'timecard.status': "Clocked Out" } });
-
     return this;
 }
 
-module.exports = database.model("timecard", timecardSchema, 'timecard');
+const Timecard = database.model("timecard", timecardSchema, 'timecard');
 
+Timecard.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("timecard:update", change.fullDocument);
+                break;
+            case "delete":
+                io.emit("timecard:delete", change.documentKey._id);
+                break;
+        }
+    });
+
+module.exports = Timecard;

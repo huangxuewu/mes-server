@@ -127,10 +127,10 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:get', async (query, callback) => {
+    socket.on('timecard:fetch', async (query, callback) => {
         try {
-            const timecard = await db.timecard.findOne(query).populate("employee");
-            callback({ status: "success", message: "Timecard fetched successfully", payload: timecard });
+            const timecards = await db.timecard.find(query);
+            callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
 
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -155,15 +155,6 @@ module.exports = (socket, io) => {
 
     socket.on('timecard:review', (data) => {
         console.log(data);
-    });
-
-    socket.on('timecards:get', async (query, callback) => {
-        try {
-            const timecards = await db.timecard.find(query).populate("employee");
-            callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
     });
 
     socket.on('enrollment:get', async (query, callback) => {
