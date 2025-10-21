@@ -73,8 +73,8 @@ const workHistorySchema = new Schema({
 
 const documentLinksSchema = new Schema({
     // List A
-    "U.S. Passport": { type: String },
-    "U.S. Passport Card": { type: String },
+    "Passport": { type: String },
+    "Passport Card": { type: String },
     "Green Card": { type: String },
     "Foreign Passport with I-94": { type: String },
     "Employment Authorization Document": { type: String },
@@ -96,7 +96,7 @@ const documentLinksSchema = new Schema({
     // List C
     "Social Security Card": { type: String },
     "Birth Certificate": { type: String },
-    "U.S. Citizen ID Card": { type: String },
+    "Citizen ID Card": { type: String },
     "Native American Tribal Document": { type: String },
     "Employment Authorization Card": { type: String },
     "Temporary Resident Card": { type: String },

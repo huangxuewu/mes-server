@@ -72,15 +72,6 @@ module.exports = (socket, io) => {
 
             callback?.({ status: "success", message: "Outbound shipments updated successfully" });
 
-            // update order status
-            // if all shipments are completed, update order status to completed
-            const shipments = await db.outbound.find({ masterPO });
-            const allCompleted = shipments.every(shipment => shipment.status === "Completed" || shipment.bol.link);
-
-            if (!allCompleted) return;
-
-            await db.order.updateOne({ poNumber: masterPO }, { $set: { orderStatus: "Completed", 'buyers.$[].done': true } });
-
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
@@ -136,7 +127,7 @@ module.exports = (socket, io) => {
 
             // update order status if shipment is picked up
             if (['Picked Up', 'Completed'].includes(load.status))
-                db.order.updateShipmentStatus(shipment);
+                await db.order.updateShipmentStatus(shipment);
 
         } catch (error) {
             callback?.({ status: "error", message: error.message });

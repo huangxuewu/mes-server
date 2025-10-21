@@ -126,6 +126,30 @@ Outbound
         }
     });
 
+Outbound.hooks.pre("save", async function (next) {
+    // Only process if this is an update operation and loads are being modified
+    if (this.isModified('loads')) {
+        try {
+            // Check if any load has been completed
+            const hasCompletedLoad = this.loads.some(load => load.status === "Completed" || load.bol?.url);
+
+            if (hasCompletedLoad) {
+                // Update corresponding order buyers to done = true
+                // This will trigger the existing order completion logic in the order model
+                await this.model('order').updateMany(
+                    { "buyers.poNumber": this.poNumber },
+                    { $set: { "buyers.$.done": true } }
+                );
+            }
+        } catch (error) {
+            console.error('Error in outbound pre-save hook:', error);
+            // Don't block the save operation if there's an error
+        }
+    }
+
+    next();
+})
+
 Outbound.getActiveLoads = async () => {
     const loads = await Outbound.aggregate([
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },

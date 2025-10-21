@@ -1,3 +1,4 @@
+const dayjs = require("dayjs");
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
@@ -16,7 +17,7 @@ const punchSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-    deviceId: {
+    station: {
         type: String,
         default: null
     },
@@ -47,7 +48,7 @@ const timecardSchema = new mongoose.Schema({
     },
     date: {
         type: String,
-        required: true
+        default: () => dayjs().format("YYYY-MM-DD")
     },
     punches: [punchSchema],
     totals: {
@@ -85,6 +86,15 @@ const timecardSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+timecardSchema.methods.clockIn = async function ({ image, station, location, method, ip, note }) {
+    const timecard = await this.model("timecard").findByIdAndUpdate(this._id, {
+        $push: {
+            punches: { type: "Clock In", time: new Date(), image, station, location, method, ip, note }
+        }
+    }, { new: true });
+    return timecard;
+}
 
 
 

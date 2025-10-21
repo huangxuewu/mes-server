@@ -94,35 +94,33 @@ orderSchema.statics.updateShipmentStatus = async function (shipment) {
     }
 }
 
-
 const Order = database.model("order", orderSchema, 'order');
+
+Order.hooks.pre("save", async function (next) {
+    if (this.isModified('buyers')) {
+        const allDone = this.buyers.every(buyer => buyer.done);
+
+        if (allDone) {
+            this.orderStatus = "Completed";
+            this.fulfilledAt = new Date();
+        }
+
+        next();
+    }
+})
 
 Order.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
-
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                const doc = change?.fullDocument;
-                // if order is completed, do not update
-                if (doc.orderStatus !== "Completed") {
-                    const allDone = doc.buyers.every(buyer => buyer.done);
-
-                    if (allDone)
-                        return database.model('order')
-                            .findOneAndUpdate({ _id: doc._id }, { orderStatus: "Completed", shippedAt: new Date() }, { new: true })
-                            .then(updatedOrder => io.emit("order:update", updatedOrder))
-                            .catch(error => console.log(error))
-                }
-
-                io.emit("order:update", doc);
+                io.emit("order:update", change.fullDocument);
                 break;
             case "delete":
                 io.emit("order:delete", change.documentKey._id);
                 break;
         }
-
     })
 
 module.exports = Order;

@@ -1,3 +1,4 @@
+const dayjs = require("dayjs");
 const db = require("../../models");
 
 module.exports = (socket, io) => {
@@ -51,28 +52,16 @@ module.exports = (socket, io) => {
     });
 
     // Timecard
-    socket.on('timecard:clockIn', async ({ _id, image }, callback) => {
+    socket.on('timecard:clockIn', async (payload, callback) => {
         try {
-            const employee = await db.employee.findById(_id);
+            const { _id, image, station, location, method, ip, note } = payload;
 
-            if (!employee) return callback({ status: "error", message: "Employee not found" });
+            const date = dayjs().format("YYYY-MM-DD");
 
             const timecard = await db.timecard.create({
-                employee: _id,
-                date: new Date().toISOString().split('T')[0],
-                timeIn: new Date(),
-                timeInImage: image,
-            });
-
-            // update employee timecard status
-            await db.employee.updateOne({ _id }, {
-                $set: {
-                    timecard: {
-                        _id: timecard._id,
-                        date: timecard.date,
-                        status: "Clocked In",
-                    }
-                }
+                date: date,
+                employeeId: _id,
+                punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }]
             });
 
             callback({ status: "success", message: "Timecard created successfully", payload: timecard });
