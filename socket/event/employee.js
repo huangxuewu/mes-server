@@ -54,16 +54,7 @@ module.exports = (socket, io) => {
     // Timecard
     socket.on('timecard:clockIn', async (payload, callback) => {
         try {
-            const { _id, image, station, location, method, ip, note } = payload;
-
-            const date = dayjs().format("YYYY-MM-DD");
-
-            const timecard = await db.timecard.create({
-                date: date,
-                employeeId: _id,
-                punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }]
-            });
-
+            const timecard = await db.timecard.clockIn(payload);
             callback({ status: "success", message: "Timecard created successfully", payload: timecard });
 
         } catch (error) {
@@ -71,46 +62,28 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:clockOut', async ({ _id, image }, callback) => {
+    socket.on('timecard:clockOut', async (payload, callback) => {
         try {
-            const timecard = await db.timecard.findById(_id);
-
-            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
-
-            const updatedTimecard = await timecard.clockOut(image);
-
-            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
-
+            const timecard = await db.timecard.clockOut(payload);
+            callback({ status: "success", message: "Timecard clocked out successfully", payload: timecard });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
     });
 
-    socket.on('timecard:breakStart', async ({ _id, image }, callback) => {
+    socket.on('timecard:breakStart', async (payload, callback) => {
         try {
-            const timecard = await db.timecard.findById(_id);
-
-            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
-
-            const updatedTimecard = await timecard.breakStart(image);
-
-            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
-
+            const timecard = await db.timecard.breakStart(payload);
+            callback({ status: "success", message: "Timecard break started successfully", payload: timecard });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
     });
 
-    socket.on('timecard:breakEnd', async ({ _id, image }, callback) => {
+    socket.on('timecard:breakEnd', async (payload, callback) => {
         try {
-            const timecard = await db.timecard.findById(_id);
-
-            if (!timecard) return callback({ status: "error", message: "Timecard not found" });
-
-            const updatedTimecard = await timecard.breakEnd(image);
-
-            callback({ status: "success", message: "Timecard updated successfully", payload: updatedTimecard });
-
+            const timecard = await db.timecard.breakEnd(payload);
+            callback({ status: "success", message: "Timecard break ended successfully", payload: timecard });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

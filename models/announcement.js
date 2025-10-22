@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const database = require("../config/database");
 
 // Schema for tracking read status of announcements
 const readStatusSchema = new mongoose.Schema({
@@ -355,4 +356,6 @@ announcementSchema.pre('save', async function (next) {
     next();
 });
 
-module.exports = mongoose.model('Announcement', announcementSchema);
+const Announcement = database.model('announcement', announcementSchema, 'announcement');
+
+module.exports = Announcement;

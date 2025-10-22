@@ -28,7 +28,7 @@ const punchSchema = new mongoose.Schema({
     method: {
         type: String,
         enum: ["Manual", "Automatic", "Station"],
-        default: "Manual"
+        default: "Station"
     },
     ip: {
         type: String,
@@ -36,7 +36,13 @@ const punchSchema = new mongoose.Schema({
     },
     note: {
         type: String,
-        default: ""
+        default: "",
+        description: "Office note for the timecard"
+    },
+    status: {
+        type: String,
+        enum: ["Pending", "Approved", "Rejected"],
+        default: "Pending"
     }
 });
 
@@ -87,16 +93,144 @@ const timecardSchema = new mongoose.Schema({
     timestamps: true
 });
 
-timecardSchema.methods.clockIn = async function ({ image, station, location, method, ip, note }) {
-    const timecard = await this.model("timecard").findByIdAndUpdate(this._id, {
-        $push: {
-            punches: { type: "Clock In", time: new Date(), image, station, location, method, ip, note }
-        }
-    }, { new: true });
+timecardSchema.statics.clockIn = async function (payload) {
+    const { _id, image, station, location, method, ip, note } = payload;
+    const date = dayjs().format("YYYY-MM-DD");
+
+    const existingTimecard = await this.findOne({ employeeId: _id, date: date });
+
+    if (existingTimecard) {
+        existingTimecard.punches.push({ type: "Clock In", time: new Date(), image, station, location, method, ip, note });
+        const updatedTimecard = await existingTimecard.save();
+        return updatedTimecard;
+    }
+
+    const timecard = await this.create({
+        date: date,
+        employeeId: _id,
+        punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }]
+    });
+
     return timecard;
 }
 
+timecardSchema.statics.breakStart = async function (payload) {
+    const { _id, image, station, location, method, ip, note } = payload;
+    const timecard = await this.findById(_id);
+    if (timecard) {
+        timecard.punches.push({ type: "Break Start", time: new Date(), image, station, location, method, ip, note });
+        return await timecard.save();
+    }
+    return timecard;
+}
 
+timecardSchema.statics.breakEnd = async function (payload) {
+    const { _id, image, station, location, method, ip, note } = payload;
+    const timecard = await this.findById(_id);
+    if (timecard) {
+        timecard.punches.push({ type: "Break End", time: new Date(), image, station, location, method, ip, note });
+        return await timecard.save();
+    }
+    return timecard;
+}
+
+timecardSchema.statics.clockOut = async function (payload) {
+    const { _id, image, station, location, method, ip, note } = payload;
+    const timecard = await this.findById(_id);
+    if (timecard) {
+        timecard.punches.push({ type: "Clock Out", time: new Date(), image, station, location, method, ip, note });
+        return await timecard.save();
+    }
+    return timecard;
+}
+
+// Function to calculate timecard totals based on punches
+function calculateTimecardTotals(punches) {
+    let workMinutes = 0;
+    let breakMinutes = 0;
+    let grossMinutes = 0;
+    let overtimeMinutes = 0;
+
+    // Sort punches by time to ensure proper order
+    const sortedPunches = punches.sort((a, b) => new Date(a.time) - new Date(b.time));
+    
+    let clockInTime = null;
+    let breakStartTime = null;
+    let totalWorkTime = 0;
+    let totalBreakTime = 0;
+
+    for (const punch of sortedPunches) {
+        switch (punch.type) {
+            case "Clock In":
+                clockInTime = new Date(punch.time);
+                break;
+            case "Clock Out":
+                if (clockInTime) {
+                    const workSession = new Date(punch.time) - clockInTime;
+                    totalWorkTime += workSession;
+                    clockInTime = null;
+                }
+                break;
+            case "Break Start":
+                if (clockInTime) {
+                    const workSession = new Date(punch.time) - clockInTime;
+                    totalWorkTime += workSession;
+                    breakStartTime = new Date(punch.time);
+                    clockInTime = null;
+                }
+                break;
+            case "Break End":
+                if (breakStartTime) {
+                    const breakSession = new Date(punch.time) - breakStartTime;
+                    totalBreakTime += breakSession;
+                    clockInTime = new Date(punch.time);
+                    breakStartTime = null;
+                }
+                break;
+        }
+    }
+
+    // Convert milliseconds to minutes
+    workMinutes = Math.round(totalWorkTime / (1000 * 60));
+    breakMinutes = Math.round(totalBreakTime / (1000 * 60));
+    
+    // Gross minutes = work minutes + break minutes (if breaks are paid)
+    grossMinutes = workMinutes + breakMinutes;
+    
+    // Calculate overtime (assuming 8 hours = 480 minutes is regular time)
+    const regularWorkMinutes = 480;
+    if (workMinutes > regularWorkMinutes) {
+        overtimeMinutes = workMinutes - regularWorkMinutes;
+    }
+
+    return {
+        workMinutes,
+        breakMinutes,
+        grossMinutes,
+        overtimeMinutes
+    };
+}
+
+// Pre-save hook to automatically calculate totals
+timecardSchema.pre('save', function(next) {
+    if (this.punches && this.punches.length > 0) {
+        const totals = calculateTimecardTotals(this.punches);
+        this.totals = totals;
+    }
+    next();
+});
+
+// Pre-update hook for findOneAndUpdate operations
+timecardSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function(next) {
+    // Get the updated document to recalculate totals
+    this.findOne(this.getQuery()).then((doc) => {
+        if (doc && doc.punches && doc.punches.length > 0) {
+            const totals = calculateTimecardTotals(doc.punches);
+            this.set({ totals });
+        }
+        next();
+    }).catch(next);
+});
 
 const Timecard = database.model("timecard", timecardSchema, 'timecard');
 
