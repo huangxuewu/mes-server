@@ -105,13 +105,6 @@ const documentLinksSchema = new Schema({
     "Employment Authorization Document (List C)": { type: String }
 }, { _id: false });
 
-const timecardSchema = new Schema({
-    _id: { type: mongoose.Schema.Types.ObjectId, ref: "timecard" },
-    date: { type: String },
-    status: { type: String, enum: ["Clocked In", "Clocked Out", "On Break", "Absent", "Leave", "PTO", "Holiday", "Off Day", ""], default: "" },
-    disabled: { type: Boolean, default: false }
-});
-
 const employeeSchema = new Schema({
     portrait: { type: String }, // url
     displayName: { type: String, trim: true },
@@ -128,7 +121,7 @@ const employeeSchema = new Schema({
     employment: employmentSchema,
     documents: documentLinksSchema,
     workHistory: [workHistorySchema],
-    timecard: timecardSchema,
+    isDeleted: { type: Boolean, default: false },
     status: { type: String, enum: ["Draft", "Pending", "Probation", "Active", "Inactive"], default: "Draft" }
 }, { timestamps: true });
 
