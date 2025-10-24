@@ -39,8 +39,7 @@ const topicSchema = new mongoose.Schema({
     lastMessage: {
         content: String,
         by: mongoose.Schema.Types.Mixed,
-        at: Date.now()
-
+        at: Date
     },
     isDeleted: {
         type: Boolean,
