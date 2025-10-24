@@ -4,6 +4,13 @@ module.exports = (socket, io) => {
 
     socket.on("topic:create", async (data, callback) => {
         try {
+            // push dummy data
+            data.lastMessage = {
+                content: `${data.participants.length} participants joined the topic`,
+                by: "System",
+                at: new Date()
+            }
+
             await db.topic.create(data);
             callback({ status: "success", message: "Topic created successfully" });
         } catch (error) {
@@ -14,7 +21,8 @@ module.exports = (socket, io) => {
     socket.on("topic:update", async (data, callback) => {
 
         try {
-            await db.topic.updateOne({ _id: data._id }, { $set: data });
+            const { _id, ...rest } = data;
+            await db.topic.updateOne({ _id: _id }, { $set: rest });
             callback({ status: "success", message: "Topic updated successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -40,7 +48,7 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("topics:get", async (data, callback) => {
+    socket.on("topic:fetch", async (data, callback) => {
 
         try {
             const topics = await db.topic.find(data);

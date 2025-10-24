@@ -21,6 +21,10 @@ const userSchema = new mongoose.Schema({
         update: [String],
         remove: [String],
         view: [String],
+    },
+    group: {
+        type: String,
+        description: "Group of users"
     }
 });
 
