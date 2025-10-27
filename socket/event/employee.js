@@ -99,8 +99,14 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:update', (data) => {
-        console.log(data);
+    socket.on('timecard:update', async (data, callback) => {
+        try {
+            const { _id, ...rest } = data;
+            const timecard = await db.timecard.findByIdAndUpdate({ _id }, { $set: rest }, { new: true });
+            callback({ status: "success", message: "Timecard updated successfully", payload: timecard });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
     });
 
     socket.on('timecard:delete', (data) => {

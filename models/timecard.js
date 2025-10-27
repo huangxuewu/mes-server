@@ -46,6 +46,18 @@ const punchSchema = new mongoose.Schema({
     }
 });
 
+const auditLogSchema = new mongoose.Schema({
+    punchId: { type: mongoose.Schema.Types.ObjectId },
+    action: { type: String, default: null, enum: ["create", "update", "delete", "approve", "reject"] },
+    changes: [{
+        field: { type: String, default: null },
+        oldValue: { type: String, default: null },
+        newValue: { type: String, default: null },
+    }],
+    createdAt: { type: Date, default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', default: null },
+});
+
 const timecardSchema = new mongoose.Schema({
     employeeId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -57,6 +69,7 @@ const timecardSchema = new mongoose.Schema({
         default: () => dayjs().format("YYYY-MM-DD")
     },
     punches: [punchSchema],
+    audits: [auditLogSchema],
     totals: {
         workMinutes: {
             type: Number,
@@ -153,7 +166,7 @@ function calculateTimecardTotals(punches) {
 
     // Sort punches by time to ensure proper order
     const sortedPunches = punches.sort((a, b) => new Date(a.time) - new Date(b.time));
-    
+
     let clockInTime = null;
     let breakStartTime = null;
     let totalWorkTime = 0;
@@ -193,10 +206,10 @@ function calculateTimecardTotals(punches) {
     // Convert milliseconds to minutes
     workMinutes = Math.round(totalWorkTime / (1000 * 60));
     breakMinutes = Math.round(totalBreakTime / (1000 * 60));
-    
+
     // Gross minutes = work minutes + break minutes (if breaks are paid)
     grossMinutes = workMinutes + breakMinutes;
-    
+
     // Calculate overtime (assuming 8 hours = 480 minutes is regular time)
     const regularWorkMinutes = 480;
     if (workMinutes > regularWorkMinutes) {
@@ -212,7 +225,7 @@ function calculateTimecardTotals(punches) {
 }
 
 // Pre-save hook to automatically calculate totals
-timecardSchema.pre('save', function(next) {
+timecardSchema.pre('save', function (next) {
     if (this.punches && this.punches.length > 0) {
         const totals = calculateTimecardTotals(this.punches);
         this.totals = totals;
@@ -220,17 +233,13 @@ timecardSchema.pre('save', function(next) {
     next();
 });
 
-// Pre-update hook for findOneAndUpdate operations
-timecardSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function(next) {
-    // Get the updated document to recalculate totals
-    this.findOne(this.getQuery()).then((doc) => {
-        if (doc && doc.punches && doc.punches.length > 0) {
-            const totals = calculateTimecardTotals(doc.punches);
-            this.set({ totals });
-        }
-        next();
-    }).catch(next);
-});
+// Helper method to recalculate and update totals
+timecardSchema.methods.recalculateTotals = function () {
+    if (this.punches && this.punches.length > 0) {
+        this.totals = calculateTimecardTotals(this.punches);
+    }
+    return this;
+};
 
 const Timecard = database.model("timecard", timecardSchema, 'timecard');
 
