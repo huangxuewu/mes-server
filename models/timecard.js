@@ -69,7 +69,7 @@ const timecardSchema = new mongoose.Schema({
         default: () => dayjs().format("YYYY-MM-DD")
     },
     punches: [punchSchema],
-    audits: [auditLogSchema],
+    auditLog: [auditLogSchema],
     totals: {
         workMinutes: {
             type: Number,
@@ -121,7 +121,8 @@ timecardSchema.statics.clockIn = async function (payload) {
     const timecard = await this.create({
         date: date,
         employeeId: _id,
-        punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }]
+        auditLog: [],
+        punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }],
     });
 
     return timecard;

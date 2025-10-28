@@ -106,10 +106,39 @@ const documentLinksSchema = new Schema({
 }, { _id: false });
 
 const employeeSchema = new Schema({
-    portrait: { type: String }, // url
-    displayName: { type: String, trim: true },
-    firstName: { type: String, required: true, trim: true },
-    lastName: { type: String, required: true, trim: true },
+    portrait: {
+        type: String,
+        description: "Employee portrait image url served from dropbox"
+    },
+    displayName: {
+        type: String,
+        trim: true,
+        set: function (value) {
+            return typeof value === 'string'
+                ? value.toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
+                : value;
+        }
+    },
+    firstName: {
+        type: String,
+        required: true,
+        trim: true,
+        set: function (value) {
+            return typeof value === 'string'
+                ? value.toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
+                : value;
+        }
+    },
+    lastName: {
+        type: String,
+        required: true,
+        trim: true,
+        set: function (value) {
+            return typeof value === 'string'
+                ? value.toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
+                : value;
+        }
+    },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
     skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", ""], default: "Junior" },
