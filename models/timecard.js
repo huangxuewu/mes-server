@@ -225,9 +225,11 @@ function calculateTimecardTotals(punches) {
     };
 }
 
-// Pre-save hook to automatically calculate totals
+// Pre-save hook to automatically calculate totals and sort punches by time
 timecardSchema.pre('save', function (next) {
     if (this.punches && this.punches.length > 0) {
+        // Sort punches by time to ensure they're always in chronological order
+        this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
         const totals = calculateTimecardTotals(this.punches);
         this.totals = totals;
     }
