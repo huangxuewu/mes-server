@@ -158,6 +158,28 @@ timecardSchema.statics.clockOut = async function (payload) {
     return timecard;
 }
 
+timecardSchema.statics.supplement = async function (payload) {
+    const { date, employeeId, punches, station, location, method = 'Manual', ip, note } = payload;
+
+    const timecard = await this.create({
+        date,
+        employeeId,
+        auditLog: [],
+        punches: punches.map(punch => ({
+            type: punch.type,
+            time: new Date(punch.time),
+            image: null,
+            station: station,
+            location: location,
+            method: method,
+            note: note,
+            ip: ip,
+        })),
+    });
+
+    return timecard;
+}
+
 // Function to calculate timecard totals based on punches
 function calculateTimecardTotals(punches) {
     let workMinutes = 0;

@@ -99,6 +99,16 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on('timecard:create', async (payload, callback) => {
+        try {
+            const timecard = await db.timecard.supplement(payload);
+
+            callback({ status: "success", message: "Timecard created successfully", payload: timecard });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
     socket.on('timecard:update', async (data, callback) => {
         try {
             const { _id, ...rest } = data;
