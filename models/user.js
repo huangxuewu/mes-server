@@ -16,6 +16,7 @@ const userSchema = new mongoose.Schema({
         default: "Active"
     },
     permission: {
+        module: [String],
         access: [String],
         create: [String],
         update: [String],
