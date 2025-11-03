@@ -93,4 +93,22 @@ module.exports = (socket, io) => {
             callback({ status: "error", message: error.message });
         }
     });
+
+    socket.on("message:delete", async (data, callback) => {
+        try {
+            await db.message.deleteOne({ _id: data._id });
+            callback({ status: "success", message: "Message deleted successfully" });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+    
+    socket.on("message:fetch", async (query, callback) => {
+        try {
+            const messages = await db.message.find(query);
+            callback({ status: "success", message: "Messages fetched successfully", payload: messages });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
 }

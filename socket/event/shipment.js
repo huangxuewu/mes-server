@@ -42,7 +42,7 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:query", async (query, callback) => {
         try {
-            const shipment = await db.outbound.findOne(query).lean();
+            const shipment = await db.outbound.find(query).lean();
 
             callback?.({ status: "success", message: "Outbound shipment fetched successfully", payload: shipment });
         } catch (error) {
@@ -52,13 +52,21 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:get", async (query, callback) => {
         try {
-            const shipments = await db.outbound.find(query).lean();
+            const shipments = await db.outbound.findOne(query).lean();
             callback?.({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     })
 
+    socket.on("outbound:aggregate", async (query, callback) => {
+        try {
+            const counts = await db.outbound.aggregate(query);
+            callback?.({ status: "success", message: "Outbound shipment count fetched successfully", payload: counts });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
 
     socket.on("outbound:complete", async (payload, callback) => {
         try {

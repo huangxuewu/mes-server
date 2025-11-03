@@ -1,4 +1,5 @@
 const dayjs = require("dayjs");
+const crypto = require("crypto");
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
@@ -54,6 +55,7 @@ const auditLogSchema = new mongoose.Schema({
         oldValue: { type: String, default: null },
         newValue: { type: String, default: null },
     }],
+    reason: { type: String, default: "" },
     createdAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', default: null },
 });
@@ -101,7 +103,17 @@ const timecardSchema = new mongoose.Schema({
     status: { type: String, enum: ['Draft', 'Pending', 'Approved', 'Rejected'], default: 'Pending' },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user' }
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user' },
+    previousHash: {
+        type: String,
+        default: null,
+        description: "Hash of the previous timecard record in the chain"
+    },
+    currentHash: {
+        type: String,
+        default: null,
+        description: "Hash of the current timecard record"
+    }
 }, {
     timestamps: true
 });
@@ -180,6 +192,44 @@ timecardSchema.statics.supplement = async function (payload) {
     return timecard;
 }
 
+// Function to calculate hash for timecard data integrity
+function calculateTimecardHash(timecard) {
+    // Create a string representation of all critical fields that shouldn't be modified
+    const hashData = {
+        employeeId: timecard.employeeId?.toString() || '',
+        date: timecard.date || '',
+        punches: (timecard.punches || []).map(punch => ({
+            type: punch.type,
+            time: punch.time?.toISOString() || '',
+            image: punch.image || '',
+            station: punch.station || '',
+            location: punch.location || '',
+            method: punch.method || '',
+            ip: punch.ip || '',
+            note: punch.note || '',
+            status: punch.status || ''
+        })),
+        totals: {
+            workMinutes: timecard.totals?.workMinutes || 0,
+            breakMinutes: timecard.totals?.breakMinutes || 0,
+            grossMinutes: timecard.totals?.grossMinutes || 0,
+            overtimeMinutes: timecard.totals?.overtimeMinutes || 0
+        },
+        previousHash: timecard.previousHash || '',
+        createdAt: timecard.createdAt?.toISOString() || '',
+        policyVersion: timecard.policyVersion || '',
+        rules: {
+            paidBreak: timecard.rules?.paidBreak || false
+        }
+    };
+    
+    // Create a deterministic JSON string (sorted keys)
+    const hashString = JSON.stringify(hashData, Object.keys(hashData).sort());
+    
+    // Generate SHA-256 hash
+    return crypto.createHash('sha256').update(hashString).digest('hex');
+}
+
 // Function to calculate timecard totals based on punches
 function calculateTimecardTotals(punches) {
     let workMinutes = 0;
@@ -247,15 +297,67 @@ function calculateTimecardTotals(punches) {
     };
 }
 
-// Pre-save hook to automatically calculate totals and sort punches by time
-timecardSchema.pre('save', function (next) {
-    if (this.punches && this.punches.length > 0) {
-        // Sort punches by time to ensure they're always in chronological order
-        this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
-        const totals = calculateTimecardTotals(this.punches);
-        this.totals = totals;
+// Pre-save hook to automatically calculate totals, sort punches, and maintain hash chain
+timecardSchema.pre('save', async function (next) {
+    try {
+        if (this.punches && this.punches.length > 0) {
+            // Sort punches by time to ensure they're always in chronological order
+            this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
+            const totals = calculateTimecardTotals(this.punches);
+            this.totals = totals;
+        }
+
+        // Maintain hash chain
+        // If this is a new document (not updating), get the previous timecard in the chain
+        if (this.isNew || !this.currentHash) {
+            // Find the most recent timecard for this employee, ordered by date then creation time
+            const previousTimecard = await this.constructor
+                .findOne({
+                    employeeId: this.employeeId,
+                    _id: { $ne: this._id }
+                })
+                .sort({ date: -1, createdAt: -1 })
+                .exec();
+
+            // Set previousHash from the most recent timecard's currentHash
+            if (previousTimecard && previousTimecard.currentHash) {
+                this.previousHash = previousTimecard.currentHash;
+            } else {
+                // This is the first timecard for this employee
+                this.previousHash = null;
+            }
+        }
+        // If updating an existing document, previousHash should remain unchanged
+        // (it was set when the document was first created)
+
+        // Calculate currentHash based on current data
+        this.currentHash = calculateTimecardHash(this);
+
+        next();
+    } catch (error) {
+        next(error);
     }
-    next();
+});
+
+// Post-update hook to recalculate hash when timecard is updated via findByIdAndUpdate
+// This ensures hash chain is maintained even when using direct MongoDB updates
+timecardSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (doc) {
+    try {
+        if (doc) {
+            // Recalculate totals if punches exist
+            if (doc.punches && doc.punches.length > 0) {
+                doc.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
+                const totals = calculateTimecardTotals(doc.punches);
+                doc.totals = totals;
+            }
+            
+            // Recalculate hash (previousHash should remain unchanged on updates)
+            doc.currentHash = calculateTimecardHash(doc);
+            await doc.save();
+        }
+    } catch (error) {
+        console.error('Error in post-update hook for hash chain:', error);
+    }
 });
 
 // Helper method to recalculate and update totals
@@ -264,6 +366,87 @@ timecardSchema.methods.recalculateTotals = function () {
         this.totals = calculateTimecardTotals(this.punches);
     }
     return this;
+};
+
+// Method to verify the integrity of the current timecard
+timecardSchema.methods.verifyIntegrity = function () {
+    const calculatedHash = calculateTimecardHash(this);
+    const isHashValid = calculatedHash === this.currentHash;
+    
+    return {
+        isValid: isHashValid,
+        calculatedHash: calculatedHash,
+        storedHash: this.currentHash,
+        message: isHashValid 
+            ? 'Timecard hash is valid' 
+            : 'Timecard hash mismatch - data may have been tampered with'
+    };
+};
+
+// Static method to verify hash chain integrity for an employee
+timecardSchema.statics.verifyChainIntegrity = async function (employeeId) {
+    try {
+        // Get all timecards for this employee, ordered chronologically
+        const timecards = await this.find({ employeeId })
+            .sort({ date: 1, createdAt: 1 })
+            .exec();
+
+        if (timecards.length === 0) {
+            return {
+                isValid: true,
+                message: 'No timecards found for this employee',
+                timecardsChecked: 0,
+                violations: []
+            };
+        }
+
+        const violations = [];
+        let previousHash = null;
+
+        for (let i = 0; i < timecards.length; i++) {
+            const timecard = timecards[i];
+            
+            // Verify current hash
+            const integrityCheck = timecard.verifyIntegrity();
+            if (!integrityCheck.isValid) {
+                violations.push({
+                    timecardId: timecard._id,
+                    date: timecard.date,
+                    issue: 'Hash mismatch',
+                    details: integrityCheck.message
+                });
+            }
+
+            // Verify chain link
+            if (previousHash !== null && timecard.previousHash !== previousHash) {
+                violations.push({
+                    timecardId: timecard._id,
+                    date: timecard.date,
+                    issue: 'Chain broken',
+                    details: `Expected previousHash: ${previousHash}, Found: ${timecard.previousHash}`
+                });
+            }
+
+            previousHash = timecard.currentHash;
+        }
+
+        return {
+            isValid: violations.length === 0,
+            message: violations.length === 0 
+                ? 'Hash chain integrity verified' 
+                : `Found ${violations.length} integrity violation(s)`,
+            timecardsChecked: timecards.length,
+            violations: violations
+        };
+    } catch (error) {
+        return {
+            isValid: false,
+            message: `Error verifying chain integrity: ${error.message}`,
+            timecardsChecked: 0,
+            violations: [],
+            error: error.message
+        };
+    }
 };
 
 const Timecard = database.model("timecard", timecardSchema, 'timecard');

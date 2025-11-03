@@ -135,11 +135,13 @@ Outbound.hooks.pre("save", async function (next) {
 
             if (hasCompletedLoad) {
                 // Update corresponding order buyers to done = true
-                // This will trigger the existing order completion logic in the order model
-                await this.model('order').updateMany(
+                const Order = this.model('order');
+                await Order.updateMany(
                     { "buyers.poNumber": this.poNumber },
                     { $set: { "buyers.$.done": true } }
                 );
+                // Check and update order status if all buyers are done
+                await Order.checkOrderStatusByBuyerPO(this.poNumber);
             }
         } catch (error) {
             console.error('Error in outbound pre-save hook:', error);

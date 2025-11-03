@@ -90,24 +90,61 @@ orderSchema.statics.updateShipmentStatus = async function (shipment) {
     for (const load of loads) {
         if (!["Picked Up", "Completed"].includes(load.status)) continue;
 
+        // Update buyers to done
         await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
+        
+        // Check and update order status for affected orders
+        await this.checkOrderStatusByBuyerPO(poNumber);
     }
 }
 
-const Order = database.model("order", orderSchema, 'order');
-
-Order.hooks.pre("save", async function (next) {
-    if (this.isModified('buyers')) {
-        const allDone = this.buyers.every(buyer => buyer.done);
-
-        if (allDone) {
-            this.orderStatus = "Completed";
-            this.fulfilledAt = new Date();
+// Helper function to check and update order status
+const checkAndUpdateOrderStatus = async function(orderId, Model) {
+    const order = await Model.findById(orderId);
+    if (order && order.buyers && order.buyers.length > 0) {
+        const allDone = order.buyers.every(buyer => buyer.done);
+        if (allDone && order.orderStatus !== "Completed") {
+            await Model.findByIdAndUpdate(orderId, {
+                $set: {
+                    orderStatus: "Completed",
+                    fulfilledAt: order.fulfilledAt || new Date()
+                }
+            });
         }
-
-        next();
     }
+}
+
+// Static method to check and update order status for orders matching a buyer PO number
+orderSchema.statics.checkOrderStatusByBuyerPO = async function(poNumber) {
+    const affectedOrders = await this.find({ "buyers.poNumber": poNumber });
+    for (const order of affectedOrders) {
+        await checkAndUpdateOrderStatus(order._id, this);
+    }
+}
+
+// Pre-save hook (for save() operations)
+orderSchema.pre("save", async function (next) {
+    // Check if all buyers are done on every save/update
+    if (this.buyers && this.buyers.length > 0) {
+        const allDone = this.buyers.every(buyer => buyer.done);
+        console.log(allDone, this.orderStatus);
+        if (allDone && this.orderStatus !== "Completed") {
+            this.orderStatus = "Completed";
+            if (!this.fulfilledAt) {
+                this.fulfilledAt = new Date();
+            }
+        }
+    }
+
+    next();
 })
+
+// Post hook for findOneAndUpdate, findByIdAndUpdate
+orderSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (doc) {
+    if (doc) await checkAndUpdateOrderStatus(doc._id, this.model);
+})
+
+const Order = database.model("order", orderSchema, 'order');
 
 Order.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
