@@ -41,6 +41,10 @@ const topicSchema = new mongoose.Schema({
         by: mongoose.Schema.Types.Mixed,
         at: Date
     },
+    deadline: {
+        type: String,
+        description: "Deadline date YYYY-MM-DD for the topic primary task"
+    },
     isDeleted: {
         type: Boolean,
         default: false
