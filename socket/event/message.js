@@ -60,7 +60,9 @@ module.exports = (socket, io) => {
 
     socket.on("message:create", async (data, callback) => {
         try {
-            await db.message.create(data);
+            const message = await db.message.create(data);
+            const lastMessage = { content: message.content, by: message.authorId, at: message.createdAt };
+            await db.topic.updateOne({ _id: message.topicId }, { $set: { lastMessage } });
             callback({ status: "success", message: "Message created successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -102,7 +104,7 @@ module.exports = (socket, io) => {
             callback({ status: "error", message: error.message });
         }
     });
-    
+
     socket.on("message:fetch", async (query, callback) => {
         try {
             const messages = await db.message.find(query);
