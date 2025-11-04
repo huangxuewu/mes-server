@@ -10,9 +10,10 @@ module.exports = (socket, io) => {
         }
     })
 
-    socket.on("user:update", async (data, callback) => {
+    socket.on("user:update", async (payload, callback) => {
         try {
-            await db.user.updateOne({ _id: data._id }, { $set: data });
+            const { _id, ...update } = payload;
+            await db.user.updateOne({ _id }, { $set: update });
             callback({ status: "success", message: "User updated successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });

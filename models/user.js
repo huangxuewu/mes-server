@@ -29,4 +29,20 @@ const userSchema = new mongoose.Schema({
     }
 });
 
-module.exports = database.model("user", userSchema, 'user');
+const User = database.model("User", userSchema, "user");
+
+User.watch([], { fullDocument: "updateLookup" })
+    .on("change", (change) => {
+        switch (change.operationType) {
+            case "insert":
+            case "update":
+            case "replace":
+                io.emit("user:update", change.fullDocument);
+                break;
+            case "delete":
+                io.emit("user:delete", change.documentKey._id);
+                break;
+        }
+    });
+
+module.exports = User;
