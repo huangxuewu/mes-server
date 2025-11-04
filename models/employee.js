@@ -141,7 +141,7 @@ const employeeSchema = new Schema({
     },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
-    skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive", ""], default: "Junior" },
+    skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive"], default: "Junior" },
     role: { type: String },
     pin: { type: String },
     personal: personalSchema,
@@ -162,19 +162,6 @@ employeeSchema.virtual("fullName").get(function () {
 employeeSchema.virtual("age").get(function () {
     return new Date().getFullYear() - this.dob.getFullYear();
 });
-
-employeeSchema.methods.clockIn = async function (timecardId) {
-    const employee = await this.model("employee").findByIdAndUpdate(this._id, {
-        timecard: {
-            _id: timecardId,
-            date: new Date().toISOString().split('T')[0],
-            status: "Clocked In",
-            disabled: false
-        }
-    }, { new: true });
-
-    return employee;
-}
 
 const Employee = database.model("employee", employeeSchema, 'employee');
 
