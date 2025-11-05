@@ -10,6 +10,7 @@ const attachmentSchema = new mongoose.Schema({
 })
 
 const messageSchema = new mongoose.Schema({
+    from: { type: String, enum: ["User", "System", "AI"], required: true },
     topicId: { type: mongoose.Schema.Types.ObjectId, ref: "Topic", required: true },
     content: { type: mongoose.Schema.Types.Mixed, required: true },
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
