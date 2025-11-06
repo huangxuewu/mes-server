@@ -21,6 +21,7 @@ const userSchema = new mongoose.Schema({
         create: [String],
         update: [String],
         remove: [String],
+        audit: [String],
         view: [String],
     },
     group: {
