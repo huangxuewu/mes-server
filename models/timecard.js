@@ -102,7 +102,14 @@ const timecardSchema = new mongoose.Schema({
     },
     overtime: {
         approvedMinutes: { type: Number, default: 0 },
-        approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', default: null },
+        approvedBy: { 
+            type: mongoose.Schema.Types.ObjectId, 
+            ref: 'user', 
+            default: null,
+            set: function(v) {
+                return v === "" ? null : v;
+            }
+        },
         approvedAt: { type: Date, default: null },
         reason: { type: String, default: "" },
         status: { type: String, enum: ["Pending", "Approved", "Rejected"], default: "Pending" },
