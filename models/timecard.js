@@ -100,6 +100,13 @@ const timecardSchema = new mongoose.Schema({
         },
 
     },
+    overtime: {
+        approvedMinutes: { type: Number, default: 0 },
+        approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'user', default: null },
+        approvedAt: { type: Date, default: null },
+        reason: { type: String, default: "" },
+        status: { type: String, enum: ["Pending", "Approved", "Rejected"], default: "Pending" },
+    },
     status: { type: String, enum: ['Draft', 'Pending', 'Approved', 'Rejected'], default: 'Pending' },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
@@ -222,10 +229,10 @@ function calculateTimecardHash(timecard) {
             paidBreak: timecard.rules?.paidBreak || false
         }
     };
-    
+
     // Create a deterministic JSON string (sorted keys)
     const hashString = JSON.stringify(hashData, Object.keys(hashData).sort());
-    
+
     // Generate SHA-256 hash
     return crypto.createHash('sha256').update(hashString).digest('hex');
 }
@@ -350,7 +357,7 @@ timecardSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (d
                 const totals = calculateTimecardTotals(doc.punches);
                 doc.totals = totals;
             }
-            
+
             // Recalculate hash (previousHash should remain unchanged on updates)
             doc.currentHash = calculateTimecardHash(doc);
             await doc.save();
@@ -372,13 +379,13 @@ timecardSchema.methods.recalculateTotals = function () {
 timecardSchema.methods.verifyIntegrity = function () {
     const calculatedHash = calculateTimecardHash(this);
     const isHashValid = calculatedHash === this.currentHash;
-    
+
     return {
         isValid: isHashValid,
         calculatedHash: calculatedHash,
         storedHash: this.currentHash,
-        message: isHashValid 
-            ? 'Timecard hash is valid' 
+        message: isHashValid
+            ? 'Timecard hash is valid'
             : 'Timecard hash mismatch - data may have been tampered with'
     };
 };
@@ -405,7 +412,7 @@ timecardSchema.statics.verifyChainIntegrity = async function (employeeId) {
 
         for (let i = 0; i < timecards.length; i++) {
             const timecard = timecards[i];
-            
+
             // Verify current hash
             const integrityCheck = timecard.verifyIntegrity();
             if (!integrityCheck.isValid) {
@@ -432,8 +439,8 @@ timecardSchema.statics.verifyChainIntegrity = async function (employeeId) {
 
         return {
             isValid: violations.length === 0,
-            message: violations.length === 0 
-                ? 'Hash chain integrity verified' 
+            message: violations.length === 0
+                ? 'Hash chain integrity verified'
                 : `Found ${violations.length} integrity violation(s)`,
             timecardsChecked: timecards.length,
             violations: violations

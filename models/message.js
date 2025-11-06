@@ -3,14 +3,20 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const attachmentSchema = new mongoose.Schema({
-    type: { type: String, enum: ["image", "video", "audio", "document", "other"], required: true },
+    type: { type: String, enum: ["Image", "Video", "Audio", "Document", "Other"], required: true },
     url: { type: String, required: true },
+    size: { type: Number, required: true },
     filename: { type: String, required: true },
-    size: { type: Number, required: true }
 })
 
 const messageSchema = new mongoose.Schema({
-    from: { type: String, enum: ["User", "System", "AI"], required: true },
+    type: {
+        type: String,
+        enum: ["Text", "Todo", "Poll"],
+        required: true,
+        default: "Text"
+    },
+    from: { type: String, enum: ["User", "System", "AI"], required: true, default: "User" },
     topicId: { type: mongoose.Schema.Types.ObjectId, ref: "Topic", required: true },
     content: { type: mongoose.Schema.Types.Mixed, required: true },
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
