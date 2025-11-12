@@ -1,4 +1,5 @@
 const db = require("../../models");
+const mongoose = require("mongoose");
 
 module.exports = (socket, io) => {
     socket.on('line:create', async (data, callback) => {
@@ -12,6 +13,16 @@ module.exports = (socket, io) => {
     socket.on('line:update', async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
+
+            // documents, machines, tools, qualifiedWorkers are array of ObjectIds
+            data.steps.forEach(step => {
+                ['documents', 'machines', 'tools', 'qualifiedWorkers'].forEach(field => {
+                    if (Array.isArray(step[field])) {
+                        step[field] = step[field].map(id => new mongoose.Types.ObjectId(`${id}`));
+                    }
+                })
+            });
+
             const line = await db.line.findByIdAndUpdate(_id, { $set: data }, { new: true });
             callback({ status: "success", message: "Line updated successfully", payload: line })
 

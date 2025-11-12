@@ -64,9 +64,9 @@ const lineSchema = new mongoose.Schema({
         type: Number,
         default: 85
     },
-    products: [],             // products that can be produced on this line
+    products: [],                       // products that can be produced on this line
     steps: [stepsSchema],               // steps to produce a product
-    maintenanceSchedule: [],  // maintenance schedule for this line
+    maintenanceSchedule: [],            // maintenance schedule for this line
     status: {
         code: Number,
         updatedAt: Date
