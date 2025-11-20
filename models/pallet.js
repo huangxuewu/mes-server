@@ -12,33 +12,42 @@ const palletSchema = new mongoose.Schema({
     _id: {
         type: String,
     },
+    date: {
+        type: String,
+    },
+    time: {
+        type: Date
+    },
+    lotNumber: {
+        type: String,
+    },
     productId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Product",
         required: true,
     },
-    tare: {
-        type: Number,
-        default: 0,
-    },
-    weight: {
-        type: Number,
-        default: 0,
-    },
-    count: {
-        type: Number,
-        default: 0,
-    },
-    location: {
+    styleCode: {
         type: String,
     },
-    operator: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
+    letterCode: {
+        type: String,
+    },
+    productName: {
+        type: String,
+    },
+    boxesPerPallet: {
+        type: Number,
+    },
+    bagsPerBox: {
+        type: Number,
+    },
+    pillowsPerBag: {
+        type: Number,
     },
     trace: [traceSchema],
     status: {
         type: String,
+        default: "Pending"
     }
 }, {
     _id: false,

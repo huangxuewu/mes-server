@@ -97,6 +97,10 @@ const productSchema = new mongoose.Schema({
     upc: { type: String, index: true },
     sku: { type: String, index: true, unique: true, sparse: true },
     barcode: String,
+    letterCode: {
+        type: String,
+        default: ""
+    },
     styleName: { type: String, index: true },
     styleColor: String,
     styleSize: String,
