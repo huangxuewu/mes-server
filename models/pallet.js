@@ -50,7 +50,13 @@ const palletSchema = new mongoose.Schema({
         type: Number,
     },
     trace: [traceSchema],
-    operator: String,
+    printedBy: {
+        type: String
+    },
+    printedAt: {
+        type: Date,
+        default: () => Date.now()
+    },
     status: {
         type: String,
         default: "Pending"
