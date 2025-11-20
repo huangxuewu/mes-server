@@ -21,6 +21,11 @@ const palletSchema = new mongoose.Schema({
     lotNumber: {
         type: String,
     },
+    category: {
+        type: String,
+        enum: ['Finished Goods', 'Raw Materials', 'Tools', 'Accessories', 'Other'],
+        default: 'Finished Goods',
+    },
     productId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Product",
