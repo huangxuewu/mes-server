@@ -102,17 +102,26 @@ const timecardSchema = new mongoose.Schema({
     },
     overtime: {
         approvedMinutes: { type: Number, default: 0 },
-        approvedBy: { 
-            type: mongoose.Schema.Types.ObjectId, 
-            ref: 'user', 
+        approvedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'user',
             default: null,
-            set: function(v) {
+            set: function (v) {
                 return v === "" ? null : v;
             }
         },
         approvedAt: { type: Date, default: null },
         reason: { type: String, default: "" },
         status: { type: String, enum: ["Pending", "Approved", "Rejected"], default: "Pending" },
+        // selected range
+        selectedEarlyRange: {
+            start: { type: Date, default: null },
+            end: { type: Date, default: null },
+        },
+        selectedLateRange: {
+            start: { type: Date, default: null },
+            end: { type: Date, default: null },
+        }
     },
     status: { type: String, enum: ['Draft', 'Pending', 'Approved', 'Rejected'], default: 'Pending' },
     isDeleted: { type: Boolean, default: false },
