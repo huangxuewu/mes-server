@@ -119,10 +119,10 @@ metasheets.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("metasheets:update", change.fullDocument);
+                io.emit("metasheet:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("metasheets:delete", change.fullDocument);
+                io.emit("metasheet:delete", change.documentKey._id);
                 break;
         }
     });
