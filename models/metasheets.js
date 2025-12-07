@@ -12,7 +12,7 @@ const metasheetsSchema = new mongoose.Schema({
             'MATERIAL_RAW',
             'MATERIAL_PACKAGING',
             'MATERIAL_ACCESSORY',
-            'TOOL'
+            'TOOL_GENERIC'
         ],
         description: "Unique business identifier for the metasheet"
     },
