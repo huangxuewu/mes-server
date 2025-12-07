@@ -7,8 +7,8 @@ module.exports = (socket, io) => {
         const models = {
             'finishedGoods': db.finishedGoods,
             'rawMaterials': db.rawMaterials,
+            'accessories': db.accessories,
             'tools': db.tools,
-            'accessories': db.accessories
         };
         return models[type];
     }
