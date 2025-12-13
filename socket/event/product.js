@@ -38,13 +38,10 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('products:get', async (query, callback) => {
+    socket.on('product:fetch', async (query, callback) => {
         try {
-            db.product.find(query).then(products => {
-                callback({ status: "success", message: "Products fetched successfully", payload: products })
-            }).catch(error => {
-                callback({ status: "error", message: error.message })
-            })
+            const products = await db.product.find(query);
+            callback({ status: "success", message: "Products fetched successfully", payload: products })
         } catch (error) {
             callback({ status: "error", message: error.message })
         }
