@@ -58,10 +58,11 @@ const dimensionsSchema = new mongoose.Schema({
  */
 const storageSchema = new mongoose.Schema({
     location: { type: String, trim: true },
+    casePack: { type: Number, default: 0, min: 0 },
     maxHeight: { type: Number, default: 0, min: 0 },
+    unitsPerPallet: { type: Number, default: 0, min: 0 },
     allowOverHang: { type: Boolean, default: false },
     allowStacking: { type: Boolean, default: false },
-    unitsPerPallet: { type: Number, default: 0, min: 0 }
 }, { _id: false });
 
 /**

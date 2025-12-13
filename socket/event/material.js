@@ -2,18 +2,18 @@ const db = require("../../models");
 
 module.exports = (socket, io) => {
 
-    socket.on('material:create', async (data, callback) => {
+    socket.on('material:create', async (payload, callback) => {
         try {
-            const material = await db.material.create(data);
+            const material = await db.material.create(payload);
             callback({ status: "success", message: "Material created successfully", payload: material })
         } catch (error) {
             callback({ status: "error", message: error.message })
         }
     });
 
-    socket.on('material:update', async (data, callback) => {
+    socket.on('material:update', async (payload, callback) => {
         try {
-            const { _id, ...update } = data;
+            const { _id, ...update } = payload;
             const material = await db.material.findByIdAndUpdate(_id, { $set: update }, { new: true });
             callback({ status: "success", message: "Material updated successfully", payload: material })
         } catch (error) {
@@ -21,9 +21,10 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('material:delete', async (data, callback) => {
+    socket.on('material:delete', async (payload, callback) => {
         try {
-            await db.material.findByIdAndDelete(data._id);
+            const { _id } = payload;
+            await db.material.findByIdAndDelete(_id);
             callback({ status: "success", message: "Material deleted successfully" })
         } catch (error) {
             callback({ status: "error", message: error.message })
