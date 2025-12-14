@@ -27,14 +27,6 @@ const specFieldSchema = new mongoose.Schema({
     }
 }, { _id: false });
 
-/**
- * Specification group schema
- */
-const specificationSchema = new mongoose.Schema({
-    group: { type: String, required: true },
-    fields: [specFieldSchema]
-}, { _id: false });
-
 const bomSchema = new mongoose.Schema({
     materialId: { type: mongoose.Schema.Types.ObjectId, ref: "rawMaterials" },
     quantity: Number,
@@ -111,7 +103,8 @@ const productSchema = new mongoose.Schema({
     styleDimensions: {
         length: { type: Number, min: 0 },
         width: { type: Number, min: 0 },
-        height: { type: Number, min: 0 }
+        height: { type: Number, min: 0 },
+        unit: { type: String }
     },
     styleWeight: {
         min: { type: Number },
@@ -124,10 +117,10 @@ const productSchema = new mongoose.Schema({
     version: { type: String, default: "v1.0.0" },
     revisionHistory: [revisionHistorySchema],
     qualityChecks: [qualityControlSchema],
-    specification: [specificationSchema],
     storaging: [storagingSchema],
     production: productionSchema,
     casePack: casePackSchema,
+    specification: {},
     bom: [bomSchema],
     packaging: {
         pillowsPerBag: Number,

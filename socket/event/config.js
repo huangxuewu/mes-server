@@ -14,7 +14,8 @@ module.exports = (socket, io) => {
 
     socket.on("config:update", async (data, callback) => {
         try {
-            const config = await db.config.findByIdAndUpdate(data._id, data, { new: true });
+            const { key, ...update } = data;
+            const config = await db.config.findOneAndUpdate({ key }, { $set: update }, { new: true });
             callback({ status: "success", message: "Config updated successfully", payload: config });
         } catch (error) {
             callback({ status: "error", message: error.message });

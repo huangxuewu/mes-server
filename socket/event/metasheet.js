@@ -12,8 +12,8 @@ module.exports = (socket, io) => {
 
     socket.on("metasheet:update", async (data, callback) => {
         try {
-            const { _id, ...update } = data;
-            const metasheet = await db.metasheets.findByIdAndUpdate(_id, { $set: update }, { new: true });
+            const { key, ...update } = data;
+            const metasheet = await db.metasheets.findOneAndUpdate({ key }, { $set: update }, { new: true });
             callback({ status: "success", message: "Metasheet updated successfully", payload: metasheet });
         } catch (error) {
             callback({ status: "error", message: error.message });
