@@ -86,9 +86,11 @@ const productionSchema = new mongoose.Schema({
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true },
     description: { type: String, required: true },
-    upc: { type: String, index: true },
     sku: { type: String, index: true, unique: true, sparse: true },
-    barcode: String,
+    upc: { type: String, index: true, default: "" },
+    brand: { type: String, default: "Down Home" },
+    metasheetKey: { type: String, default: "" },
+    barcode: { type: String, default: "" },
     letterCode: {
         type: String,
         default: ""
@@ -113,7 +115,8 @@ const productSchema = new mongoose.Schema({
         unit: { type: String },
         tolerance: { type: Number }
     },
-
+    customerSpecific: Boolean,
+    customerIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "customer" }],
     version: { type: String, default: "v1.0.0" },
     revisionHistory: [revisionHistorySchema],
     qualityChecks: [qualityControlSchema],
