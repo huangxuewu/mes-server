@@ -15,8 +15,8 @@ const configSchema = new mongoose.Schema({
     },
     value: {
         type: mongoose.Schema.Types.Mixed,
+        description: "Config value",
         required: true,
-        description: "Config value"
     },
     scope: {
         type: String,
@@ -85,7 +85,7 @@ Config.watch([], { fullDocument: "updateLookup" })
             case "replace":
                 io.emit("config:update", change.fullDocument);
                 break;
-                
+
             case "delete":
                 io.emit("config:delete", change.documentKey._id);
                 break;
