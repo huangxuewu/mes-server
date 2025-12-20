@@ -34,6 +34,7 @@ const loadSchema = new mongoose.Schema({
     proNumber: { type: String, default: "" },
     assignedSCAC: { type: String, default: "" },
     executingSCAC: { type: String, default: "" },
+    carrierSCAC: { type: String, default: "" },
     chRobinsonNumber: { type: String, default: "" },
     cube: { type: Number, default: 0 },
     weight: { type: Number, default: 0 },
