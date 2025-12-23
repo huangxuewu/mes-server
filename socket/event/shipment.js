@@ -83,7 +83,30 @@ module.exports = (socket, io) => {
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
-    })
+    });
+
+    socket.on("outbound:rectify", async (payload, callback) => {
+        try {
+            const { _id, rectify } = payload;
+            const entries = rectify && typeof rectify === "object" ? Object.entries(rectify) : [];
+
+            // Support rectifying one or many loads. Each loadNumber needs its own arrayFilter.
+            const ops = entries.map(([loadNumber, items]) => ({
+                updateOne: {
+                    filter: { _id },
+                    update: { $set: { "loads.$[target].items": items } },
+                    arrayFilters: [{ "target.loadNumber": loadNumber }],
+                }
+            }));
+
+            await db.outbound.bulkWrite(ops, { ordered: false });
+
+            callback?.({ status: "success", message: "Outbound shipments rectified successfully" });
+
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
 
     socket.on("load:update", async (payload, callback) => {
         try {
