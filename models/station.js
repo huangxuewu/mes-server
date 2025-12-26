@@ -27,7 +27,7 @@ const stationSchema = new mongoose.Schema({
         enum: ['Active', 'Inactive', 'Disabled'],
         default: 'Active'
     },
-    allowModules: [String]
+    allowedModules: [String]
 }, {
     timestamps: true
 });
