@@ -51,10 +51,14 @@ const positionSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Active", "Inactive", "Filled"],
+        enum: ["Active", "Inactive"],
         default: "Active"
     },
-    index:{
+    isHiring: {
+        type: Boolean,
+        default: false
+    },
+    index: {
         type: Number,
         default: 0,
         description: "Index for sorting"
