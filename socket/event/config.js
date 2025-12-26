@@ -50,4 +50,32 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("station:get", async (query, callback) => {
+        try {
+            const station = await db.station.findOne(query);
+            callback({ status: "success", message: "Station fetched successfully", payload: station });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("station:create", async (data, callback) => {
+        try {
+            const station = await db.station.create(data);
+            callback({ status: "success", message: "Station created successfully", payload: station });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("station:update", async (payload, callback) => {
+        try {
+            const { _id, ...data } = payload;
+            const station = await db.station.findByIdAndUpdate(_id, data, { new: true });
+            callback({ status: "success", message: "Station updated successfully", payload: station });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
 };

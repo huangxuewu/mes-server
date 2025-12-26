@@ -18,6 +18,10 @@ const stationSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    application:{
+        type: String,
+        required: true
+    },
     status: {
         type: String,
         enum: ['Active', 'Inactive', 'Disabled'],
