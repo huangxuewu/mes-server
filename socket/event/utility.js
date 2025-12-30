@@ -2,7 +2,7 @@ const axios = require('axios');
 const db = require("../../models");
 const { createCanvas } = require("canvas");
 const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
-const { decryptPasscodeFields } = require("../../utils/passcodeCrypto");
+const { decryptString } = require("../../utils/passcodeCrypto");
 
 module.exports = (socket, io) => {
 
@@ -120,9 +120,9 @@ module.exports = (socket, io) => {
 
     socket.on("passcode:decrypt", async (data, callback) => {
         try {
-            const { passcode } = data;
-            const decryptedPasscode = decryptPasscodeFields(passcode);
-            callback({ status: "success", message: "Passcode decrypted successfully", payload: decryptedPasscode });
+            const { _id, passcode } = data;
+            const value = decryptString(passcode);
+            callback({ status: "success", message: "Passcode decrypted successfully", payload: { _id, value } });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
