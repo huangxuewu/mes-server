@@ -1,4 +1,5 @@
 const axios = require('axios');
+const db = require("../../models");
 const { createCanvas } = require("canvas");
 const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
 
@@ -26,26 +27,26 @@ module.exports = (socket, io) => {
                     return status >= 200 && status < 300;
                 }
             });
-            
+
             const imageBuffer = Buffer.from(response.data);
-            
+
             // Validate that we actually got image data
             if (imageBuffer.length === 0) {
                 throw new Error('No image data received');
             }
-            
+
             // For canvas usage, we don't need to detect image type
-            
+
             const base64Image = imageBuffer.toString('base64');
-            
-            callback({ 
-                status: "success", 
-                message: "Image fetched successfully", 
+
+            callback({
+                status: "success",
+                message: "Image fetched successfully",
                 payload: base64Image
             });
         } catch (error) {
             let errorMessage = 'Failed to fetch image';
-            
+
             if (error.code === 'ECONNABORTED') {
                 errorMessage = 'Request timeout - image took too long to load';
             } else if (error.response) {
@@ -55,7 +56,7 @@ module.exports = (socket, io) => {
             } else if (error.message) {
                 errorMessage = error.message;
             }
-            
+
             callback({ status: "error", message: errorMessage });
         }
     })
@@ -72,6 +73,55 @@ module.exports = (socket, io) => {
             const buffer = canvas.toBuffer("image/jpeg", { quality: 0.8 });
 
             callback({ status: "success", message: "PDF thumbnail created successfully", payload: buffer });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    })
+
+    socket.on("passcode:create", async (data, callback) => {
+        try {
+            const passcode = await db.passcode.create(data);
+            callback({ status: "success", message: "Passcode created successfully", payload: passcode });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    })
+
+    socket.on("passcode:update", async (data, callback) => {
+        try {
+            const { _id, ...update } = data;
+            const passcode = await db.passcode.findByIdAndUpdate(_id, { $set: update }, { new: true });
+            callback({ status: "success", message: "Passcode updated successfully", payload: passcode });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    })
+
+    socket.on("passcode:delete", async (data, callback) => {
+        try {
+            const { _id } = data;
+            await db.passcode.findByIdAndDelete(_id);
+            callback({ status: "success", message: "Passcode deleted successfully" });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    })
+
+    socket.on("passcode:fetch", async (data = {}, callback) => {
+        try {
+            const passcodes = await db.passcode.find(data);
+            callback({ status: "success", message: "Passcodes fetched successfully", payload: passcodes });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    })
+
+
+    socket.on("passcode:decrypt", async (data, callback) => {
+        try {
+            const { _id, passcode } = data;
+            const value = await decrypt(passcode);
+            callback({ status: "success", message: "Passcode decrypted successfully", payload: { _id, value } });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
