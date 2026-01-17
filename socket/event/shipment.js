@@ -443,12 +443,21 @@ module.exports = (socket, io) => {
 
     socket.on("inbound:get", async (query, callback) => {
         try {
-            const inbound = await db.inbound.findOne(query);
+            const inbound = await db.inbound.findOne(query).lean();
             callback?.({ status: "success", message: "Inbound shipment fetched successfully", payload: inbound });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
     });
+
+    socket.on("inbound:fetch", async (query, callback) => {
+        try {
+            const inbounds = await db.inbound.find(query).lean();
+            callback?.({ status: "success", message: "Inbound shipments fetched successfully", payload: inbounds });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    })
 
     socket.on("inbound:create", async (payload, callback) => {
         try {
@@ -459,9 +468,19 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("inbound:delete", async (query, callback) => {
+        try {
+            await db.inbound.deleteOne(query);
+            callback?.({ status: "success", message: "Inbound shipment deleted successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
     socket.on("inbound:update", async (payload, callback) => {
         try {
-            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $set: payload });
+            const { _id, ...data } = payload;
+            const inbound = await db.inbound.updateOne({ _id }, { $set: data }, { new: true });
             callback?.({ status: "success", message: "Inbound shipment updated successfully", payload: inbound });
         } catch (error) {
             callback?.({ status: "error", message: error.message });

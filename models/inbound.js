@@ -28,9 +28,13 @@ const documentSchema = new mongoose.Schema({
 const inboundSchema = new mongoose.Schema({
     poNumber: { type: String, required: true },
     poDate: { type: String, default: null },
-    shipmentType: {
+    source: {
         type: String,
-        enum: ["Overseas", "Domestic"]
+        enum: ["Port", "Local", "Parcel"]
+    },
+    carrier: {
+        type: String,
+        default: ""
     },
     containerNumber: String,
     sealNumber: String,
@@ -42,17 +46,31 @@ const inboundSchema = new mongoose.Schema({
     receiveNote: String,
     shipDate: String,
     etaDate: String,
+    etaTime: String,
     ataDate: String,
+    ataTime: String,
     receivedAt: Date,
-    originPort: String,
+    shipmentFrom: String,
     dischargePort: String,
     destination: {
         type: String,
         default: "Down Home"
     },
     items: [itemSchema],
-    trackingEvents: [trackingEventsSchema],
-    documents: [documentSchema],
+    trackingEvents: {
+        type: [trackingEventsSchema],
+        default: []
+    },
+    documents: {
+        type: [documentSchema],
+        default: []
+    },
+    status: {
+        type: String,
+        enum: ["Pending", "In Progress", "In Transit", "Port Discharging", "Completed", "Cancelled", "On Hold","Postponed"],
+        default: "Pending",
+        description: "Status of the inbound shipment"
+    },
 }, {
     timestamps: true
 });
@@ -71,27 +89,14 @@ Inbound
             case "insert":
             case "update":
             case "replace":
-                io.emit("outbound:update", change.fullDocument);
+                io.emit("inbound:update", change.fullDocument);
 
                 break;
             case "delete":
-                io.emit("outbound:delete", change.documentKey._id);
+                io.emit("inbound:delete", change.documentKey._id);
                 break;
         }
     });
-
-Inbound.getActiveLoads = async () => {
-    const loads = await Inbound.aggregate([
-        { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
-        { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
-        { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
-        { $project: { loads: 0 } },
-        { $group: { _id: "$loadNumber", loads: { $push: "$$ROOT" } } },
-        { $project: { _id: 0, loadNumber: "$_id", loads: 1 } }
-    ]);
-
-    return loads;
-};
 
 module.exports = Inbound;
 
