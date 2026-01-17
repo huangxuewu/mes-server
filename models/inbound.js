@@ -3,12 +3,23 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const itemSchema = new mongoose.Schema({
+    materialType: String,
+    dimensions: {
+        length: Number,
+        width: Number,
+        height: Number,
+        unit: String
+    },
     upc: String,
+    unit: String,
     quantity: Number,
     casePack: Number,
     styleCode: String,
+    styleSize: String,
+    styleColor: String,
     description: String,
-    vendor: String,
+    prouductName: String,
+    supplierName: String,
 }, { _id: false });
 
 const trackingEventsSchema = new mongoose.Schema({
@@ -67,7 +78,7 @@ const inboundSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Pending", "In Progress", "In Transit", "Port Discharging", "Completed", "Cancelled", "On Hold","Postponed"],
+        enum: ["Pending", "In Progress", "In Transit", "Port Discharging", "Completed", "Cancelled", "On Hold", "Postponed"],
         default: "Pending",
         description: "Status of the inbound shipment"
     },
