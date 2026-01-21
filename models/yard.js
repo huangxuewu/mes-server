@@ -26,8 +26,9 @@ const yardSchema = new mongoose.Schema({
         enum: ["Available", "Occupied", "Reserved"],
         default: "Available"
     },
-    items: []
-});
+    items: [],
+    parkedAt: { type: Date, default: null },
+}, { timestamps: true });
 
 const Yard = database.model("Yard", yardSchema, "yard");
 
