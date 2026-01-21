@@ -9,8 +9,9 @@ const haulerSchema = new mongoose.Schema({
     company: { type: String },
     seal: { type: String },
     trailer: { type: String },
+    proNumber: { type: String },
     loadNumber: { type: String },
-    loadType: { type: String, enum: ["","LTL", "FTL", "PTL"] },
+    loadType: { type: String, enum: ["", "LTL", "FTL", "PTL"] },
     // Driver Info
     driverName: { type: String },
     contactNumber: { type: String },

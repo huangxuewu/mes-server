@@ -632,7 +632,7 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("hauler:delete", async (query, callback) => {
+    socket.on("hauler:delete", async (query = {}, callback) => {
         try {
             await db.hauler.deleteOne(query);
             callback?.({ status: "success", message: "Hauler deleted successfully" });
@@ -641,4 +641,41 @@ module.exports = (socket, io) => {
         }
     });
 
+
+    socket.on("yard:fetch", async (query, callback) => {
+        try {
+            const yards = await db.yard.find(query);
+            callback?.({ status: "success", message: "Yard Slots fetched successfully", payload: yards });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("yard:create", async (payload, callback) => {
+        try {
+            const yard = await db.yard.create(payload);
+            callback?.({ status: "success", message: "Yard Slot created successfully", payload: yard });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("yard:update", async (payload, callback) => {
+        try {
+            const { _id, ...data } = payload;
+            await db.yard.updateOne({ _id }, { $set: data });
+            callback?.({ status: "success", message: "Yard Slot updated successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("yard:delete", async (query, callback) => {
+        try {
+            await db.yard.deleteOne(query);
+            callback?.({ status: "success", message: "Yard Slot deleted successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
 }
