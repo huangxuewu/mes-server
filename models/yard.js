@@ -12,6 +12,10 @@ const yardSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    trailer:{
+        type: String,
+        default: ""
+    },
     scac: {
         type: String,
         default: ""
