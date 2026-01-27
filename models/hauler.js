@@ -21,7 +21,7 @@ const haulerSchema = new mongoose.Schema({
     finishLoadAt: { type: Date },
     assignedGate: { type: mongoose.Schema.Types.ObjectId, ref: "Gate" },
     priority: { type: String, enum: ["High", "Normal", "Low"], default: "Normal" },
-    status: { type: String, enum: ["Available", "Loading", "Unloading", "Completed", "Cancelled"], default: "Available" },
+    status: { type: String, enum: ["Available", "Preload", "Loading", "Unloading", "Completed", "Cancelled"], default: "Available" },
     note: { type: String },
 }, {
     timestamps: true,
