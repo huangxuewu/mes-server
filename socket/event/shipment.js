@@ -400,7 +400,7 @@ module.exports = (socket, io) => {
 
     socket.on("bill-of-lading:link", async (payload, callback) => {
         try {
-            const { shipmentIdArray, loadNumber, uploadedAt, link } = payload;
+            const { shipmentIdArray, poNumber, loadNumber, link } = payload;
 
             await db.outbound.updateMany(
                 { 'loads.shipmentId': { $in: shipmentIdArray } },
@@ -434,6 +434,9 @@ module.exports = (socket, io) => {
             // update outbound gate status
             await db.gate.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
             await db.hauler.updateOne({ loadNumber, 'status': 'Loading' }, { $set: { finishLoadAt: new Date(), status: 'Available' } });
+
+            // also update the order buyer status
+            // await db.order.updateOne({poNumber:poNumber.split('-')[0]}, { $set: { 'buyers.$[dc].done': true } }, { arrayFilters: [{ 'dc.poNumber': poNumber.split('-')[0] }] });
 
             callback?.({ status: "success", message: "Bill of Lading linked successfully" });
         } catch (error) {
