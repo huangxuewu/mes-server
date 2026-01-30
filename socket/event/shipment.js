@@ -400,14 +400,14 @@ module.exports = (socket, io) => {
 
     socket.on("bill-of-lading:link", async (payload, callback) => {
         try {
-            const { shipmentIdArray, loadNumber, updatedAt, link } = payload;
+            const { shipmentIdArray, loadNumber, uploadedAt, link } = payload;
 
             await db.outbound.updateMany(
                 { 'loads.shipmentId': { $in: shipmentIdArray } },
                 {
                     $set: {
                         'loads.$[shipment].bol.url': link,
-                        'loads.$[shipment].bol.updatedAt': updatedAt || new Date(),
+                        'loads.$[shipment].bol.uploadedAt': new Date(), // we are not using uploadedAt because the client side time might not be accurate
                         'loads.$[shipment].status': 'Completed'
                     }
                 },
@@ -419,7 +419,7 @@ module.exports = (socket, io) => {
                     { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
                     {
                         $set: {
-                            'loads.$[shipment].bol': { number: null, url: null, updatedAt: null, rawData: null },
+                            'loads.$[shipment].bol': { number: null, url: null, uploadedAt: null, rawData: null },
                             'loads.$[shipment].status': 'Leftover, Reschedule Needed'
                         }
                     },
