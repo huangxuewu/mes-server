@@ -30,14 +30,16 @@ const trackingEventsSchema = new mongoose.Schema({
 }, { _id: false });
 
 const documentSchema = new mongoose.Schema({
-    type: String,
-    url: String,
+    poNumber: String,
+    poDate: String,
+    note: String,
+    items: [itemSchema],
     documentId: { type: mongoose.Schema.Types.ObjectId, ref: "document" },
     formData: mongoose.Schema.Types.Mixed,
-}, { _id: false });
+    link: String,
+})
 
 const inboundSchema = new mongoose.Schema({
-    poNumber: { type: String, required: true },
     poDate: { type: String, default: null },
     source: {
         type: String,
@@ -67,13 +69,9 @@ const inboundSchema = new mongoose.Schema({
         type: String,
         default: "Down Home"
     },
-    items: [itemSchema],
+    documents: [documentSchema],
     trackingEvents: {
         type: [trackingEventsSchema],
-        default: []
-    },
-    documents: {
-        type: [documentSchema],
         default: []
     },
     status: {
