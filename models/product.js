@@ -130,6 +130,29 @@ const productSchema = new mongoose.Schema({
         bagsPerBox: Number,
         boxesPerPallet: Number
     },
+    pricing: {
+        model: {
+            type: String,
+            enum: ["Fixed Fee", "Cost Plus", "Margin Based"],
+            default: "Fixed Fee"
+        },
+        currency: {
+            type: String,
+            enum: ["USD", "EUR", "GBP", "JPY", "CNY", "INR", "BDT"],
+            default: "USD"
+        },
+        fee: {
+            amount: {
+                type: Number,
+                min: 0
+            },
+            basis: {
+                type: String,
+                enum: ["Per Piece", "Per Bag", "Per Box", "Per Pallet"],
+                default: "Per Piece"
+            }
+        }
+    },
     status: {
         type: String,
         enum: ["Active", "Development", "Discontinued", "Pre-Production"],
