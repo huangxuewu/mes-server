@@ -49,6 +49,11 @@ const inboundSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    deliveryType:{
+        type: String,
+        enum:['Live Unload', 'Drop Trailer'],
+        default: 'Live Unload'
+    },
     containerNumber: String,
     sealNumber: String,
     vesselNumber: String,

@@ -1,7 +1,10 @@
 const path = require('path');
+const dns = require("node:dns");
 const express = require('express');
 const { io, app, server } = require("./socket/io");
 const socketHandler = require("./socket/index");
+
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 // Import API routes
 const apiRoutes = require('./api');
