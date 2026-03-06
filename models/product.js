@@ -106,14 +106,15 @@ const productSchema = new mongoose.Schema({
         length: { type: Number, min: 0 },
         width: { type: Number, min: 0 },
         height: { type: Number, min: 0 },
-        unit: { type: String }
+        unit: { type: String, default: "in" }
     },
     styleWeight: {
-        min: { type: Number },
-        standard: { type: Number },
-        max: { type: Number },
-        unit: { type: String },
-        tolerance: { type: Number }
+        unit: { type: String, default: "oz" },
+        fillWeight: { type: Number, default: 0 },
+        shellWeight: { type: Number, default: 0 },
+        grossWeight: { type: Number, default: 0 },
+        upperTolerance: { type: Number, default: 0 },
+        lowerTolerance: { type: Number, default: 0 },
     },
     customerSpecific: Boolean,
     customerIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "customer" }],
