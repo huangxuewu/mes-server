@@ -167,10 +167,9 @@ module.exports = (socket, io) => {
 
     socket.on("load:sync", async (payloads, callback) => {
         try {
-            if (!Array.isArray(payloads) || !payloads.length) {
+            if (!Array.isArray(payloads) || !payloads.length) 
                 return callback?.({ status: "error", message: "Invalid or empty payloads" });
-            }
-
+            
             const startTime = performance.now();
 
             // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
@@ -196,21 +195,23 @@ module.exports = (socket, io) => {
             for (const payload of payloads) {
 
                 const { poNumber, load } = payload;
+                const shipmentId = String(load?.shipmentId ?? '').trim();
 
-                if (!poNumber || !load?.shipmentId) continue; // Validate input
+                if (!poNumber || !shipmentId) continue; // Validate input
 
                 const shipment = shipmentMap.get(poNumber);
 
                 if (!shipment) continue;
 
                 const { loads, items } = shipment;
-                const loadIndex = loads.findIndex(doc => doc.shipmentId === load.shipmentId);
+                const loadIndex = loads.findIndex(doc => String(doc?.shipmentId ?? '').trim() === shipmentId);
+                const updatedLoad = { ...load, shipmentId };
 
                 // Update or add load
                 if (loadIndex !== -1) {
-                    loads[loadIndex] = { ...loads[loadIndex], ...load }; // Merge load data
+                    loads[loadIndex] = { ...loads[loadIndex], ...updatedLoad }; // Merge load data
                 } else {
-                    loads.push(load);
+                    loads.push(updatedLoad);
                 }
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
