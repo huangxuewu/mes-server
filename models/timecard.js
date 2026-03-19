@@ -44,6 +44,11 @@ const punchSchema = new mongoose.Schema({
         type: String,
         enum: ["Pending", "Approved", "Rejected"],
         default: "Pending"
+    },
+    eventId: {
+        type: String,
+        default: null,
+        index: true
     }
 });
 
@@ -69,6 +74,10 @@ const timecardSchema = new mongoose.Schema({
     date: {
         type: String,
         default: () => dayjs().format("YYYY-MM-DD")
+    },
+    processedEventIds: {
+        type: [String],
+        default: []
     },
     punches: [punchSchema],
     auditLog: [auditLogSchema],
@@ -144,12 +153,19 @@ const timecardSchema = new mongoose.Schema({
 
 timecardSchema.statics.clockIn = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
+    const eventId = payload?.eventId || payload?.idempotencyKey || null;
+    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
     const date = dayjs().format("YYYY-MM-DD");
 
     const existingTimecard = await this.findOne({ employeeId: _id, date: date });
 
     if (existingTimecard) {
-        existingTimecard.punches.push({ type: "Clock In", time: new Date(), image, station, location, method, ip, note });
+        if (eventId && existingTimecard.processedEventIds?.includes(eventId)) {
+            return existingTimecard;
+        }
+
+        existingTimecard.punches.push({ type: "Clock In", time: punchTime, image, station, location, method, ip, note, eventId });
+        if (eventId) existingTimecard.processedEventIds.push(eventId);
         const updatedTimecard = await existingTimecard.save();
         return updatedTimecard;
     }
@@ -158,7 +174,8 @@ timecardSchema.statics.clockIn = async function (payload) {
         date: date,
         employeeId: _id,
         auditLog: [],
-        punches: [{ type: "Clock In", time: new Date(), image, station, location, method, ip, note }],
+        processedEventIds: eventId ? [eventId] : [],
+        punches: [{ type: "Clock In", time: punchTime, image, station, location, method, ip, note, eventId }],
     });
 
     return timecard;
@@ -166,9 +183,16 @@ timecardSchema.statics.clockIn = async function (payload) {
 
 timecardSchema.statics.breakStart = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
+    const eventId = payload?.eventId || payload?.idempotencyKey || null;
+    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
     const timecard = await this.findById(_id);
     if (timecard) {
-        timecard.punches.push({ type: "Break Start", time: new Date(), image, station, location, method, ip, note });
+        if (eventId && timecard.processedEventIds?.includes(eventId)) {
+            return timecard;
+        }
+
+        timecard.punches.push({ type: "Break Start", time: punchTime, image, station, location, method, ip, note, eventId });
+        if (eventId) timecard.processedEventIds.push(eventId);
         return await timecard.save();
     }
     return timecard;
@@ -176,9 +200,16 @@ timecardSchema.statics.breakStart = async function (payload) {
 
 timecardSchema.statics.breakEnd = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
+    const eventId = payload?.eventId || payload?.idempotencyKey || null;
+    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
     const timecard = await this.findById(_id);
     if (timecard) {
-        timecard.punches.push({ type: "Break End", time: new Date(), image, station, location, method, ip, note });
+        if (eventId && timecard.processedEventIds?.includes(eventId)) {
+            return timecard;
+        }
+
+        timecard.punches.push({ type: "Break End", time: punchTime, image, station, location, method, ip, note, eventId });
+        if (eventId) timecard.processedEventIds.push(eventId);
         return await timecard.save();
     }
     return timecard;
@@ -186,9 +217,16 @@ timecardSchema.statics.breakEnd = async function (payload) {
 
 timecardSchema.statics.clockOut = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
+    const eventId = payload?.eventId || payload?.idempotencyKey || null;
+    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
     const timecard = await this.findById(_id);
     if (timecard) {
-        timecard.punches.push({ type: "Clock Out", time: new Date(), image, station, location, method, ip, note });
+        if (eventId && timecard.processedEventIds?.includes(eventId)) {
+            return timecard;
+        }
+
+        timecard.punches.push({ type: "Clock Out", time: punchTime, image, station, location, method, ip, note, eventId });
+        if (eventId) timecard.processedEventIds.push(eventId);
         return await timecard.save();
     }
     return timecard;

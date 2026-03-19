@@ -208,11 +208,9 @@ module.exports = (socket, io) => {
                 const updatedLoad = { ...load, shipmentId };
 
                 // Update or add load
-                if (loadIndex !== -1) {
-                    loads[loadIndex] = { ...loads[loadIndex], ...updatedLoad }; // Merge load data
-                } else {
-                    loads.push(updatedLoad);
-                }
+                loadIndex !== -1
+                    ? Object.assign(loads[loadIndex], { ...loads[loadIndex], ...updatedLoad }) // Merge load data
+                    : loads.push(updatedLoad);
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
                 // if (loadRef.status === 'Completed') continue;
