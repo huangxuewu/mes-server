@@ -135,6 +135,39 @@ module.exports = (socket, io) => {
         console.log(data);
     });
 
+    // Overtime schedule
+    socket.on('overtime:fetch', async (query, callback) => {
+        try {
+            const overtimes = await db.overtime.find(query);
+            callback({ status: "success", message: "Overtime schedules fetched successfully", payload: overtimes });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('overtime:upsert', async (payload, callback) => {
+        try {
+            const { employeeId, date, ...rest } = payload;
+            const overtime = await db.overtime.findOneAndUpdate(
+                { employeeId, date },
+                { $set: { employeeId, date, ...rest } },
+                { new: true, upsert: true }
+            );
+            callback({ status: "success", message: "Overtime schedule saved successfully", payload: overtime });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('overtime:delete', async ({ _id }, callback) => {
+        try {
+            await db.overtime.deleteOne({ _id });
+            callback({ status: "success", message: "Overtime schedule deleted successfully", payload: { _id } });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
     socket.on('enrollment:get', async (query, callback) => {
         try {
             const enrollment = await db.enrollment.findOne(query);

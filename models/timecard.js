@@ -121,7 +121,8 @@ const timecardSchema = new mongoose.Schema({
         selectedLateRange: {
             start: { type: Date, default: null },
             end: { type: Date, default: null },
-        }
+        },
+
     },
     status: { type: String, enum: ['Draft', 'Pending', 'Approved', 'Rejected'], default: 'Pending' },
     isDeleted: { type: Boolean, default: false },
