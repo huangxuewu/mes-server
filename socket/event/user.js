@@ -1,9 +1,24 @@
+const md5 = require("md5");
 const db = require("../../models");
+
+const MD5_PATTERN = /^[a-f0-9]{32}$/i;
+
+const normalizeUserPayload = (payload = {}) => {
+    const normalizedPayload = { ...payload };
+
+    delete normalizedPayload.confirmPassword;
+
+    if (typeof normalizedPayload.password === "string" && normalizedPayload.password.length > 0 && !MD5_PATTERN.test(normalizedPayload.password)) {
+        normalizedPayload.password = md5(normalizedPayload.password);
+    }
+
+    return normalizedPayload;
+};
 
 module.exports = (socket, io) => {
     socket.on("user:create", async (data, callback) => {
         try {
-            await db.user.create(data);
+            await db.user.create(normalizeUserPayload(data));
             callback({ status: "success", message: "User created successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -13,7 +28,7 @@ module.exports = (socket, io) => {
     socket.on("user:update", async (payload, callback) => {
         try {
             const { _id, ...update } = payload;
-            await db.user.updateOne({ _id }, { $set: update });
+            await db.user.updateOne({ _id }, { $set: normalizeUserPayload(update) });
             callback({ status: "success", message: "User updated successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
