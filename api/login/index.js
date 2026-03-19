@@ -7,6 +7,9 @@ const router = express.Router();
 // JWT secret key (in production, this should be in environment variables)
 const JWT_SECRET = process.env.JWT_SECRET || 'DOWN_HOME_MES_SYSTEM';
 
+// Password hashing salt (must match frontend)
+const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
+
 // POST /api/login - User login
 router.post('/', async (req, res) => {
     try {
@@ -41,8 +44,8 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Verify password (assuming passwords are stored as MD5 hashes)
-        const hashedPassword = md5(password);
+        // Verify password (assuming passwords are stored as MD5 hashes with salt)
+        const hashedPassword = md5(password + PASSWORD_SALT);
         if (user.password !== hashedPassword) {
             return res.status(401).json({
                 success: false,
@@ -125,7 +128,7 @@ router.post('/register', async (req, res) => {
         }
 
         // Create new user
-        const hashedPassword = md5(password);
+        const hashedPassword = md5(password + PASSWORD_SALT);
         const newUser = new User({
             username,
             password: hashedPassword,

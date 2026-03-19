@@ -1,6 +1,9 @@
 const md5 = require("md5");
 const db = require("../../models");
 
+// Password hashing salt (must match frontend)
+const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
+
 const MD5_PATTERN = /^[a-f0-9]{32}$/i;
 
 const normalizeUserPayload = (payload = {}) => {
@@ -9,7 +12,7 @@ const normalizeUserPayload = (payload = {}) => {
     delete normalizedPayload.confirmPassword;
 
     if (typeof normalizedPayload.password === "string" && normalizedPayload.password.length > 0 && !MD5_PATTERN.test(normalizedPayload.password)) {
-        normalizedPayload.password = md5(normalizedPayload.password);
+        normalizedPayload.password = md5(normalizedPayload.password + PASSWORD_SALT);
     }
 
     return normalizedPayload;
