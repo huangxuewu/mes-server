@@ -1,8 +1,14 @@
 const axios = require('axios');
+const path = require("path");
 const db = require("../../models");
 const { createCanvas } = require("canvas");
 const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
 const { decryptString } = require("../../utils/passcodeCrypto");
+
+const standardFontDataUrl = path.join(
+    path.dirname(require.resolve("pdfjs-dist/package.json")),
+    "standard_fonts"
+) + path.sep;
 
 module.exports = (socket, io) => {
 
@@ -65,7 +71,10 @@ module.exports = (socket, io) => {
     socket.on("pdf:thumbnail", async (data, callback) => {
         try {
             const pdfData = new Uint8Array(data);
-            const pdf = await getDocument(pdfData).promise;
+            const pdf = await getDocument({
+                data: pdfData,
+                standardFontDataUrl
+            }).promise;
             const page = await pdf.getPage(1);
             const viewport = page.getViewport({ scale: 1.5 });
             const canvas = createCanvas(viewport.width, viewport.height);
