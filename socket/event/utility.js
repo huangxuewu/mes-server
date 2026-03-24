@@ -1,16 +1,32 @@
-const axios = require('axios');
 const path = require("path");
+const axios = require('axios');
 const db = require("../../models");
-const { createCanvas } = require("canvas");
-const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
+// const { createCanvas } = require("canvas");
+// const { getDocument } = require("pdfjs-dist/legacy/build/pdf.js");
 const { decryptString } = require("../../utils/passcodeCrypto");
 
-const standardFontDataUrl = path.join(
-    path.dirname(require.resolve("pdfjs-dist/package.json")),
-    "standard_fonts"
-) + path.sep;
-
 module.exports = (socket, io) => {
+
+    const normalizePdfBuffer = (data) => {
+        if (!data) throw new Error("PDF data is required");
+
+        if (Buffer.isBuffer(data)) return data;
+        if (data instanceof ArrayBuffer) return Buffer.from(data);
+        if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+
+        if (data?.type === 'Buffer' && Array.isArray(data.data)) {
+            return Buffer.from(data.data);
+        }
+
+        if (typeof data === 'string') {
+            if (data.startsWith('data:application/pdf;base64,')) {
+                return Buffer.from(data.split(',')[1], 'base64');
+            }
+            return Buffer.from(data, 'base64');
+        }
+
+        throw new Error(`Unsupported PDF payload type: ${typeof data}`);
+    };
 
     // get image from url
     // the purpose is to remove the cross origin policy, because the image is from another domain
@@ -70,19 +86,27 @@ module.exports = (socket, io) => {
 
     socket.on("pdf:thumbnail", async (data, callback) => {
         try {
-            const pdfData = new Uint8Array(data);
-            const pdf = await getDocument({
-                data: pdfData,
-                standardFontDataUrl
-            }).promise;
-            const page = await pdf.getPage(1);
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = createCanvas(viewport.width, viewport.height);
-            const ctx = canvas.getContext("2d");
-            await page.render({ canvasContext: ctx, viewport }).promise;
-            const buffer = canvas.toBuffer("image/jpeg", { quality: 0.8 });
+            const pdfBuffer = normalizePdfBuffer(data);
 
-            callback({ status: "success", message: "PDF thumbnail created successfully", payload: buffer });
+            const { pdf } = await import("pdf-to-img");
+            const doc = await pdf(pdfBuffer, { scale: 1.5 });
+
+            let page1 = null;
+            if (typeof doc.getPage === 'function') {
+                page1 = await doc.getPage(1);
+            } else {
+                for await (const image of doc) {
+                    page1 = image;
+                    break;
+                }
+            }
+
+            if (!page1) {
+                throw new Error("Failed to render first page");
+            }
+
+            const payload = Buffer.isBuffer(page1) ? page1 : Buffer.from(page1);
+            callback({ status: "success", message: "PDF thumbnail created successfully", payload });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
