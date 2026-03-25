@@ -59,7 +59,7 @@ const inboundSchema = new mongoose.Schema({
     vesselNumber: String,
     voyageNumber: String,
     bolNumber: String,
-    truckNumber: String,
+    trailerNumber: String,
     deliveryNote: String,
     receiveNote: String,
     shipDate: String,
@@ -86,7 +86,7 @@ const inboundSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Pending", "In Progress", "In Transit", "Port Discharging", "Completed", "Cancelled", "On Hold", "Postponed"],
+        enum: ["Pending", "Scheduled", "Ocean Transit", "Discharged", "En Route", "In Transit", "Receiving", "Parked", "Received", "Completed", "Cancelled", "On Hold", "Postponed"],
         default: "Pending",
         description: "Status of the inbound shipment"
     },
