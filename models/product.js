@@ -84,8 +84,8 @@ const productionSchema = new mongoose.Schema({
  * Product schema
  */
 const productSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    description: { type: String, required: true },
+    name: { type: String },
+    description: { type: String },
     sku: { type: String, index: true, unique: true, sparse: true },
     upc: { type: String, index: true, default: "" },
     brand: { type: String, default: "Down Home" },
