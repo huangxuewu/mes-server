@@ -130,7 +130,12 @@ const productSchema = new mongoose.Schema({
     packaging: {
         pillowsPerBag: Number,
         bagsPerBox: Number,
-        boxesPerPallet: Number
+        boxesPerPallet: Number,
+        boxMaterialReferenceId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'rawMaterials',
+            default: null
+        }
     },
     pricing: {
         model: {
