@@ -85,22 +85,58 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("outbound:rectify", async (payload, callback) => {
-        try {
-            const { _id, rectify } = payload;
-            const entries = rectify && typeof rectify === "object" ? Object.entries(rectify) : [];
+    const applyReallocationByShipmentId = async (payload = {}) => {
+        const { _id } = payload;
+        const reallocate = payload?.reallocate ?? {};
+        const entries = reallocate && typeof reallocate === "object" ? Object.entries(reallocate) : [];
 
-            // Support rectifying one or many loads. Each loadNumber needs its own arrayFilter.
-            const ops = entries.map(([loadNumber, items]) => ({
+        if (!_id) {
+            throw new Error("Missing outbound _id in reallocation payload");
+        }
+
+        if (!entries.length) {
+            throw new Error("Missing reallocate map in payload");
+        }
+
+        const ops = entries
+            .map(([shipmentId, items]) => ({
+                shipmentId: String(shipmentId ?? "").trim(),
+                items: Array.isArray(items) ? items : []
+            }))
+            .filter(entry => entry.shipmentId.length)
+            .map(({ shipmentId, items }) => ({
                 updateOne: {
-                    filter: { _id },
+                    filter: { _id, "loads.shipmentId": shipmentId },
                     update: { $set: { "loads.$[target].items": items } },
-                    arrayFilters: [{ "target.loadNumber": loadNumber }],
+                    arrayFilters: [{ "target.shipmentId": shipmentId }],
                 }
             }));
 
-            await db.outbound.bulkWrite(ops, { ordered: false });
+        if (!ops.length) {
+            throw new Error("No valid shipmentId entries found in reallocation payload");
+        }
 
+        return db.outbound.bulkWrite(ops, { ordered: false });
+    };
+
+    socket.on("outbound:reallocate", async (payload, callback) => {
+        try {
+            await applyReallocationByShipmentId(payload);
+            callback?.({ status: "success", message: "Outbound shipments reallocated successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    // Backward compatibility for older clients that still emit outbound:rectify.
+    socket.on("outbound:rectify", async (payload, callback) => {
+        try {
+            const normalizePayload = {
+                _id: payload?._id,
+                reallocate: payload?.reallocate ?? payload?.rectify,
+            };
+
+            await applyReallocationByShipmentId(normalizePayload);
             callback?.({ status: "success", message: "Outbound shipments rectified successfully" });
 
         } catch (error) {
