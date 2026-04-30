@@ -254,9 +254,9 @@ module.exports = (socket, io) => {
                 // Calculate carton count only if necessary
                 const shipmentCartonCount = items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
 
-                if (loadRef.cartons !== shipmentCartonCount) {
-                    loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
-                }
+                // if (loadRef.cartons !== shipmentCartonCount) {
+                //     loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
+                // }
 
                 // Update status if BOL exists
                 loadRef.status = loadRef.bol?.url ? "Completed" : loadRef.status;
