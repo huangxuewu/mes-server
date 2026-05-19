@@ -13,6 +13,7 @@ const itemSchema = new mongoose.Schema({
     upc: String,
     unit: String,
     quantity: Number,
+    receivedQty: Number,
     casePack: Number,
     styleCode: String,
     styleSize: String,
