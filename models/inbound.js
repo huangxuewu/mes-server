@@ -19,8 +19,13 @@ const itemSchema = new mongoose.Schema({
     styleSize: String,
     styleColor: String,
     description: String,
-    prouductName: String,
+    productName: String,
     supplierName: String,
+    note: {
+        content: String,
+        operator: String,
+        at: Date,
+    },
 }, { _id: false });
 
 const trackingEventsSchema = new mongoose.Schema({
