@@ -26,6 +26,18 @@ const itemSchema = new mongoose.Schema({
         operator: String,
         at: Date,
     },
+    isAppend: {
+        type: Boolean,
+        default: false,
+    },
+    appendAt: {
+        type: Date,
+        default: null,
+    },
+    appendBy: {
+        type: String,
+        default: null,
+    },
 }, { _id: false });
 
 const trackingEventsSchema = new mongoose.Schema({

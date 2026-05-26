@@ -6,6 +6,32 @@ const { performance } = require('node:perf_hooks');
 
 module.exports = (socket, io) => {
 
+    const normalizeInboundItem = (item = {}) => {
+        const normalized = {
+            ...item,
+            isAppend: Boolean(item?.isAppend ?? item?.isAdditional),
+            appendBy: item?.appendBy ? String(item.appendBy) : (item?.addedBy ? String(item.addedBy) : null),
+        };
+
+        normalized.appendAt = item?.appendAt ? new Date(item.appendAt) : (item?.addedAt ? new Date(item.addedAt) : null);
+        if (Number.isNaN(normalized.appendAt?.getTime?.())) normalized.appendAt = null;
+
+        delete normalized.isAdditional;
+        delete normalized.addedBy;
+        delete normalized.addedAt;
+
+        return normalized;
+    };
+
+    const normalizeInboundDocument = (doc = {}) => ({
+        ...doc,
+        items: (doc.items || []).map(normalizeInboundItem),
+    });
+
+    const normalizeInboundDocuments = (documents = []) => (
+        Array.isArray(documents) ? documents.map(normalizeInboundDocument) : []
+    );
+
     socket.on("outbound:create", async (data, callback) => {
         try {
             await db.order.updateOne({ _id: data._id }, { $set: { transitAt: new Date, orderStatus: "In Transit" } });
@@ -499,7 +525,11 @@ module.exports = (socket, io) => {
 
     socket.on("inbound:create", async (payload, callback) => {
         try {
-            const inbound = await db.inbound.create(payload);
+            const normalizedPayload = {
+                ...payload,
+                documents: normalizeInboundDocuments(payload?.documents),
+            };
+            const inbound = await db.inbound.create(normalizedPayload);
             callback?.({ status: "success", message: "Inbound shipment created successfully", payload: inbound });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -518,7 +548,15 @@ module.exports = (socket, io) => {
     socket.on("inbound:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
-            const inbound = await db.inbound.updateOne({ _id }, { $set: data }, { new: true });
+            const normalizedData = {
+                ...data,
+            };
+
+            if (Object.prototype.hasOwnProperty.call(data, 'documents')) {
+                normalizedData.documents = normalizeInboundDocuments(data.documents);
+            }
+
+            const inbound = await db.inbound.updateOne({ _id }, { $set: normalizedData }, { new: true });
             callback?.({ status: "success", message: "Inbound shipment updated successfully", payload: inbound });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -556,7 +594,8 @@ module.exports = (socket, io) => {
     socket.on("inbound:add_document", async (payload, callback) => {
 
         try {
-            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $push: { documents: payload } });
+            const normalizedDocument = normalizeInboundDocument(payload);
+            const inbound = await db.inbound.updateOne({ _id: payload._id }, { $push: { documents: normalizedDocument } });
             callback?.({ status: "success", message: "Inbound shipment document added successfully", payload: inbound });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
