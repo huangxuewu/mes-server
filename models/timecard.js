@@ -1,4 +1,4 @@
-const dayjs = require("dayjs");
+const dayjs = require("../utils/dayjs");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
@@ -73,7 +73,7 @@ const timecardSchema = new mongoose.Schema({
     },
     date: {
         type: String,
-        default: () => dayjs().format("YYYY-MM-DD")
+        default: null
     },
     processedEventIds: {
         type: [String],
@@ -155,7 +155,7 @@ timecardSchema.statics.clockIn = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
     const eventId = payload?.eventId || payload?.idempotencyKey || null;
     const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
-    const date = dayjs().format("YYYY-MM-DD");
+    const date = await dayjs.businessDate();
 
     const existingTimecard = await this.findOne({ employeeId: _id, date: date });
 
@@ -362,6 +362,10 @@ function calculateTimecardTotals(punches) {
 // Pre-save hook to automatically calculate totals, sort punches, and maintain hash chain
 timecardSchema.pre('save', async function (next) {
     try {
+        if (!this.date) {
+            this.date = await dayjs.businessDate();
+        }
+
         if (this.punches && this.punches.length > 0) {
             // Sort punches by time to ensure they're always in chronological order
             this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));

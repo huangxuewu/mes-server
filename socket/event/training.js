@@ -1,4 +1,4 @@
-const dayjs = require("dayjs");
+const dayjs = require("../../utils/dayjs");
 const db = require("../../models");
 const mongoose = require("mongoose");
 const { Types: { ObjectId } } = mongoose;

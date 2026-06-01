@@ -1,4 +1,4 @@
-const dayjs = require("dayjs");
+const dayjs = require("../utils/dayjs");
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
