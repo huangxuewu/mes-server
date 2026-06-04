@@ -234,12 +234,13 @@ timecardSchema.statics.clockOut = async function (payload) {
 
 timecardSchema.statics.supplement = async function (payload) {
     const { date, employeeId, punches, station, location, method = 'Manual', ip, note } = payload;
+    const sanitizedPunches = this.sanitizePunches(punches);
 
     const timecard = await this.create({
         date,
         employeeId,
         auditLog: [],
-        punches: punches.map(punch => ({
+        punches: sanitizedPunches.map(punch => ({
             type: punch.type,
             time: new Date(punch.time),
             image: null,
@@ -252,6 +253,13 @@ timecardSchema.statics.supplement = async function (payload) {
     });
 
     return timecard;
+}
+
+timecardSchema.statics.sanitizePunches = function (punches, { preserveUndefined = false } = {}) {
+    if (punches === undefined) return preserveUndefined ? undefined : [];
+    if (!Array.isArray(punches)) throw new Error('Timecard punches must be an array');
+
+    return punches.filter((punch) => punch && typeof punch === 'object' && !Array.isArray(punch));
 }
 
 // Function to calculate hash for timecard data integrity

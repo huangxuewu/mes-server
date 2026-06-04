@@ -112,7 +112,17 @@ module.exports = (socket, io) => {
     socket.on('timecard:update', async (data, callback) => {
         try {
             const { _id, ...rest } = data;
-            const timecard = await db.timecard.findByIdAndUpdate({ _id }, { $set: rest }, { new: true });
+            const update = { ...rest };
+
+            if (Object.prototype.hasOwnProperty.call(update, 'punches')) {
+                update.punches = db.timecard.sanitizePunches(update.punches, { preserveUndefined: true });
+            }
+
+            const timecard = await db.timecard.findByIdAndUpdate(
+                { _id },
+                { $set: update },
+                { new: true, runValidators: true, context: 'query' }
+            );
             callback({ status: "success", message: "Timecard updated successfully", payload: timecard });
         } catch (error) {
             callback({ status: "error", message: error.message });
