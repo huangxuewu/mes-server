@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const database = require("../config/database");
 const { io } = require("../socket/io");
 
-const invoiceSchema = new mongoose.Schema({
+const billSchema = new mongoose.Schema({
     providerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "serviceProvider",
@@ -43,7 +43,7 @@ const invoiceSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
-    invoiceUrl: {
+    billUrl: {
         type: String,
         default: "",
         trim: true,
@@ -52,24 +52,24 @@ const invoiceSchema = new mongoose.Schema({
     timestamps: true,
 });
 
-invoiceSchema.index({ periodStart: -1, provider: 1 });
-invoiceSchema.index({ status: 1, periodEnd: -1 });
-invoiceSchema.index({ providerId: 1, periodStart: -1 });
+billSchema.index({ periodStart: -1, provider: 1 });
+billSchema.index({ status: 1, periodEnd: -1 });
+billSchema.index({ providerId: 1, periodStart: -1 });
 
-const Invoice = database.model("invoice", invoiceSchema, "invoice");
+const Bill = database.model("bill", billSchema, "bill");
 
-Invoice.watch([], { fullDocument: "updateLookup" })
+Bill.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.emit("invoice:update", change.fullDocument);
+                io.emit("bill:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("invoice:delete", change.documentKey._id);
+                io.emit("bill:delete", change.documentKey._id);
                 break;
         }
     });
 
-module.exports = Invoice;
+module.exports = Bill;
