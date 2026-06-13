@@ -53,6 +53,21 @@ const billSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
+    processDate: {
+        type: String,
+        default: "",
+        trim: true,
+    },
+    checkNumber: {
+        type: String,
+        default: "",
+        trim: true,
+    },
+    operatorName: {
+        type: String,
+        default: "",
+        trim: true,
+    },
 }, {
     timestamps: true,
 });
