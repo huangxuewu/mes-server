@@ -60,6 +60,11 @@ const serviceProviderSchema = new mongoose.Schema({
         trim: true,
         lowercase: true,
     },
+    contactPerson: {
+        type: String,
+        default: "",
+        trim: true,
+    },
     contactId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "contact",

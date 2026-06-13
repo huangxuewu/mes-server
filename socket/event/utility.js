@@ -28,44 +28,51 @@ module.exports = (socket, io) => {
         throw new Error(`Unsupported PDF payload type: ${typeof data}`);
     };
 
+    const fetchUrlBuffer = async (url, timeout = 10000) => {
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            },
+            timeout,
+            maxContentLength: 20 * 1024 * 1024,
+            maxRedirects: 5,
+            validateStatus: status => status >= 200 && status < 300,
+        });
+
+        return Buffer.from(response.data);
+    };
+
+    const renderPdfFirstPage = async (pdfBuffer) => {
+        const { pdf } = await import("pdf-to-img");
+        const doc = await pdf(pdfBuffer, { scale: 1.5 });
+
+        let page1 = null;
+        if (typeof doc.getPage === 'function') page1 = await doc.getPage(1);
+        else for await (const image of doc) { page1 = image; break; }
+
+        if (!page1) throw new Error("Failed to render first page");
+        return Buffer.isBuffer(page1) ? page1 : Buffer.from(page1);
+    };
+
     // get image from url
     // the purpose is to remove the cross origin policy, because the image is from another domain
 
     socket.on('utility:get_image', async (url, callback) => {
         try {
-            const response = await axios.get(url, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'image/*,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Accept-Encoding': 'gzip, deflate',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
-                },
-                timeout: 10000, // 10 second timeout
-                maxContentLength: 10 * 1024 * 1024, // 10MB max file size
-                maxRedirects: 5, // Allow redirects
-                validateStatus: function (status) {
-                    return status >= 200 && status < 300;
-                }
-            });
+            const imageBuffer = await fetchUrlBuffer(url);
 
-            const imageBuffer = Buffer.from(response.data);
-
-            // Validate that we actually got image data
-            if (imageBuffer.length === 0) {
-                throw new Error('No image data received');
-            }
-
-            // For canvas usage, we don't need to detect image type
-
-            const base64Image = imageBuffer.toString('base64');
+            if (imageBuffer.length === 0) throw new Error('No image data received');
 
             callback({
                 status: "success",
                 message: "Image fetched successfully",
-                payload: base64Image
+                payload: imageBuffer.toString('base64')
             });
         } catch (error) {
             let errorMessage = 'Failed to fetch image';
@@ -86,26 +93,7 @@ module.exports = (socket, io) => {
 
     socket.on("pdf:thumbnail", async (data, callback) => {
         try {
-            const pdfBuffer = normalizePdfBuffer(data);
-
-            const { pdf } = await import("pdf-to-img");
-            const doc = await pdf(pdfBuffer, { scale: 1.5 });
-
-            let page1 = null;
-            if (typeof doc.getPage === 'function') {
-                page1 = await doc.getPage(1);
-            } else {
-                for await (const image of doc) {
-                    page1 = image;
-                    break;
-                }
-            }
-
-            if (!page1) {
-                throw new Error("Failed to render first page");
-            }
-
-            const payload = Buffer.isBuffer(page1) ? page1 : Buffer.from(page1);
+            const payload = await renderPdfFirstPage(normalizePdfBuffer(data));
             callback({ status: "success", message: "PDF thumbnail created successfully", payload });
         } catch (error) {
             callback({ status: "error", message: error.message });
