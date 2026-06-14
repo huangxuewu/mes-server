@@ -20,6 +20,8 @@ const userSchema = new mongoose.Schema({
         access: [String],
         create: [String],
         view: [String],
+        update: [String],
+        modify: [String],
         edit: [String],
         delete: [String],
         approve: [String],
