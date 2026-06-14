@@ -18,6 +18,11 @@ const billSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
+    accountNumber: {
+        type: String,
+        default: "",
+        trim: true,
+    },
     periodStart: {
         type: String,
         required: true,

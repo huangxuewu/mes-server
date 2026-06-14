@@ -49,6 +49,11 @@ const serviceProviderSchema = new mongoose.Schema({
         enum: PAYMENT_TERMS,
         default: "Net 30",
     },
+    accountNumber: {
+        type: String,
+        default: "",
+        trim: true,
+    },
     servicePhone: {
         type: String,
         default: "",
