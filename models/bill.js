@@ -28,6 +28,11 @@ const billSchema = new mongoose.Schema({
         required: true,
         trim: true,
     },
+    dueDate: {
+        type: String,
+        default: "",
+        trim: true,
+    },
     amount: {
         type: Number,
         required: true,
@@ -58,7 +63,13 @@ const billSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
-    checkNumber: {
+    paymentMethod: {
+        type: String,
+        enum: ["AutoPay", "ACH", "Check", "CreditCard", "Wire", ""],
+        default: "",
+        trim: true,
+    },
+    paymentReference: {
         type: String,
         default: "",
         trim: true,
