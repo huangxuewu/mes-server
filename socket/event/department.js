@@ -1,5 +1,6 @@
 const db = require("../../models");
 const syncDepartmentTeams = require("../../utils/syncDepartmentTeams");
+const { cleanupOrphanedTeamSchedules, cleanupDepartmentSchedules } = require("../../utils/cleanupTeamSchedules");
 
 module.exports = (socket, io) => {
     // Create new department
@@ -7,6 +8,7 @@ module.exports = (socket, io) => {
         try {
             const department = await db.department.create(data);
             await syncDepartmentTeams(department);
+            await cleanupOrphanedTeamSchedules(department);
             callback({ status: "success", message: "Department created successfully", payload: department });
 
             io.emit("department:created", department);
@@ -23,6 +25,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Department not found" });
 
             await syncDepartmentTeams(department);
+            await cleanupOrphanedTeamSchedules(department);
             callback({ status: "success", message: "Department updated successfully", payload: department });
 
             io.emit("department:updated", department);
@@ -36,6 +39,7 @@ module.exports = (socket, io) => {
         try {
             const _id = payload?._id ?? payload;
             await db.employee.updateMany({ department: _id }, { $unset: { team: '', department: '' } });
+            await cleanupDepartmentSchedules(_id);
             const result = await db.department.deleteOne({ _id });
             if (result.deletedCount === 0)
                 return callback({ status: "error", message: "Department not found" });

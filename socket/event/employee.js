@@ -178,6 +178,71 @@ module.exports = (socket, io) => {
         }
     });
 
+    // Work schedule (team-level)
+    socket.on('workScheduleTemplate:get', async ({ teamId }, callback) => {
+        try {
+            const template = await db.workScheduleTemplate.findOne({ teamId });
+            callback({ status: "success", message: "Work schedule template fetched successfully", payload: template });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workScheduleTemplates:fetch', async ({ departmentId }, callback) => {
+        try {
+            const templates = await db.workScheduleTemplate.find({ departmentId });
+            callback({ status: "success", message: "Work schedule templates fetched successfully", payload: templates });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workScheduleTemplate:upsert', async (payload, callback) => {
+        try {
+            const { teamId, departmentId, ...rest } = payload;
+            const template = await db.workScheduleTemplate.findOneAndUpdate(
+                { teamId },
+                { $set: { teamId, departmentId, ...rest } },
+                { new: true, upsert: true }
+            );
+            callback({ status: "success", message: "Work schedule template saved successfully", payload: template });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workSchedules:fetch', async (query, callback) => {
+        try {
+            const schedules = await db.workSchedule.find(query);
+            callback({ status: "success", message: "Work schedules fetched successfully", payload: schedules });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workSchedule:upsert', async (payload, callback) => {
+        try {
+            const { teamId, departmentId, date, ...rest } = payload;
+            const schedule = await db.workSchedule.findOneAndUpdate(
+                { teamId, date },
+                { $set: { teamId, departmentId, date, ...rest } },
+                { new: true, upsert: true }
+            );
+            callback({ status: "success", message: "Work schedule saved successfully", payload: schedule });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workSchedule:delete', async ({ teamId, date }, callback) => {
+        try {
+            await db.workSchedule.deleteOne({ teamId, date });
+            callback({ status: "success", message: "Work schedule deleted successfully", payload: { teamId, date } });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
     socket.on('enrollment:get', async (query, callback) => {
         try {
             const enrollment = await db.enrollment.findOne(query);
