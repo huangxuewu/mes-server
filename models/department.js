@@ -27,9 +27,10 @@ const departmentSchema = new mongoose.Schema({
         enum: ["Active", "Inactive"],
         default: "Active"
     },
-    teamMembers:[{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'employee'
+    teams: [{
+        name: { type: String, required: true, trim: true },
+        leader: { type: mongoose.Schema.Types.ObjectId, ref: 'employee' },
+        members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'employee' }]
     }]
 }, {
     timestamps: true

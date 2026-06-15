@@ -1,13 +1,14 @@
 const db = require("../../models");
+const syncDepartmentTeams = require("../../utils/syncDepartmentTeams");
 
 module.exports = (socket, io) => {
     // Create new department
     socket.on("department:create", async (data, callback) => {
         try {
             const department = await db.department.create(data);
+            await syncDepartmentTeams(department);
             callback({ status: "success", message: "Department created successfully", payload: department });
 
-            // Broadcast to all connected clients
             io.emit("department:created", department);
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -18,12 +19,12 @@ module.exports = (socket, io) => {
     socket.on("department:update", async ({ _id, ...data }, callback) => {
         try {
             const department = await db.department.findByIdAndUpdate(_id, { $set: data }, { new: true });
-            if (!department) {
+            if (!department)
                 return callback({ status: "error", message: "Department not found" });
-            }
+
+            await syncDepartmentTeams(department);
             callback({ status: "success", message: "Department updated successfully", payload: department });
 
-            // Broadcast to all connected clients
             io.emit("department:updated", department);
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -31,15 +32,15 @@ module.exports = (socket, io) => {
     });
 
     // Delete department
-    socket.on("department:delete", async (_id, callback) => {
+    socket.on("department:delete", async (payload, callback) => {
         try {
+            const _id = payload?._id ?? payload;
+            await db.employee.updateMany({ department: _id }, { $unset: { team: '', department: '' } });
             const result = await db.department.deleteOne({ _id });
-            if (result.deletedCount === 0) {
+            if (result.deletedCount === 0)
                 return callback({ status: "error", message: "Department not found" });
-            }
-            callback({ status: "success", message: "Department deleted successfully" });
 
-            // Broadcast to all connected clients
+            callback({ status: "success", message: "Department deleted successfully" });
             io.emit("department:deleted", { _id });
         } catch (error) {
             callback({ status: "error", message: error.message });

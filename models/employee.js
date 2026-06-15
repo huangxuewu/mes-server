@@ -140,6 +140,7 @@ const employeeSchema = new Schema({
         }
     },
     department: { type: mongoose.Schema.Types.ObjectId, ref: "department" },
+    team: { type: mongoose.Schema.Types.ObjectId },
     position: { type: mongoose.Schema.Types.ObjectId, ref: "position" },
     skillLevel: { type: String, enum: ["Intern", "Junior", "Intermediate", "Senior", "Lead", "Supervisor", "Manager", "Director", "Executive"], default: "Junior" },
     tags: { type: [String], default: [] },
