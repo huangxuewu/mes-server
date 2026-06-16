@@ -179,18 +179,24 @@ module.exports = (socket, io) => {
     });
 
     // Work schedule (team-level)
-    socket.on('workScheduleTemplate:get', async ({ teamId }, callback) => {
+    socket.on('workScheduleTemplate:get', async ({ _id, teamId }, callback) => {
         try {
-            const template = await db.workScheduleTemplate.findOne({ teamId });
+            const template = _id
+                ? await db.workScheduleTemplate.findOne({ _id })
+                : teamId
+                    ? await db.workScheduleTemplate.findOne({ teamId, isDefault: true })
+                        || await db.workScheduleTemplate.findOne({ teamId }).sort({ createdAt: 1 })
+                    : null;
             callback({ status: "success", message: "Work schedule template fetched successfully", payload: template });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
     });
 
-    socket.on('workScheduleTemplates:fetch', async ({ departmentId }, callback) => {
+    socket.on('workScheduleTemplates:fetch', async ({ teamId, departmentId }, callback) => {
         try {
-            const templates = await db.workScheduleTemplate.find({ departmentId });
+            const filter = teamId ? { teamId } : departmentId ? { departmentId } : {};
+            const templates = await db.workScheduleTemplate.find(filter).sort({ name: 1 });
             callback({ status: "success", message: "Work schedule templates fetched successfully", payload: templates });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -199,13 +205,59 @@ module.exports = (socket, io) => {
 
     socket.on('workScheduleTemplate:upsert', async (payload, callback) => {
         try {
-            const { teamId, departmentId, ...rest } = payload;
-            const template = await db.workScheduleTemplate.findOneAndUpdate(
-                { teamId },
-                { $set: { teamId, departmentId, ...rest } },
-                { new: true, upsert: true }
-            );
+            const { _id, teamId, departmentId, isDefault, name, ...rest } = payload;
+            if (!teamId || !departmentId || !name?.trim())
+                return callback({ status: "error", message: "Team, department, and template name are required" });
+
+            const trimmedName = String(name).trim();
+            const duplicate = await db.workScheduleTemplate.findOne({
+                teamId,
+                name: trimmedName,
+                ...(_id ? { _id: { $ne: _id } } : {})
+            });
+            if (duplicate)
+                return callback({ status: "error", message: "A template with this name already exists for this team" });
+
+            if (isDefault)
+                await db.workScheduleTemplate.updateMany({ teamId, ...(_id ? { _id: { $ne: _id } } : {}) }, { $set: { isDefault: false } });
+
+            const existingCount = await db.workScheduleTemplate.countDocuments({ teamId, ...(_id ? { _id: { $ne: _id } } : {}) });
+            const shouldDefault = !!isDefault || existingCount === 0;
+
+            if (shouldDefault && !isDefault)
+                await db.workScheduleTemplate.updateMany({ teamId, ...(_id ? { _id: { $ne: _id } } : {}) }, { $set: { isDefault: false } });
+
+            const doc = {
+                teamId,
+                departmentId,
+                name: trimmedName,
+                isDefault: shouldDefault,
+                ...rest
+            };
+
+            const template = _id
+                ? await db.workScheduleTemplate.findOneAndUpdate({ _id }, { $set: doc }, { new: true })
+                : await db.workScheduleTemplate.create(doc);
+
             callback({ status: "success", message: "Work schedule template saved successfully", payload: template });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('workScheduleTemplate:delete', async ({ _id }, callback) => {
+        try {
+            if (!_id) return callback({ status: "error", message: "Template id is required" });
+
+            const removed = await db.workScheduleTemplate.findOneAndDelete({ _id });
+            if (!removed) return callback({ status: "error", message: "Template not found" });
+
+            if (removed.isDefault) {
+                const next = await db.workScheduleTemplate.findOne({ teamId: removed.teamId }).sort({ createdAt: 1 });
+                if (next) await db.workScheduleTemplate.updateOne({ _id: next._id }, { $set: { isDefault: true } });
+            }
+
+            callback({ status: "success", message: "Work schedule template deleted successfully", payload: { _id } });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

@@ -11,6 +11,8 @@ const workScheduleTemplateSchema = new mongoose.Schema({
         ref: "department",
         required: true
     },
+    name: { type: String, default: "", required: true },
+    isDefault: { type: Boolean, default: false },
     workStartTime: { type: String, default: "" },
     workEndTime: { type: String, default: "" },
     events: [scheduleEventSchema],
@@ -18,7 +20,8 @@ const workScheduleTemplateSchema = new mongoose.Schema({
     note: { type: String, default: "" }
 }, { timestamps: true });
 
-workScheduleTemplateSchema.index({ teamId: 1 }, { unique: true });
+workScheduleTemplateSchema.index({ teamId: 1, name: 1 }, { unique: true });
 workScheduleTemplateSchema.index({ departmentId: 1 });
+workScheduleTemplateSchema.index({ teamId: 1, isDefault: 1 });
 
 module.exports = mongoose.model("workScheduleTemplate", workScheduleTemplateSchema);
