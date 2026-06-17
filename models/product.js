@@ -250,30 +250,40 @@ productSchema.pre("save", async function (next) {
  * Pre hook for findOneAndUpdate
  */
 productSchema.pre("findOneAndUpdate", async function (next) {
-    const update = this.getUpdate();
-    const newSpecification = update?.$set?.specification ?? update?.specification;
-    if (!newSpecification) return next();
+    try {
+        const update = this.getUpdate() || {};
+        const $set = { ...(update.$set || {}) };
+        const newSpecification = $set.specification ?? update.specification;
+        if (!newSpecification) return next();
 
-    const docToUpdate = await this.model.findOne(this.getQuery());
-    if (!docToUpdate) return next();
+        const docToUpdate = await this.model.findOne(this.getQuery());
+        if (!docToUpdate) return next();
 
-    const newVersion = bumpVersion(docToUpdate.version);
-    const changes = diffSpecifications(docToUpdate.specification, newSpecification);
+        const newVersion = bumpVersion(docToUpdate.version);
+        const changes = diffSpecifications(docToUpdate.specification, newSpecification);
 
-    // merge into update
-    this.findOneAndUpdate({}, {
-        $set: { version: newVersion },
-        $push: {
-            revisionHistory: {
-                version: newVersion,
-                updatedAt: new Date(),
-                updatedBy: update._updatedBy || update?.$set?._updatedBy || "system",
-                changes: changes || "Specification updated"
+        delete $set.revisionHistory;
+        delete update.revisionHistory;
+        $set.version = newVersion;
+
+        this.setUpdate({
+            ...update,
+            $set,
+            $push: {
+                ...(update.$push || {}),
+                revisionHistory: {
+                    version: newVersion,
+                    updatedAt: new Date(),
+                    updatedBy: $set._updatedBy || "system",
+                    changes: changes || "Specification updated"
+                }
             }
-        }
-    });
+        });
 
-    next();
+        next();
+    } catch (err) {
+        next(err);
+    }
 });
 
 /**

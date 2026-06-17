@@ -13,7 +13,7 @@ module.exports = (socket, io) => {
 
     socket.on('product:update', async (payload, callback) => {
         try {
-            const { _id, ...data } = payload;
+            const { _id, revisionHistory, version, ...data } = payload;
             const product = await db.product.findByIdAndUpdate(_id, { $set: data }, { new: true });
             callback({ status: "success", message: "Product updated successfully", payload: product })
         } catch (error) {
