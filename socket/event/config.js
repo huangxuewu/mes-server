@@ -62,9 +62,7 @@ module.exports = (socket, io) => {
     socket.on("station:create", async (data, callback) => {
         try {
             const station = await db.station.create(data);
-            const payload = await db.station.updateOne({ _id: station._id }, { $set: station }, { new: true, upsert: true });
-
-            callback({ status: "success", message: "Station created successfully", payload });
+            callback({ status: "success", message: "Station created successfully", payload: station });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
