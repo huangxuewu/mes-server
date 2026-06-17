@@ -59,6 +59,14 @@ const serviceProviderSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
+    contacts: [{
+        title: { type: String, default: "", trim: true },
+        name: { type: String, default: "", trim: true },
+        cellphone: { type: String, default: "", trim: true },
+        telephone: { type: String, default: "", trim: true },
+        extension: { type: String, default: "", trim: true },
+        email: { type: String, default: "", trim: true, lowercase: true },
+    }],
     contactEmail: {
         type: String,
         default: "",

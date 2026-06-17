@@ -162,7 +162,7 @@ const productSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["Active", "Development", "Discontinued", "Pre-Production"],
+        enum: ["Draft", "Active", "Development", "Discontinued", "Pre-Production"],
         default: "Development"
     }
 }, { timestamps: true });
