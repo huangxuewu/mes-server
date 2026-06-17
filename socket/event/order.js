@@ -39,7 +39,8 @@ module.exports = (socket, io) => {
 
     socket.on('order:get', async (data, callback) => {
         try {
-
+            const order = await db.order.findOne(data).lean();
+            callback?.({ status: "success", message: "Order fetched successfully", payload: order });
         } catch (error) {
             callback?.({ status: "error", message: error.message })
         }
@@ -47,11 +48,38 @@ module.exports = (socket, io) => {
 
     socket.on('orders:get', async (query, callback) => {
         try {
-            db.order.find(query).sort({ cancelDate: 1 }).then(orders => {
-                callback?.({ status: "success", message: "Orders fetched successfully", payload: orders })
-            }).catch(error => {
-                callback?.({ status: "error", message: error.message })
-            })
+            const startedAt = Date.now();
+            const orders = await db.order.aggregate([
+                { $match: query },
+                { $sort: { cancelDate: 1 } },
+                {
+                    $addFields: {
+                        buyers: {
+                            $map: {
+                                input: { $ifNull: ['$buyers', []] },
+                                as: 'buyer',
+                                in: {
+                                    poNumber: '$$buyer.poNumber',
+                                    poDate: '$$buyer.poDate',
+                                    masterPO: '$$buyer.masterPO',
+                                    name: '$$buyer.name',
+                                    address: '$$buyer.address',
+                                    city: '$$buyer.city',
+                                    state: '$$buyer.state',
+                                    zip: '$$buyer.zip',
+                                    country: '$$buyer.country',
+                                    done: '$$buyer.done',
+                                    status: '$$buyer.status',
+                                    shipWindow: '$$buyer.shipWindow',
+                                }
+                            }
+                        }
+                    }
+                },
+                { $project: { productionLogs: 0 } },
+            ]);
+            console.log(`orders:get returned ${orders.length} orders in ${Date.now() - startedAt}ms`);
+            callback?.({ status: "success", message: "Orders fetched successfully", payload: orders });
         } catch (error) {
             callback?.({ status: "error", message: error.message })
         }

@@ -77,6 +77,8 @@ const orderSchema = new mongoose.Schema({
     timestamps: true
 });
 
+orderSchema.index({ cancelDate: 1 });
+
 // check if order po number already exists
 orderSchema.methods.checkDuplication = async function () {
     const record = await this.constructor.findOne({ poNumber: this.poNumber });
