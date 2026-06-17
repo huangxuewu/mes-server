@@ -181,28 +181,49 @@ function bumpVersion(version) {
 }
 
 /**
- * Helper: compute diff of specification arrays
+ * Helper: normalize specification to a flat change map (supports legacy array + grouped object)
  */
-function diffSpecifications(oldSpecs = [], newSpecs = []) {
+function specsToChangeMap(specs) {
+    const map = {};
+
+    if (Array.isArray(specs)) {
+        specs.forEach(spec => {
+            (spec?.fields || []).forEach(f => {
+                map[`${spec.group}:${f.name}`] = f.value;
+            });
+        });
+        return map;
+    }
+
+    if (!specs || typeof specs !== 'object') return map;
+
+    for (const [group, rows] of Object.entries(specs)) {
+        if (!Array.isArray(rows)) continue;
+        rows.forEach(row => {
+            const name = String(row?.[1] ?? '').trim();
+            if (!name) return;
+            const values = Array.isArray(row) ? row.slice(2).map(v => String(v ?? '').trim()).filter(Boolean) : [];
+            map[`${group}:${name}`] = values.join(', ');
+        });
+    }
+
+    return map;
+}
+
+/**
+ * Helper: compute diff of specification (array or grouped object)
+ */
+function diffSpecifications(oldSpecs, newSpecs) {
+    const oldMap = specsToChangeMap(oldSpecs);
+    const newMap = specsToChangeMap(newSpecs);
     const changes = [];
 
-    const oldMap = {};
-    oldSpecs.forEach(spec => {
-        spec.fields.forEach(f => {
-            oldMap[`${spec.group}:${f.name}`] = f.value;
-        });
-    });
+    for (const [key, value] of Object.entries(newMap)) {
+        if (oldMap[key] !== value)
+            changes.push(`${key}: "${oldMap[key] || '-'}" -> "${value}"`);
+    }
 
-    newSpecs.forEach(spec => {
-        spec.fields.forEach(f => {
-            const key = `${spec.group}:${f.name}`;
-            if (oldMap[key] !== f.value) {
-                changes.push(`${key}: "${oldMap[key] || "-"}" -> "${f.value}"`);
-            }
-        });
-    });
-
-    return changes.join("; ");
+    return changes.join('; ');
 }
 
 /**
@@ -230,13 +251,14 @@ productSchema.pre("save", async function (next) {
  */
 productSchema.pre("findOneAndUpdate", async function (next) {
     const update = this.getUpdate();
-    if (!update.specification) return next();
+    const newSpecification = update?.$set?.specification ?? update?.specification;
+    if (!newSpecification) return next();
 
     const docToUpdate = await this.model.findOne(this.getQuery());
     if (!docToUpdate) return next();
 
     const newVersion = bumpVersion(docToUpdate.version);
-    const changes = diffSpecifications(docToUpdate.specification, update.specification);
+    const changes = diffSpecifications(docToUpdate.specification, newSpecification);
 
     // merge into update
     this.findOneAndUpdate({}, {
@@ -245,7 +267,7 @@ productSchema.pre("findOneAndUpdate", async function (next) {
             revisionHistory: {
                 version: newVersion,
                 updatedAt: new Date(),
-                updatedBy: update._updatedBy || "system",
+                updatedBy: update._updatedBy || update?.$set?._updatedBy || "system",
                 changes: changes || "Specification updated"
             }
         }
