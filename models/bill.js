@@ -79,7 +79,7 @@ const billSchema = new mongoose.Schema({
         default: "",
         trim: true,
     },
-    operatorName: {
+    handler: {
         type: String,
         default: "",
         trim: true,
