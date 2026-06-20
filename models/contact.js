@@ -20,6 +20,7 @@ const contactInfoSchema = new mongoose.Schema({
 
 const businessInfoSchema = new mongoose.Schema({
     companyName: { type: String },
+    dbaName: { type: String },
     taxId: { type: String },
     industry: { type: String },
     size: { 
