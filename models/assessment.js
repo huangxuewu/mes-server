@@ -6,6 +6,7 @@ const answerSchema = new mongoose.Schema({
     questionId: { type: String, required: true },
     sectionId: { type: String, required: true },
     rating: { type: Number, min: 1, max: 5 },
+    na: { type: Boolean, default: false },
     note: { type: String, default: "" }
 }, { _id: false });
 

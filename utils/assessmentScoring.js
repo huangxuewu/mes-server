@@ -15,8 +15,8 @@ const computeScores = (answers = []) => {
     const bySection = {};
     const allRatings = [];
 
-    answers.forEach(({ sectionId, rating }) => {
-        if (!rating) return;
+    answers.forEach(({ sectionId, rating, na }) => {
+        if (na || !rating) return;
         if (!bySection[sectionId]) bySection[sectionId] = [];
         bySection[sectionId].push(rating);
         allRatings.push(rating);
