@@ -99,6 +99,7 @@ const productSchema = new mongoose.Schema({
     styleName: { type: String, index: true },
     styleColor: String,
     styleSize: String,
+    firmness: String,
     styleCode: String,
     styleImage: String,
     stylePrice: { type: Number, min: 0 },

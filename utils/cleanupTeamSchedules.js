@@ -8,19 +8,13 @@ const cleanupOrphanedTeamSchedules = async (department) => {
         ? { departmentId: department._id, teamId: { $nin: activeTeamIds } }
         : { departmentId: department._id };
 
-    await Promise.all([
-        db.workScheduleTemplate.deleteMany(filter),
-        db.workSchedule.deleteMany(filter)
-    ]);
+    await db.workSchedule.deleteMany(filter);
 };
 
 const cleanupDepartmentSchedules = async (departmentId) => {
     if (!departmentId) return;
 
-    await Promise.all([
-        db.workScheduleTemplate.deleteMany({ departmentId }),
-        db.workSchedule.deleteMany({ departmentId })
-    ]);
+    await db.workSchedule.deleteMany({ departmentId });
 };
 
 module.exports = { cleanupOrphanedTeamSchedules, cleanupDepartmentSchedules };

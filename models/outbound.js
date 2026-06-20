@@ -35,6 +35,7 @@ const loadSchema = new mongoose.Schema({
     assignedSCAC: { type: String, default: "" },
     executingSCAC: { type: String, default: "" },
     carrierSCAC: { type: String, default: "" },
+    stop: { type: Number, default: 0, description: "LTL pickup stop: 0=direct load, 1=stop 1, 2=stop 2" },
     chRobinsonNumber: { type: String, default: "" },
     cube: { type: Number, default: 0 },
     weight: { type: Number, default: 0 },
