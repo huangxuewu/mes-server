@@ -202,9 +202,24 @@ module.exports = (socket, io) => {
 
     socket.on('workScheduleTemplate:upsert', async (payload, callback) => {
         try {
-            const { _id, isDefault, name, teamId: _teamId, departmentId: _departmentId, ...rest } = payload;
+            const {
+                _id,
+                isDefault,
+                applyScope,
+                departmentId,
+                name,
+                workStartTime,
+                workEndTime,
+                events,
+                weekdayOverrides,
+                note
+            } = payload;
             if (!name?.trim())
                 return callback({ status: "error", message: "Template name is required" });
+
+            const scopedApply = applyScope === 'department' ? 'department' : 'all';
+            if (scopedApply === 'department' && !departmentId)
+                return callback({ status: "error", message: "Department is required for department-scoped templates" });
 
             const trimmedName = String(name).trim();
             const duplicate = await db.workScheduleTemplate.findOne({
@@ -214,19 +229,35 @@ module.exports = (socket, io) => {
             if (duplicate)
                 return callback({ status: "error", message: "A template with this name already exists" });
 
+            const scopeFilter = scopedApply === 'department'
+                ? { applyScope: 'department', departmentId }
+                : { applyScope: 'all' };
+
             if (isDefault)
-                await db.workScheduleTemplate.updateMany({ ...(_id ? { _id: { $ne: _id } } : {}) }, { $set: { isDefault: false } });
+                await db.workScheduleTemplate.updateMany({
+                    ...scopeFilter,
+                    ...(_id ? { _id: { $ne: _id } } : {})
+                }, { $set: { isDefault: false } });
 
             const existingCount = await db.workScheduleTemplate.countDocuments({ ...(_id ? { _id: { $ne: _id } } : {}) });
             const shouldDefault = !!isDefault || existingCount === 0;
 
             if (shouldDefault && !isDefault)
-                await db.workScheduleTemplate.updateMany({ ...(_id ? { _id: { $ne: _id } } : {}) }, { $set: { isDefault: false } });
+                await db.workScheduleTemplate.updateMany({
+                    ...scopeFilter,
+                    ...(_id ? { _id: { $ne: _id } } : {})
+                }, { $set: { isDefault: false } });
 
             const doc = {
                 name: trimmedName,
                 isDefault: shouldDefault,
-                ...rest
+                applyScope: scopedApply,
+                departmentId: scopedApply === 'department' ? departmentId : null,
+                workStartTime: workStartTime || '',
+                workEndTime: workEndTime || '',
+                events: events || [],
+                weekdayOverrides: weekdayOverrides || {},
+                note: note || ''
             };
 
             const template = _id
