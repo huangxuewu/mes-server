@@ -41,6 +41,7 @@ const employmentSchema = new Schema({
         notes: { type: String },
         workType: { type: String, enum: ["Full Time", "Part Time", "Contract", "Intern", "Temporary"], default: "Full Time" },
         payType: { type: String, enum: ["Hourly", "Salary", "Commission"], default: "Hourly" },
+        payRate: { type: Number },
         approver: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
     },
     probation: {
@@ -153,7 +154,11 @@ const employeeSchema = new Schema({
     documents: documentLinksSchema,
     workHistory: [workHistorySchema],
     isDeleted: { type: Boolean, default: false },
-    status: { type: String, enum: ["Draft", "Pending", "Probation", "Active", "Inactive"], default: "Draft" }
+    hiringStatus: {
+        type: String,
+        enum: ["Applied", "Reviewing", "Active", "Rejected", "Withdrawn", "Incomplete"],
+        default: "Incomplete"
+    }
 }, { timestamps: true });
 
 

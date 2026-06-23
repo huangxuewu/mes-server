@@ -1,5 +1,49 @@
+const mongoose = require("mongoose");
 const dayjs = require("../../utils/dayjs");
 const db = require("../../models");
+
+const REF_OBJECT_ID_FIELDS = ["department", "team", "position"];
+
+const stripBlankRefIds = (payload) => {
+    const next = { ...payload };
+    for (const field of REF_OBJECT_ID_FIELDS) {
+        const val = next[field];
+        if (val === "" || val === null || val === undefined)
+            delete next[field];
+    }
+    return next;
+};
+
+const invalidRefUnsets = (doc) => {
+    const unset = {};
+    if (!doc) return unset;
+    for (const field of REF_OBJECT_ID_FIELDS) {
+        const val = doc[field];
+        if (val === "" || (typeof val === "string" && !mongoose.isValidObjectId(val)))
+            unset[field] = "";
+    }
+    return unset;
+};
+
+const buildEmployeeUpdateOp = (existing, setPayload) => {
+    const $set = stripBlankRefIds(setPayload);
+    const $unset = invalidRefUnsets(existing);
+    const op = {};
+    if (Object.keys($set).length) op.$set = $set;
+    if (Object.keys($unset).length) op.$unset = $unset;
+    return op;
+};
+
+const HIRING_TRANSITIONS = {
+    Applied: ["Reviewing", "Incomplete", "Rejected", "Withdrawn"],
+    Reviewing: ["Active", "Incomplete", "Rejected", "Withdrawn"],
+    Incomplete: ["Reviewing"],
+    Active: [],
+    Rejected: [],
+    Withdrawn: [],
+};
+
+const canHiringTransition = (from, to) => HIRING_TRANSITIONS[from]?.includes(to) ?? false;
 
 module.exports = (socket, io) => {
 
@@ -26,7 +70,9 @@ module.exports = (socket, io) => {
     // create new employee
     socket.on('employee:create', async (data, callback) => {
         try {
-            const employee = await db.employee.create(data);
+            const { status, ...rest } = data;
+            const hiringStatus = rest.hiringStatus === "Applied" ? "Applied" : "Incomplete";
+            const employee = await db.employee.create(stripBlankRefIds({ ...rest, hiringStatus }));
             callback({ status: "success", message: "Employee created successfully", payload: employee });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -35,8 +81,81 @@ module.exports = (socket, io) => {
 
     socket.on('employee:update', async ({ _id, ...data }, callback) => {
         try {
-            const employee = await db.employee.findByIdAndUpdate({ _id }, { $set: data }, { new: true });
+            if (Object.prototype.hasOwnProperty.call(data, 'hiringStatus'))
+                return callback({ status: "error", message: "Use employee:hiringTransition to change hiring status" });
+
+            const { status, ...update } = data;
+            const existing = await db.employee.findById(_id).lean();
+            if (!existing) return callback({ status: "error", message: "Employee not found" });
+
+            const op = buildEmployeeUpdateOp(existing, update);
+            if (!op.$set && !op.$unset)
+                return callback({ status: "error", message: "No valid fields to update" });
+
+            const employee = await db.employee.findByIdAndUpdate(_id, op, { new: true });
             callback({ status: "success", message: "Employee updated successfully", payload: employee });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on('employee:hiringTransition', async (payload, callback) => {
+        try {
+            const { _id, hiringStatus, department, team, position, payRate } = payload;
+            if (!_id || !hiringStatus) return callback({ status: "error", message: "Employee id and hiring status are required" });
+
+            const employee = await db.employee.findById(_id).lean();
+            if (!employee) return callback({ status: "error", message: "Employee not found" });
+
+            const from = employee.hiringStatus || "Incomplete";
+            if (!canHiringTransition(from, hiringStatus)) return callback({ status: "error", message: `Invalid hiring transition from ${from} to ${hiringStatus}` });
+
+            const update = { hiringStatus };
+
+            if (hiringStatus === "Active") {
+                if (!department) return callback({ status: "error", message: "Department is required" });
+                if (!position) return callback({ status: "error", message: "Position is required" });
+                if (payRate === "" || payRate == null || Number.isNaN(Number(payRate)))
+                    return callback({ status: "error", message: "Pay rate is required" });
+
+                const dept = await db.department.findById(department).lean();
+                const teams = dept?.teams || [];
+                if (teams.length && !team)
+                    return callback({ status: "error", message: "Team is required" });
+
+                const pos = await db.position.findById(position).lean();
+                if (!pos) return callback({ status: "error", message: "Position not found" });
+
+                update.department = department;
+                update.position = position;
+                update["employment.hire.payRate"] = Number(payRate);
+                update["employment.hire.payType"] = employee.preferred?.payType || "Hourly";
+                update["employment.status"] = "Probation";
+                if (employee.preferred?.workType)
+                    update["employment.hire.workType"] = employee.preferred.workType;
+                if (!employee.employment?.hire?.date)
+                    update["employment.hire.date"] = dayjs().format("YYYY-MM-DD");
+                if (pos.level && pos.level !== "Custom")
+                    update.skillLevel = pos.level;
+                if (team)
+                    update.team = team;
+
+                const op = buildEmployeeUpdateOp(employee, update);
+                const updated = await db.employee.findByIdAndUpdate(_id, op, { new: true, runValidators: true });
+
+                if (team)
+                    await db.department.updateOne(
+                        { _id: department, "teams._id": team },
+                        { $addToSet: { "teams.$.members": _id } }
+                    );
+
+                return callback({ status: "success", message: "Hiring status updated successfully", payload: updated });
+            }
+
+            const op = buildEmployeeUpdateOp(employee, update);
+            const updated = await db.employee.findByIdAndUpdate(_id, op, { new: true, runValidators: true });
+
+            callback({ status: "success", message: "Hiring status updated successfully", payload: updated });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
