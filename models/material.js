@@ -3,35 +3,16 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 /**
- * Contact Info Schema
+ * Supplier Link Schema
+ * Links a material to an existing supplier `contact` (type 'Supplier') plus
+ * relationship-level fields. Company/person details are resolved from the contact.
  */
-const contactInfoSchema = new mongoose.Schema({
-    email: { type: String, trim: true },
-    phone: { type: String, trim: true },
-    address: { type: String, trim: true }
-}, { _id: false });
-
-/**
- * Point of Contact Schema
- */
-const pointOfContactSchema = new mongoose.Schema({
-    name: { type: String, trim: true },
-    title: { type: String, trim: true },
-    email: { type: String, trim: true },
-    telephone: { type: String, trim: true },
-    extension: { type: String, trim: true },
-    cellphone: { type: String, trim: true }
-}, { _id: false });
-
-/**
- * Supplier Schema
- */
-const supplierSchema = new mongoose.Schema({
-    alias: { type: String, trim: true },
-    companyName: { type: String, trim: true },
+const supplierLinkSchema = new mongoose.Schema({
+    referenceId: { type: mongoose.Schema.Types.ObjectId, ref: 'contact' },
+    pointOfContactId: { type: mongoose.Schema.Types.ObjectId, ref: 'contact' },
     countryOfOrigin: { type: String, trim: true },
-    contactInfo: contactInfoSchema,
-    pointOfContact: pointOfContactSchema
+    leadTime: { type: Number, default: 0, min: 0 }, // procurement lead time, in days
+    isPrimary: { type: Boolean, default: false }
 }, { _id: false });
 
 /**
@@ -63,28 +44,6 @@ const storageSchema = new mongoose.Schema({
     unitsPerPallet: { type: Number, default: 0, min: 0 },
     allowOverHang: { type: Boolean, default: false },
     allowStacking: { type: Boolean, default: false },
-}, { _id: false });
-
-/**
- * Specification Field Schema (for dynamic specifications)
- */
-const specFieldSchema = new mongoose.Schema({
-    name: { type: String, required: true, trim: true },
-    value: { type: mongoose.Schema.Types.Mixed },
-    unit: { type: String, trim: true },
-    type: {
-        type: String,
-        enum: ['text', 'number', 'date', 'boolean', 'image'],
-        default: 'text'
-    }
-}, { _id: false });
-
-/**
- * Specification Schema
- */
-const specificationSchema = new mongoose.Schema({
-    group: { type: String, trim: true },
-    fields: [specFieldSchema]
 }, { _id: false });
 
 /**
@@ -185,8 +144,8 @@ const materialSchema = new mongoose.Schema({
         index: true
     },
 
-    // Supplier Information (detailed)
-    supplier: supplierSchema,
+    // Supplier links (references to `contact` records of type 'Supplier')
+    suppliers: [supplierLinkSchema],
 
     // Physical Properties
     unit: {
@@ -200,8 +159,8 @@ const materialSchema = new mongoose.Schema({
     // Storage
     storage: storageSchema,
 
-    // Specifications (dynamic array)
-    specification: [specificationSchema],
+    // Specifications (grouped object: { [groupName]: [[type, key, ...values], ...] })
+    specification: {},
 
     // Inspection checks
     inspection: [inspectionSchema],
