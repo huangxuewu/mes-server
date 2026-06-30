@@ -46,6 +46,34 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on('orders:demand', async (query, callback) => {
+        try {
+            const lines = await db.order.aggregate([
+                { $match: query || {} },
+                { $project: { poNumber: 1, shipWindow: 1, buyers: 1 } },
+                { $unwind: '$buyers' },
+                { $unwind: '$buyers.items' },
+                {
+                    $project: {
+                        _id: 0,
+                        poNumber: 1,
+                        buyerPo: '$buyers.poNumber',
+                        shipStart: '$shipWindow.start',
+                        state: '$buyers.state',
+                        city: '$buyers.city',
+                        name: '$buyers.name',
+                        location: '$buyers.location',
+                        styleCode: '$buyers.items.styleCode',
+                        quantity: { $add: [{ $ifNull: ['$buyers.items.quantity', 0] }, { $ifNull: ['$buyers.items.adjust', 0] }] },
+                    }
+                },
+            ]);
+            callback?.({ status: "success", message: "Order demand fetched successfully", payload: lines });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message })
+        }
+    });
+
     socket.on('orders:get', async (query, callback) => {
         try {
             const startedAt = Date.now();
