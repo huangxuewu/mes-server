@@ -49,7 +49,7 @@ const contactSchema = new mongoose.Schema({
     // Contact Type
     type: {
         type: String,
-        enum: ["Customer", "Supplier", "Vendor", "Contractor", "Partner", "Employee", "Other"],
+        enum: ["Customer", "Supplier", "Vendor", "Contractor", "Carrier", "Partner", "Employee", "Other"],
         required: true,
         default: "Other"
     },
