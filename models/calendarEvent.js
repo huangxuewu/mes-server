@@ -26,6 +26,10 @@ const calendarEventSchema = new mongoose.Schema({
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     participantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     contactParticipantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "contact" }],
+    optOutIds: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        default: [],
+    },
     repeat: { type: Boolean, default: false },
     repeatRule: repeatRuleSchema,
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

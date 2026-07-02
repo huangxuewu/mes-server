@@ -33,13 +33,37 @@ const loadUser = async (userId) => {
 
 const eventVisibilityFilter = (userId, user) => {
     const oid = toId(userId);
+    const notOptedOut = { optOutIds: { $nin: [oid] } };
     const clauses = [
         { visibility: "private", ownerId: oid },
         { visibility: "public", ownerId: oid },
+        { visibility: "public", participantIds: oid },
     ];
     if (hasPermission(user, "view", PERMS.eventPublicView))
-        clauses.push({ visibility: "public" });
+        clauses.push({ visibility: "public", ...notOptedOut });
     return { $or: clauses };
+};
+
+const isEventParticipant = (event, userId) =>
+    (event.participantIds ?? []).some(id => sameId(id, userId));
+
+const isTaskParticipant = (task, userId) =>
+    (task.participantIds ?? []).some(id => sameId(id, userId));
+
+const hasOptedOut = (event, userId) =>
+    (event.optOutIds ?? []).some(id => sameId(id, userId));
+
+const hasTaskOptedOut = (task, userId) =>
+    (task.optOutIds ?? []).some(id => sameId(id, userId));
+
+const isOptOutOnlyUpdate = (fields, event, userId) => {
+    const keys = Object.keys(fields).filter(k => !["_id", "userId"].includes(k));
+    if (keys.length !== 1 || keys[0] !== "optOutIds") return false;
+    if (!isEventParticipant(event, userId)) return false;
+    const prev = new Set((event.optOutIds ?? []).map(String));
+    const next = (fields.optOutIds ?? []).map(String);
+    if (next.length !== prev.size + 1) return false;
+    return next.every(id => prev.has(id) || sameId(id, userId));
 };
 
 const buildEventRangeFilter = (rangeStart, rangeEnd) => {
@@ -68,78 +92,80 @@ const assertEventRead = (event, userId, user) => {
     if (sameId(event.ownerId, userId)) return null;
     if (event.visibility === "private")
         return "You do not have access to this event";
+    if (isEventParticipant(event, userId)) return null;
+    if (hasOptedOut(event, userId))
+        return "You do not have access to this event";
     if (!hasPermission(user, "view", PERMS.eventPublicView))
         return "You do not have permission to view public events";
     return null;
 };
 
-const assertEventWrite = (event, userId, user, action) => {
+const assertEventWrite = (event, userId, user, action, fields = {}) => {
     if (event && sameId(event.ownerId, userId)) return null;
 
-    const permMap = {
-        create: PERMS.eventPublicCreate,
-        update: PERMS.eventPublicUpdate,
-        delete: PERMS.eventPublicDelete,
-    };
-    const resource = permMap[action];
+    if (action === "update" && event && isOptOutOnlyUpdate(fields, event, userId))
+        return null;
 
     if (!event) {
-        if (action === "create" && hasPermission(user, "create", resource)) return null;
+        if (action === "create" && hasPermission(user, "create", PERMS.eventPublicCreate)) return null;
         if (action === "create") return "You do not have permission to create public events";
         return "Event not found";
     }
 
-    if (event.visibility === "private")
-        return "You do not have access to this event";
-
-    if (!hasPermission(user, action, resource))
-        return `You do not have permission to ${action} public events`;
-
-    return null;
+    return "Only the event owner can modify this event";
 };
 
-const isCompletionOnlyUpdate = (fields) => {
+const isTaskOptOutOnlyUpdate = (fields, task, userId) => {
     const keys = Object.keys(fields).filter(k => !["_id", "userId"].includes(k));
-    if (!keys.length) return false;
-    return keys.every(k => ["completions", "completed"].includes(k));
+    if (keys.length !== 1 || keys[0] !== "optOutIds") return false;
+    if (!isTaskParticipant(task, userId)) return false;
+    const prev = new Set((task.optOutIds ?? []).map(String));
+    const next = (fields.optOutIds ?? []).map(String);
+    if (next.length !== prev.size + 1) return false;
+    return next.every(id => prev.has(id) || sameId(id, userId));
 };
 
 const assertTaskWrite = (task, userId, user, action, fields = {}) => {
-    if (!task) return action === "create" ? null : "Task not found";
-
-    const isOwner = sameId(task.ownerId, userId);
-    const isCollaborate = task.taskMode === "collaborate";
-    const participantIds = (task.participantIds ?? []).map(String);
-    const isParticipant = participantIds.includes(String(userId));
-
-    if (task.taskMode === "self") {
-        if (action === "create") return null;
-        return isOwner ? null : "You do not have access to this task";
-    }
-
     if (action === "create") {
-        return hasPermission(user, "create", PERMS.taskCollaborateCreate)
-            ? null
-            : "You do not have permission to create collaborate tasks";
+        if (task?.taskMode === "collaborate" && !hasPermission(user, "create", PERMS.taskCollaborateCreate))
+            return "You do not have permission to create collaborate tasks";
+        return null;
     }
 
-    if (isOwner) return null;
+    if (!task) return "Task not found";
 
-    if (action === "update" && isParticipant && isCompletionOnlyUpdate(fields))
+    if (sameId(task.ownerId, userId)) return null;
+
+    if (action === "update" && isTaskOptOutOnlyUpdate(fields, task, userId))
         return null;
 
-    const permMap = {
-        update: PERMS.taskCollaborateUpdate,
-        delete: PERMS.taskCollaborateDelete,
-    };
-    const resource = permMap[action];
+    if (task.taskMode === "self")
+        return "You do not have access to this task";
 
-    if (!isCollaborate) return "You do not have access to this task";
+    return "Only the task owner can modify this task";
+};
 
-    if (!hasPermission(user, action, resource))
-        return `You do not have permission to ${action} collaborate tasks`;
+const sanitizeTaskPayload = (data, { participantIds } = {}) => {
+    const payload = stripTaskPayload(data);
+    const ids = participantIds ?? payload.participantIds ?? [];
+    payload.optOutIds = normalizeOptOutIds(ids, payload.optOutIds);
+    return payload;
+};
 
-    return null;
+const normalizeOptOutIds = (participantIds, optOutIds) => {
+    const participants = new Set((participantIds ?? []).map(String));
+    return (optOutIds ?? [])
+        .map(id => toId(id))
+        .filter(id => id && participants.has(String(id)));
+};
+
+const sanitizeEventPayload = (data, { isOwner = false, participantIds } = {}) => {
+    const payload = stripEventPayload(data);
+    if (!isOwner) return payload;
+
+    const ids = participantIds ?? payload.participantIds ?? [];
+    payload.optOutIds = normalizeOptOutIds(ids, payload.optOutIds);
+    return payload;
 };
 
 const stripEventPayload = (data) => {
@@ -214,6 +240,7 @@ module.exports = (socket, io) => {
             const payload = stripEventPayload({ ...rest, visibility: visibility ?? "private" });
             const event = await db.calendarEvent.create({
                 ...payload,
+                optOutIds: [],
                 ownerId: oid,
                 createdBy: oid,
             });
@@ -232,7 +259,7 @@ module.exports = (socket, io) => {
             const event = await db.calendarEvent.findById(_id);
             if (!event) return callback({ status: "error", message: "Event not found" });
 
-            const err = assertEventWrite(event, userId, user, "update");
+            const err = assertEventWrite(event, userId, user, "update", data);
             if (err) return callback({ status: "error", message: err });
 
             if (data.visibility === "public" && event.visibility !== "public") {
@@ -240,13 +267,53 @@ module.exports = (socket, io) => {
                 if (createErr) return callback({ status: "error", message: createErr });
             }
 
+            const isOwner = sameId(event.ownerId, userId);
+            const payload = isOwner
+                ? sanitizeEventPayload(data, {
+                    isOwner: true,
+                    participantIds: data.participantIds ?? event.participantIds,
+                })
+                : stripEventPayload(data);
+
             const updated = await db.calendarEvent.findByIdAndUpdate(
                 _id,
-                { $set: stripEventPayload(data) },
+                { $set: payload },
                 { new: true, runValidators: true },
             );
 
             callback({ status: "success", message: "Event updated", payload: updated });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("calendarEvent:optOut", async ({ _id, userId }, callback) => {
+        try {
+            const user = await loadUser(userId);
+            if (!user) return callback({ status: "error", message: "User not found" });
+
+            const event = await db.calendarEvent.findById(_id);
+            if (!event) return callback({ status: "error", message: "Event not found" });
+
+            const readErr = assertEventRead(event, userId, user);
+            if (readErr) return callback({ status: "error", message: readErr });
+
+            if (sameId(event.ownerId, userId))
+                return callback({ status: "error", message: "Event owners cannot opt out" });
+
+            if (!isEventParticipant(event, userId))
+                return callback({ status: "error", message: "Only participants can opt out of this event" });
+
+            if (hasOptedOut(event, userId))
+                return callback({ status: "success", message: "Already opted out", payload: event });
+
+            const updated = await db.calendarEvent.findByIdAndUpdate(
+                _id,
+                { $addToSet: { optOutIds: toId(userId) } },
+                { new: true, runValidators: true },
+            );
+
+            callback({ status: "success", message: "Opted out of event", payload: updated });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -322,6 +389,7 @@ module.exports = (socket, io) => {
             const task = await db.calendarTask.create({
                 ...stripTaskPayload(rest),
                 taskMode: taskMode ?? "self",
+                optOutIds: [],
                 ownerId: oid,
                 createdBy: oid,
             });
@@ -344,17 +412,54 @@ module.exports = (socket, io) => {
             if (err) return callback({ status: "error", message: err });
 
             if (data.taskMode === "collaborate" && task.taskMode !== "collaborate") {
-                const createErr = assertTaskWrite({ taskMode: "collaborate" }, userId, user, "create");
-                if (createErr) return callback({ status: "error", message: createErr });
+                if (!hasPermission(user, "create", PERMS.taskCollaborateCreate))
+                    return callback({ status: "error", message: "You do not have permission to create collaborate tasks" });
             }
+
+            const isOwner = sameId(task.ownerId, userId);
+            const payload = isOwner
+                ? sanitizeTaskPayload(data, { participantIds: data.participantIds ?? task.participantIds })
+                : stripTaskPayload(data);
 
             const updated = await db.calendarTask.findByIdAndUpdate(
                 _id,
-                { $set: stripTaskPayload(data) },
+                { $set: payload },
                 { new: true, runValidators: true },
             );
 
             callback({ status: "success", message: "Task updated", payload: updated });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("calendarTask:optOut", async ({ _id, userId }, callback) => {
+        try {
+            const user = await loadUser(userId);
+            if (!user) return callback({ status: "error", message: "User not found" });
+
+            const task = await db.calendarTask.findById(_id);
+            if (!task) return callback({ status: "error", message: "Task not found" });
+
+            if (task.taskMode !== "collaborate")
+                return callback({ status: "error", message: "Only collaborate tasks can be opted out" });
+
+            if (sameId(task.ownerId, userId))
+                return callback({ status: "error", message: "Task owners cannot opt out" });
+
+            if (!isTaskParticipant(task, userId))
+                return callback({ status: "error", message: "Only participants can opt out of this task" });
+
+            if (hasTaskOptedOut(task, userId))
+                return callback({ status: "success", message: "Already opted out", payload: task });
+
+            const updated = await db.calendarTask.findByIdAndUpdate(
+                _id,
+                { $addToSet: { optOutIds: toId(userId) } },
+                { new: true, runValidators: true },
+            );
+
+            callback({ status: "success", message: "Opted out of task", payload: updated });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

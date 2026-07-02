@@ -12,6 +12,10 @@ const calendarTaskSchema = new mongoose.Schema({
     },
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     participantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    optOutIds: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        default: [],
+    },
     completions: { type: mongoose.Schema.Types.Mixed, default: {} },
     completed: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
