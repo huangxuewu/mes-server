@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const database = require("../config/database");
 const { io } = require("../socket/io");
+const { userRoom } = require("../socket/session");
 
 const calendarTaskSchema = new mongoose.Schema({
     text: { type: String, required: true },
@@ -23,15 +24,24 @@ const calendarTaskSchema = new mongoose.Schema({
 
 const CalendarTask = database.model("calendarTask", calendarTaskSchema, "calendarTask");
 
+const taskRooms = (doc) => {
+    const rooms = new Set();
+    if (doc.ownerId) rooms.add(userRoom(doc.ownerId));
+    if (doc.taskMode === "collaborate")
+        (doc.participantIds ?? []).forEach(id => rooms.add(userRoom(id)));
+    return [...rooms];
+};
+
 CalendarTask.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.emit("calendarTask:update", change.fullDocument);
+                io.to(taskRooms(change.fullDocument)).emit("calendarTask:update", change.fullDocument);
                 break;
             case "delete":
+                // recipients are unknowable after deletion; broadcasting the id alone leaks nothing
                 io.emit("calendarTask:delete", change.documentKey._id);
                 break;
         }

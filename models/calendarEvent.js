@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const database = require("../config/database");
 const { io } = require("../socket/io");
+const { userRoom, PUBLIC_EVENT_ROOM } = require("../socket/session");
 
 const repeatRuleSchema = new mongoose.Schema({
     frequency: {
@@ -37,15 +38,24 @@ const calendarEventSchema = new mongoose.Schema({
 
 const CalendarEvent = database.model("calendarEvent", calendarEventSchema, "calendarEvent");
 
+const eventRooms = (doc) => {
+    const rooms = new Set();
+    if (doc.ownerId) rooms.add(userRoom(doc.ownerId));
+    (doc.participantIds ?? []).forEach(id => rooms.add(userRoom(id)));
+    if (doc.visibility === "public") rooms.add(PUBLIC_EVENT_ROOM);
+    return [...rooms];
+};
+
 CalendarEvent.watch([], { fullDocument: "updateLookup" })
     .on("change", (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.emit("calendarEvent:update", change.fullDocument);
+                io.to(eventRooms(change.fullDocument)).emit("calendarEvent:update", change.fullDocument);
                 break;
             case "delete":
+                // recipients are unknowable after deletion; broadcasting the id alone leaks nothing
                 io.emit("calendarEvent:delete", change.documentKey._id);
                 break;
         }

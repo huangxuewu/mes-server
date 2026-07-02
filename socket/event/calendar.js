@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const db = require("../../models");
+const { getSessionUserId, hasPermission } = require("../session");
 
 const PERMS = {
     eventPublicView: "office.calendar.event.public.view",
@@ -17,13 +18,6 @@ const toId = (id) => {
 };
 
 const sameId = (a, b) => String(a) === String(b);
-
-const hasPermission = (user, action, resource) => {
-    if (!user) return false;
-    if (user.role === "System") return true;
-    const perms = user.permission?.[action];
-    return Array.isArray(perms) && perms.includes(resource);
-};
 
 const loadUser = async (userId) => {
     const oid = toId(userId);
@@ -125,6 +119,33 @@ const isTaskOptOutOnlyUpdate = (fields, task, userId) => {
     return next.every(id => prev.has(id) || sameId(id, userId));
 };
 
+// A participant may update their own completion entry (and nothing else).
+const isSelfCompletionUpdate = (fields, task, userId) => {
+    const keys = Object.keys(fields).filter(k => !["_id", "userId"].includes(k));
+    if (!keys.length || !keys.every(k => ["completions", "completed"].includes(k))) return false;
+    if (!keys.includes("completions")) return false;
+    if (task.taskMode !== "collaborate") return false;
+    if (!isTaskParticipant(task, userId)) return false;
+    if (hasTaskOptedOut(task, userId)) return false;
+
+    const prev = task.completions ?? {};
+    const next = fields.completions ?? {};
+    const allKeys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of allKeys) {
+        if (sameId(key, userId)) continue;
+        if (Boolean(prev[key]) !== Boolean(next[key])) return false;
+    }
+    return true;
+};
+
+const computeCollaborateCompleted = (participantIds, optOutIds, completions) => {
+    const optedOut = new Set((optOutIds ?? []).map(String));
+    const activeIds = (participantIds ?? []).map(String).filter(id => !optedOut.has(id));
+    if (!activeIds.length) return false;
+    const done = completions ?? {};
+    return activeIds.every(id => Boolean(done[id]));
+};
+
 const assertTaskWrite = (task, userId, user, action, fields = {}) => {
     if (action === "create") {
         if (task?.taskMode === "collaborate" && !hasPermission(user, "create", PERMS.taskCollaborateCreate))
@@ -139,17 +160,13 @@ const assertTaskWrite = (task, userId, user, action, fields = {}) => {
     if (action === "update" && isTaskOptOutOnlyUpdate(fields, task, userId))
         return null;
 
+    if (action === "update" && isSelfCompletionUpdate(fields, task, userId))
+        return null;
+
     if (task.taskMode === "self")
         return "You do not have access to this task";
 
     return "Only the task owner can modify this task";
-};
-
-const sanitizeTaskPayload = (data, { participantIds } = {}) => {
-    const payload = stripTaskPayload(data);
-    const ids = participantIds ?? payload.participantIds ?? [];
-    payload.optOutIds = normalizeOptOutIds(ids, payload.optOutIds);
-    return payload;
 };
 
 const normalizeOptOutIds = (participantIds, optOutIds) => {
@@ -159,19 +176,32 @@ const normalizeOptOutIds = (participantIds, optOutIds) => {
         .filter(id => id && participants.has(String(id)));
 };
 
-const sanitizeEventPayload = (data, { isOwner = false, participantIds } = {}) => {
-    const payload = stripEventPayload(data);
-    if (!isOwner) return payload;
+// Only touch optOutIds when the payload actually carries it (or reshapes the
+// participant list); otherwise a partial update would wipe existing opt-outs.
+const sanitizeTaskPayload = (data, task) => {
+    const payload = stripTaskPayload(data);
+    const participantIds = payload.participantIds ?? task.participantIds ?? [];
+    if (payload.optOutIds !== undefined)
+        payload.optOutIds = normalizeOptOutIds(participantIds, payload.optOutIds);
+    else if (payload.participantIds !== undefined)
+        payload.optOutIds = normalizeOptOutIds(participantIds, task.optOutIds);
+    return payload;
+};
 
-    const ids = participantIds ?? payload.participantIds ?? [];
-    payload.optOutIds = normalizeOptOutIds(ids, payload.optOutIds);
+const sanitizeEventPayload = (data, event) => {
+    const payload = stripEventPayload(data);
+    const participantIds = payload.participantIds ?? event.participantIds ?? [];
+    if (payload.optOutIds !== undefined)
+        payload.optOutIds = normalizeOptOutIds(participantIds, payload.optOutIds);
+    else if (payload.participantIds !== undefined)
+        payload.optOutIds = normalizeOptOutIds(participantIds, event.optOutIds);
     return payload;
 };
 
 const stripEventPayload = (data) => {
     const {
         _id, id, userId, participants, participantCount, seriesId,
-        createdAt, updatedAt, __v,
+        ownerId, createdBy, createdAt, updatedAt, __v,
         ...rest
     } = data;
     return rest;
@@ -180,17 +210,29 @@ const stripEventPayload = (data) => {
 const stripTaskPayload = (data) => {
     const {
         _id, id, userId,
-        createdAt, updatedAt, __v,
+        ownerId, createdBy, createdAt, updatedAt, __v,
         ...rest
     } = data;
     return rest;
 };
 
 module.exports = (socket, io) => {
-    socket.on("calendarEvents:fetch", async ({ rangeStart, rangeEnd, userId }, callback) => {
+    const requireSession = (callback) => {
+        const userId = getSessionUserId(socket);
+        if (!userId) {
+            callback({ status: "error", message: "Not authenticated" });
+            return null;
+        }
+        return userId;
+    };
+
+    socket.on("calendarEvents:fetch", async ({ rangeStart, rangeEnd } = {}, callback) => {
         try {
-            if (!rangeStart || !rangeEnd || !userId)
-                return callback({ status: "error", message: "rangeStart, rangeEnd, and userId are required" });
+            const userId = requireSession(callback);
+            if (!userId) return;
+
+            if (!rangeStart || !rangeEnd)
+                return callback({ status: "error", message: "rangeStart and rangeEnd are required" });
 
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
@@ -208,8 +250,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarEvent:get", async ({ _id, userId }, callback) => {
+    socket.on("calendarEvent:get", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -227,7 +272,10 @@ module.exports = (socket, io) => {
 
     socket.on("calendarEvent:create", async (data, callback) => {
         try {
-            const { userId, visibility, ...rest } = data;
+            const userId = requireSession(callback);
+            if (!userId) return;
+
+            const { visibility, ...rest } = data ?? {};
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -251,8 +299,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarEvent:update", async ({ _id, userId, ...data }, callback) => {
+    socket.on("calendarEvent:update", async ({ _id, ...data } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -269,10 +320,7 @@ module.exports = (socket, io) => {
 
             const isOwner = sameId(event.ownerId, userId);
             const payload = isOwner
-                ? sanitizeEventPayload(data, {
-                    isOwner: true,
-                    participantIds: data.participantIds ?? event.participantIds,
-                })
+                ? sanitizeEventPayload(data, event)
                 : stripEventPayload(data);
 
             const updated = await db.calendarEvent.findByIdAndUpdate(
@@ -287,8 +335,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarEvent:optOut", async ({ _id, userId }, callback) => {
+    socket.on("calendarEvent:optOut", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -319,8 +370,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarEvent:delete", async ({ _id, userId }, callback) => {
+    socket.on("calendarEvent:delete", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -337,9 +391,10 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarTasks:fetch", async ({ userId }, callback) => {
+    socket.on("calendarTasks:fetch", async (payload, callback) => {
         try {
-            if (!userId) return callback({ status: "error", message: "userId is required" });
+            const userId = requireSession(callback);
+            if (!userId) return;
 
             const oid = toId(userId);
             const tasks = await db.calendarTask.find({
@@ -355,8 +410,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarTask:get", async ({ _id, userId }, callback) => {
+    socket.on("calendarTask:get", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const task = await db.calendarTask.findById(_id);
             if (!task) return callback({ status: "error", message: "Task not found" });
 
@@ -373,7 +431,10 @@ module.exports = (socket, io) => {
 
     socket.on("calendarTask:create", async (data, callback) => {
         try {
-            const { userId, taskMode, ...rest } = data;
+            const userId = requireSession(callback);
+            if (!userId) return;
+
+            const { taskMode, ...rest } = data ?? {};
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -400,13 +461,34 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarTask:update", async ({ _id, userId, ...data }, callback) => {
+    socket.on("calendarTask:update", async ({ _id, ...data } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
             const task = await db.calendarTask.findById(_id);
             if (!task) return callback({ status: "error", message: "Task not found" });
+
+            const isOwner = sameId(task.ownerId, userId);
+
+            if (!isOwner && isSelfCompletionUpdate(data, task, userId)) {
+                const done = Boolean(data.completions?.[String(userId)]);
+                const completions = { ...(task.completions ?? {}), [String(userId)]: done };
+                const updated = await db.calendarTask.findByIdAndUpdate(
+                    _id,
+                    {
+                        $set: {
+                            [`completions.${String(userId)}`]: done,
+                            completed: computeCollaborateCompleted(task.participantIds, task.optOutIds, completions),
+                        },
+                    },
+                    { new: true, runValidators: true },
+                );
+                return callback({ status: "success", message: "Task updated", payload: updated });
+            }
 
             const err = assertTaskWrite(task, userId, user, "update", data);
             if (err) return callback({ status: "error", message: err });
@@ -416,10 +498,17 @@ module.exports = (socket, io) => {
                     return callback({ status: "error", message: "You do not have permission to create collaborate tasks" });
             }
 
-            const isOwner = sameId(task.ownerId, userId);
             const payload = isOwner
-                ? sanitizeTaskPayload(data, { participantIds: data.participantIds ?? task.participantIds })
+                ? sanitizeTaskPayload(data, task)
                 : stripTaskPayload(data);
+
+            if (isOwner && (payload.taskMode ?? task.taskMode) === "collaborate") {
+                payload.completed = computeCollaborateCompleted(
+                    payload.participantIds ?? task.participantIds,
+                    payload.optOutIds ?? task.optOutIds,
+                    payload.completions ?? task.completions,
+                );
+            }
 
             const updated = await db.calendarTask.findByIdAndUpdate(
                 _id,
@@ -433,8 +522,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarTask:optOut", async ({ _id, userId }, callback) => {
+    socket.on("calendarTask:optOut", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
@@ -453,11 +545,23 @@ module.exports = (socket, io) => {
             if (hasTaskOptedOut(task, userId))
                 return callback({ status: "success", message: "Already opted out", payload: task });
 
-            const updated = await db.calendarTask.findByIdAndUpdate(
+            let updated = await db.calendarTask.findByIdAndUpdate(
                 _id,
                 { $addToSet: { optOutIds: toId(userId) } },
                 { new: true, runValidators: true },
             );
+
+            const completed = computeCollaborateCompleted(
+                updated.participantIds,
+                updated.optOutIds,
+                updated.completions,
+            );
+            if (completed !== updated.completed)
+                updated = await db.calendarTask.findByIdAndUpdate(
+                    _id,
+                    { $set: { completed } },
+                    { new: true, runValidators: true },
+                );
 
             callback({ status: "success", message: "Opted out of task", payload: updated });
         } catch (error) {
@@ -465,8 +569,11 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on("calendarTask:delete", async ({ _id, userId }, callback) => {
+    socket.on("calendarTask:delete", async ({ _id } = {}, callback) => {
         try {
+            const userId = requireSession(callback);
+            if (!userId) return;
+
             const user = await loadUser(userId);
             if (!user) return callback({ status: "error", message: "User not found" });
 
