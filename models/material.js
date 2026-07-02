@@ -144,6 +144,13 @@ const materialSchema = new mongoose.Schema({
         index: true
     },
 
+    catalogId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'materialCatalog',
+        index: true,
+        default: null
+    },
+
     // Supplier links (references to `contact` records of type 'Supplier')
     suppliers: [supplierLinkSchema],
 
