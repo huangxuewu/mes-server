@@ -300,8 +300,79 @@ function calculateTimecardHash(timecard) {
     return crypto.createHash('sha256').update(hashString).digest('hex');
 }
 
-// Function to calculate timecard totals based on punches
-function calculateTimecardTotals(punches) {
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const DEFAULT_WORKING_DAYS = new Set(["monday", "tuesday", "wednesday", "thursday", "friday"]);
+const FALLBACK_REGULAR_MINUTES = 480; // legacy flat 8h threshold, used only when no schedule resolves
+
+function parseTimeToMinutes(time) {
+    if (!time) return null;
+    const [h, m] = String(time).split(":").map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return h * 60 + m;
+}
+
+// Resolve the scheduled shift for an employee on a date, mirroring the client:
+// team day override -> department default template -> global template -> attendance config
+async function resolveScheduleBounds(employeeId, date) {
+    try {
+        if (!employeeId || !date) return null;
+
+        const employee = await database.model("employee").findById(employeeId).lean();
+        if (!employee) return null;
+
+        const dayName = DAY_NAMES[dayjs(date).day()];
+
+        const override = employee.team
+            ? await database.model("workSchedule").findOne({ teamId: employee.team, date }).lean()
+            : null;
+
+        const Template = database.model("workScheduleTemplate");
+        let template = employee.department
+            ? await Template.findOne({ isDefault: true, applyScope: "department", departmentId: employee.department }).lean()
+            : null;
+        if (!template) template = await Template.findOne({ isDefault: true, applyScope: "all" }).lean();
+
+        const templateWeekday = template?.weekdayOverrides?.[dayName];
+        const templateDay = template && templateWeekday && typeof templateWeekday === "object"
+            ? { ...template, ...templateWeekday }
+            : template;
+
+        const configDoc = await database.model("config").findOne({ key: "attendance.workingHours", status: "Active" }).lean();
+        const global = configDoc?.value || {};
+        const globalWeekday = global.weekdayOverrides?.[dayName] || null;
+        const globalBase = { workStartTime: global.officialStartTime, workEndTime: global.officialEndTime };
+
+        const sources = [override, templateDay, globalWeekday, globalBase];
+        const pick = (field) => {
+            for (const src of sources) if (src?.[field]) return src[field];
+            return null;
+        };
+
+        const isWorkingDay = [override, templateDay, globalWeekday]
+            .map(src => src?.isWorkingDay)
+            .find(value => value != null) ?? DEFAULT_WORKING_DAYS.has(dayName);
+
+        const startMinutes = parseTimeToMinutes(pick("workStartTime")) ?? parseTimeToMinutes("08:00");
+        const endMinutes = parseTimeToMinutes(pick("workEndTime")) ?? parseTimeToMinutes("16:30");
+
+        const timeZone = await dayjs.getFactoryTimeZone();
+        const dayStart = dayjs.tz(date, timeZone).startOf("day");
+
+        return {
+            dayOff: !isWorkingDay,
+            startMs: dayStart.add(startMinutes, "minute").valueOf(),
+            endMs: dayStart.add(endMinutes, "minute").valueOf()
+        };
+    } catch (error) {
+        console.error("Error resolving schedule bounds for timecard:", error);
+        return null;
+    }
+}
+
+// Function to calculate timecard totals based on punches.
+// Overtime follows the work schedule: worked minutes before the scheduled start
+// or after the scheduled end (all worked minutes on a scheduled day off).
+function calculateTimecardTotals(punches, scheduleBounds = null) {
     let workMinutes = 0;
     let breakMinutes = 0;
     let grossMinutes = 0;
@@ -314,6 +385,7 @@ function calculateTimecardTotals(punches) {
     let breakStartTime = null;
     let totalWorkTime = 0;
     let totalBreakTime = 0;
+    const workIntervals = [];
 
     for (const punch of sortedPunches) {
         switch (punch.type) {
@@ -322,16 +394,18 @@ function calculateTimecardTotals(punches) {
                 break;
             case "Clock Out":
                 if (clockInTime) {
-                    const workSession = new Date(punch.time) - clockInTime;
-                    totalWorkTime += workSession;
+                    const punchTime = new Date(punch.time);
+                    totalWorkTime += punchTime - clockInTime;
+                    workIntervals.push({ start: clockInTime.getTime(), end: punchTime.getTime() });
                     clockInTime = null;
                 }
                 break;
             case "Break Start":
                 if (clockInTime) {
-                    const workSession = new Date(punch.time) - clockInTime;
-                    totalWorkTime += workSession;
-                    breakStartTime = new Date(punch.time);
+                    const punchTime = new Date(punch.time);
+                    totalWorkTime += punchTime - clockInTime;
+                    workIntervals.push({ start: clockInTime.getTime(), end: punchTime.getTime() });
+                    breakStartTime = punchTime;
                     clockInTime = null;
                 }
                 break;
@@ -353,10 +427,18 @@ function calculateTimecardTotals(punches) {
     // Gross minutes = work minutes + break minutes (if breaks are paid)
     grossMinutes = workMinutes + breakMinutes;
 
-    // Calculate overtime (assuming 8 hours = 480 minutes is regular time)
-    const regularWorkMinutes = 480;
-    if (workMinutes > regularWorkMinutes) {
-        overtimeMinutes = workMinutes - regularWorkMinutes;
+    if (scheduleBounds) {
+        if (scheduleBounds.dayOff) {
+            overtimeMinutes = workMinutes;
+        } else {
+            const outsideMs = workIntervals.reduce((total, interval) =>
+                total
+                + Math.max(0, Math.min(interval.end, scheduleBounds.startMs) - interval.start)
+                + Math.max(0, interval.end - Math.max(interval.start, scheduleBounds.endMs)), 0);
+            overtimeMinutes = Math.round(outsideMs / (1000 * 60));
+        }
+    } else if (workMinutes > FALLBACK_REGULAR_MINUTES) {
+        overtimeMinutes = workMinutes - FALLBACK_REGULAR_MINUTES;
     }
 
     return {
@@ -377,8 +459,8 @@ timecardSchema.pre('save', async function (next) {
         if (this.punches && this.punches.length > 0) {
             // Sort punches by time to ensure they're always in chronological order
             this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
-            const totals = calculateTimecardTotals(this.punches);
-            this.totals = totals;
+            const scheduleBounds = await resolveScheduleBounds(this.employeeId, this.date);
+            this.totals = calculateTimecardTotals(this.punches, scheduleBounds);
         }
 
         // Maintain hash chain
@@ -421,8 +503,8 @@ timecardSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (d
             // Recalculate totals if punches exist
             if (doc.punches && doc.punches.length > 0) {
                 doc.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
-                const totals = calculateTimecardTotals(doc.punches);
-                doc.totals = totals;
+                const scheduleBounds = await resolveScheduleBounds(doc.employeeId, doc.date);
+                doc.totals = calculateTimecardTotals(doc.punches, scheduleBounds);
             }
 
             // Recalculate hash (previousHash should remain unchanged on updates)
@@ -435,9 +517,10 @@ timecardSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (d
 });
 
 // Helper method to recalculate and update totals
-timecardSchema.methods.recalculateTotals = function () {
+timecardSchema.methods.recalculateTotals = async function () {
     if (this.punches && this.punches.length > 0) {
-        this.totals = calculateTimecardTotals(this.punches);
+        const scheduleBounds = await resolveScheduleBounds(this.employeeId, this.date);
+        this.totals = calculateTimecardTotals(this.punches, scheduleBounds);
     }
     return this;
 };
