@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const db = require("../../models");
+const dayjs = require("../../utils/dayjs");
 const { getSessionUserId, hasPermission } = require("../session");
 
 const PERMS = {
@@ -146,6 +147,40 @@ const computeCollaborateCompleted = (participantIds, optOutIds, completions) => 
     return activeIds.every(id => Boolean(done[id]));
 };
 
+const hasTaskDueDate = (dueDate) => Boolean(dueDate && String(dueDate).trim());
+
+const isTaskFullyCompleted = (task) => {
+    if (task.taskMode !== "collaborate") return Boolean(task.completed);
+    return computeCollaborateCompleted(task.participantIds, task.optOutIds, task.completions);
+};
+
+const isExpiredCompletedTask = (task, today = dayjs().startOf("day")) => {
+    if (!isTaskFullyCompleted(task)) return false;
+
+    if (hasTaskDueDate(task.dueDate))
+        return today.isAfter(dayjs(task.dueDate).startOf("day"), "day");
+
+    const completedDay = task.completedAt ?? task.updatedAt;
+    if (!completedDay) return false;
+    return today.isAfter(dayjs(completedDay).startOf("day"), "day");
+};
+
+const syncTaskCompletionFields = (task, fields = {}) => {
+    const taskMode = fields.taskMode ?? task.taskMode ?? "self";
+    const nextCompleted = taskMode === "collaborate"
+        ? computeCollaborateCompleted(
+            fields.participantIds ?? task.participantIds,
+            fields.optOutIds ?? task.optOutIds,
+            fields.completions ?? task.completions,
+        )
+        : Boolean(fields.completed ?? task.completed);
+    const wasCompleted = isTaskFullyCompleted(task);
+    let completedAt = task.completedAt ?? null;
+    if (nextCompleted && !wasCompleted) completedAt = new Date();
+    else if (!nextCompleted) completedAt = null;
+    return { completed: nextCompleted, completedAt };
+};
+
 const assertTaskWrite = (task, userId, user, action, fields = {}) => {
     if (action === "create") {
         if (task?.taskMode === "collaborate" && !hasPermission(user, "create", PERMS.taskCollaborateCreate))
@@ -210,7 +245,7 @@ const stripEventPayload = (data) => {
 const stripTaskPayload = (data) => {
     const {
         _id, id, userId,
-        ownerId, createdBy, createdAt, updatedAt, __v,
+        ownerId, createdBy, createdAt, updatedAt, completedAt, __v,
         ...rest
     } = data;
     return rest;
@@ -397,12 +432,14 @@ module.exports = (socket, io) => {
             if (!userId) return;
 
             const oid = toId(userId);
-            const tasks = await db.calendarTask.find({
+            const today = dayjs().startOf("day");
+            const tasks = (await db.calendarTask.find({
                 $or: [
                     { ownerId: oid },
                     { taskMode: "collaborate", participantIds: oid },
                 ],
-            }).sort({ dueDate: 1, createdAt: -1 });
+            }).sort({ dueDate: 1, createdAt: -1 }))
+                .filter(task => !isExpiredCompletedTask(task, today));
 
             callback({ status: "success", message: "Calendar tasks fetched", payload: tasks });
         } catch (error) {
@@ -477,12 +514,13 @@ module.exports = (socket, io) => {
             if (!isOwner && isSelfCompletionUpdate(data, task, userId)) {
                 const done = Boolean(data.completions?.[String(userId)]);
                 const completions = { ...(task.completions ?? {}), [String(userId)]: done };
+                const completion = syncTaskCompletionFields(task, { completions });
                 const updated = await db.calendarTask.findByIdAndUpdate(
                     _id,
                     {
                         $set: {
                             [`completions.${String(userId)}`]: done,
-                            completed: computeCollaborateCompleted(task.participantIds, task.optOutIds, completions),
+                            ...completion,
                         },
                     },
                     { new: true, runValidators: true },
@@ -502,13 +540,14 @@ module.exports = (socket, io) => {
                 ? sanitizeTaskPayload(data, task)
                 : stripTaskPayload(data);
 
-            if (isOwner && (payload.taskMode ?? task.taskMode) === "collaborate") {
-                payload.completed = computeCollaborateCompleted(
-                    payload.participantIds ?? task.participantIds,
-                    payload.optOutIds ?? task.optOutIds,
-                    payload.completions ?? task.completions,
-                );
-            }
+            Object.assign(payload, syncTaskCompletionFields(task, {
+                ...payload,
+                participantIds: payload.participantIds ?? task.participantIds,
+                optOutIds: payload.optOutIds ?? task.optOutIds,
+                completions: payload.completions ?? task.completions,
+                completed: payload.completed ?? task.completed,
+                taskMode: payload.taskMode ?? task.taskMode,
+            }));
 
             const updated = await db.calendarTask.findByIdAndUpdate(
                 _id,
@@ -551,15 +590,11 @@ module.exports = (socket, io) => {
                 { new: true, runValidators: true },
             );
 
-            const completed = computeCollaborateCompleted(
-                updated.participantIds,
-                updated.optOutIds,
-                updated.completions,
-            );
-            if (completed !== updated.completed)
+            const completion = syncTaskCompletionFields(updated, {});
+            if (completion.completed !== updated.completed || String(completion.completedAt) !== String(updated.completedAt ?? ""))
                 updated = await db.calendarTask.findByIdAndUpdate(
                     _id,
-                    { $set: { completed } },
+                    { $set: completion },
                     { new: true, runValidators: true },
                 );
 

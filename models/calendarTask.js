@@ -19,6 +19,7 @@ const calendarTaskSchema = new mongoose.Schema({
     },
     completions: { type: mongoose.Schema.Types.Mixed, default: {} },
     completed: { type: Boolean, default: false },
+    completedAt: { type: Date, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 }, { timestamps: true });
 
