@@ -1,17 +1,56 @@
 const { google } = require("googleapis");
-
-// NOTE: Stage 1 uses hard-coded credentials (same pattern as passcodeCrypto.js).
-// Run `node utils/gmailAuthSetup.js` once to obtain the refresh token.
-const CLIENT_ID = "GOOGLE_CLIENT_ID";
-const CLIENT_SECRET = "GOOGLE_CLIENT_SECRET";
-const REFRESH_TOKEN = "GOOGLE_REFRESH_TOKEN";
-const REDIRECT_URI = "https://dh-mes-backend-73abf9398712.herokuapp.com/oauth2callback";
+const db = require("../models");
 
 const SEARCH_QUERY = "newer_than:14d -category:{promotions social}";
 
-const getClient = () => {
-    const auth = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-    auth.setCredentials({ refresh_token: REFRESH_TOKEN });
+const GMAIL_CONFIG_KEYS = {
+    clientId: "integration.gmail.clientId",
+    clientSecret: "integration.gmail.clientSecret",
+    refreshToken: "integration.gmail.refreshToken",
+    redirectUri: "integration.gmail.redirectUri"
+};
+
+const normalizeValue = value => String(value ?? "").trim();
+
+const getOverrideValue = (overrides, key) =>
+    normalizeValue(overrides?.[key] ?? overrides?.[GMAIL_CONFIG_KEYS[key]]);
+
+const toConfigMap = (docs = []) =>
+    docs.reduce((acc, doc) => Object.assign(acc, { [doc.key]: normalizeValue(doc.value) }), {});
+
+const resolveGmailConfig = (docs = [], overrides = {}) => {
+    const configMap = toConfigMap(docs);
+
+    const config = {
+        clientId: getOverrideValue(overrides, "clientId") || configMap[GMAIL_CONFIG_KEYS.clientId] || "",
+        clientSecret: getOverrideValue(overrides, "clientSecret") || configMap[GMAIL_CONFIG_KEYS.clientSecret] || "",
+        refreshToken: getOverrideValue(overrides, "refreshToken") || configMap[GMAIL_CONFIG_KEYS.refreshToken] || "",
+        redirectUri: getOverrideValue(overrides, "redirectUri") || configMap[GMAIL_CONFIG_KEYS.redirectUri] || ""
+    };
+
+    const missing = Object.entries(config)
+        .filter(([, value]) => !value)
+        .map(([key]) => GMAIL_CONFIG_KEYS[key]);
+
+    if (missing.length) throw new Error(`Missing Gmail config: ${missing.join(", ")}`);
+
+    return config;
+};
+
+const fetchGmailConfigDocs = () =>
+    db.config.find({
+        key: { $in: Object.values(GMAIL_CONFIG_KEYS) },
+        status: "Active"
+    }, {
+        key: 1,
+        value: 1
+    }).lean();
+
+const getClient = async (overrides = {}) => {
+    const docs = await fetchGmailConfigDocs();
+    const config = resolveGmailConfig(docs, overrides);
+    const auth = new google.auth.OAuth2(config.clientId, config.clientSecret, config.redirectUri);
+    auth.setCredentials({ refresh_token: config.refreshToken });
     return google.gmail({ version: "v1", auth });
 };
 
@@ -65,8 +104,8 @@ const toMessage = message => ({
 });
 
 // Returns recent threads with parsed messages, excluding already-known message ids
-const fetchThreads = async (knownMessageIds = new Set()) => {
-    const gmail = getClient();
+const fetchThreads = async (knownMessageIds = new Set(), overrides = {}) => {
+    const gmail = await getClient(overrides);
     const { data } = await gmail.users.threads.list({ userId: "me", q: SEARCH_QUERY, maxResults: 50 });
     if (!data.threads?.length) return [];
 
@@ -84,16 +123,16 @@ const fetchThreads = async (knownMessageIds = new Set()) => {
     return threads.filter(t => t.newMessages.length);
 };
 
-const getProfileEmail = async () => {
-    const gmail = getClient();
+const getProfileEmail = async (overrides = {}) => {
+    const gmail = await getClient(overrides);
     const { data } = await gmail.users.getProfile({ userId: "me" });
     return data.emailAddress;
 };
 
 // Sends an email; pass threadId + inReplyTo to reply in-thread, omit both for a fresh email
-const sendEmail = async ({ threadId, to, subject, body, inReplyTo }) => {
-    const gmail = getClient();
-    const from = await getProfileEmail();
+const sendEmail = async ({ threadId, to, subject, body, inReplyTo }, overrides = {}) => {
+    const gmail = await getClient(overrides);
+    const from = await getProfileEmail(overrides);
 
     const headers = [
         `From: ${from}`,
@@ -113,4 +152,10 @@ const sendEmail = async ({ threadId, to, subject, body, inReplyTo }) => {
     return toMessage(sent);
 };
 
-module.exports = { fetchThreads, sendEmail, getProfileEmail };
+module.exports = {
+    GMAIL_CONFIG_KEYS,
+    resolveGmailConfig,
+    fetchThreads,
+    sendEmail,
+    getProfileEmail
+};

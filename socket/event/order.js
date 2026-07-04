@@ -18,6 +18,25 @@ module.exports = (socket, io) => {
     socket.on('order:update', async (payload, callback) => {
         try {
             const { _id, ...data } = payload
+            if (data.buyers?.length) {
+                const currentOrder = await db.order.findById(_id).lean();
+                if (currentOrder?.buyers?.length) {
+                    const storedItemsByPoNumber = new Map(
+                        currentOrder.buyers.map(buyer => [buyer.poNumber, buyer.items || []])
+                    );
+
+                    data.buyers = data.buyers.map((buyer) => {
+                        if (!buyer || Object.prototype.hasOwnProperty.call(buyer, 'items')) return buyer;
+                        if (!storedItemsByPoNumber.has(buyer.poNumber)) return buyer;
+
+                        return {
+                            ...buyer,
+                            items: storedItemsByPoNumber.get(buyer.poNumber)
+                        };
+                    });
+                }
+            }
+
             const order = await db.order.findByIdAndUpdate(_id, { $set: data }, { new: true });
 
             callback?.({ status: "success", message: "Order updated successfully", payload: order })
@@ -49,7 +68,7 @@ module.exports = (socket, io) => {
     socket.on('orders:demand', async (query, callback) => {
         try {
             const lines = await db.order.aggregate([
-                { $match: query || {} },
+                { $match: query },
                 { $project: { poNumber: 1, shipWindow: 1, buyers: 1 } },
                 { $unwind: '$buyers' },
                 { $unwind: '$buyers.items' },
@@ -64,10 +83,11 @@ module.exports = (socket, io) => {
                         name: '$buyers.name',
                         location: '$buyers.location',
                         styleCode: '$buyers.items.styleCode',
-                        quantity: { $add: [{ $ifNull: ['$buyers.items.quantity', 0] }, { $ifNull: ['$buyers.items.adjust', 0] }] },
+                        quantity: '$buyers.items.quantity',
                     }
                 },
             ]);
+
             callback?.({ status: "success", message: "Order demand fetched successfully", payload: lines });
         } catch (error) {
             callback?.({ status: "error", message: error.message })

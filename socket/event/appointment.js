@@ -163,4 +163,17 @@ module.exports = (socket, io) => {
             callback({ status: "error", message: error.message });
         }
     });
+
+    socket.on("appointment:config:test", async (payload, callback) => {
+        try {
+            const emailAddress = await getProfileEmail(payload);
+            callback({
+                status: "success",
+                message: "Gmail configuration is valid",
+                payload: { emailAddress }
+            });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
 };
