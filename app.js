@@ -8,6 +8,7 @@ var cookieParser = require('cookie-parser');
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 var loginRouter = require('./api/login');
+var oauthRouter = require('./routes/oauth');
 
 var app = express();
 
@@ -33,42 +34,7 @@ app.use(session({
   cookie: { secure: false } // Set to true in production with HTTPS
 }));
 app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/oauth2callback', (req, res) => {
-  const { code, error } = req.query;
-
-  if (error) {
-    return res.status(400).send(`
-      <html>
-        <body style="font-family: Arial, sans-serif; padding: 24px;">
-          <h2>Gmail OAuth Error</h2>
-          <p>${error}</p>
-        </body>
-      </html>
-    `);
-  }
-
-  if (!code) {
-    return res.status(400).send(`
-      <html>
-        <body style="font-family: Arial, sans-serif; padding: 24px;">
-          <h2>Missing OAuth Code</h2>
-          <p>No authorization code was returned by Google.</p>
-        </body>
-      </html>
-    `);
-  }
-
-  return res.send(`
-    <html>
-      <body style="font-family: Arial, sans-serif; padding: 24px;">
-        <h2>Gmail OAuth Code</h2>
-        <p>Copy this code and paste it into the terminal running <code>node utils/gmailAuthSetup.js</code>.</p>
-        <textarea readonly style="width: 100%; min-height: 120px; font-size: 14px;">${code}</textarea>
-      </body>
-    </html>
-  `);
-});
+app.use(oauthRouter);
 
 app.use('/', indexRouter);
 app.use('/users', usersRouter);

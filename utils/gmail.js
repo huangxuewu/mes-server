@@ -7,8 +7,25 @@ const GMAIL_CONFIG_KEYS = {
     clientId: "integration.gmail.clientId",
     clientSecret: "integration.gmail.clientSecret",
     refreshToken: "integration.gmail.refreshToken",
-    redirectUri: "integration.gmail.redirectUri"
+    redirectUri: "integration.gmail.redirectUri",
+    redirectUriDev: "integration.gmail.redirectUri.dev"
 };
+
+const GMAIL_OAUTH_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send"
+];
+
+const OAUTH_CLIENT_CONFIG_KEYS = [
+    GMAIL_CONFIG_KEYS.clientId,
+    GMAIL_CONFIG_KEYS.clientSecret,
+    GMAIL_CONFIG_KEYS.redirectUri,
+    GMAIL_CONFIG_KEYS.redirectUriDev
+];
+
+const isProductionServer = () => process.env.NODE_ENV === "production";
+
+const isLocalHost = host => /localhost|127\.0\.0\.1/i.test(host || "");
 
 const normalizeValue = value => String(value ?? "").trim();
 
@@ -18,6 +35,22 @@ const getOverrideValue = (overrides, key) =>
 const toConfigMap = (docs = []) =>
     docs.reduce((acc, doc) => Object.assign(acc, { [doc.key]: normalizeValue(doc.value) }), {});
 
+const resolveRedirectUri = (configMap, overrides = {}, { host } = {}) => {
+    const override = getOverrideValue(overrides, "redirectUri");
+    if (override) return override;
+
+    if (host) {
+        const local = isLocalHost(host);
+        return local
+            ? configMap[GMAIL_CONFIG_KEYS.redirectUriDev] || configMap[GMAIL_CONFIG_KEYS.redirectUri] || ""
+            : configMap[GMAIL_CONFIG_KEYS.redirectUri] || configMap[GMAIL_CONFIG_KEYS.redirectUriDev] || "";
+    }
+
+    return isProductionServer()
+        ? configMap[GMAIL_CONFIG_KEYS.redirectUri] || configMap[GMAIL_CONFIG_KEYS.redirectUriDev] || ""
+        : configMap[GMAIL_CONFIG_KEYS.redirectUriDev] || configMap[GMAIL_CONFIG_KEYS.redirectUri] || "";
+};
+
 const resolveGmailConfig = (docs = [], overrides = {}) => {
     const configMap = toConfigMap(docs);
 
@@ -25,7 +58,7 @@ const resolveGmailConfig = (docs = [], overrides = {}) => {
         clientId: getOverrideValue(overrides, "clientId") || configMap[GMAIL_CONFIG_KEYS.clientId] || "",
         clientSecret: getOverrideValue(overrides, "clientSecret") || configMap[GMAIL_CONFIG_KEYS.clientSecret] || "",
         refreshToken: getOverrideValue(overrides, "refreshToken") || configMap[GMAIL_CONFIG_KEYS.refreshToken] || "",
-        redirectUri: getOverrideValue(overrides, "redirectUri") || configMap[GMAIL_CONFIG_KEYS.redirectUri] || ""
+        redirectUri: resolveRedirectUri(configMap, overrides)
     };
 
     const missing = Object.entries(config)
@@ -33,6 +66,25 @@ const resolveGmailConfig = (docs = [], overrides = {}) => {
         .map(([key]) => GMAIL_CONFIG_KEYS[key]);
 
     if (missing.length) throw new Error(`Missing Gmail config: ${missing.join(", ")}`);
+
+    return config;
+};
+
+const resolveGmailOAuthClientConfig = (docs = [], overrides = {}, options = {}) => {
+    const configMap = toConfigMap(docs);
+    const redirectUri = resolveRedirectUri(configMap, overrides, options);
+
+    const config = {
+        clientId: getOverrideValue(overrides, "clientId") || configMap[GMAIL_CONFIG_KEYS.clientId] || "",
+        clientSecret: getOverrideValue(overrides, "clientSecret") || configMap[GMAIL_CONFIG_KEYS.clientSecret] || "",
+        redirectUri
+    };
+
+    const missing = Object.entries(config)
+        .filter(([, value]) => !value)
+        .map(([key]) => key === "redirectUri" ? GMAIL_CONFIG_KEYS.redirectUri : GMAIL_CONFIG_KEYS[key]);
+
+    if (missing.length) throw new Error(`Missing Gmail OAuth config: ${missing.join(", ")}`);
 
     return config;
 };
@@ -46,10 +98,59 @@ const fetchGmailConfigDocs = () =>
         value: 1
     }).lean();
 
+const fetchGmailOAuthClientConfigDocs = () =>
+    db.config.find({
+        key: { $in: OAUTH_CLIENT_CONFIG_KEYS },
+        status: "Active"
+    }, {
+        key: 1,
+        value: 1
+    }).lean();
+
+const createOAuth2Client = (config) =>
+    new google.auth.OAuth2(config.clientId, config.clientSecret, config.redirectUri);
+
+const getGmailAuthUrl = async (overrides = {}) => {
+    const docs = await fetchGmailOAuthClientConfigDocs();
+    const config = resolveGmailOAuthClientConfig(docs, overrides);
+    return createOAuth2Client(config).generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        scope: GMAIL_OAUTH_SCOPES
+    });
+};
+
+const exchangeGmailAuthCode = async (code, overrides = {}, options = {}) => {
+    const docs = await fetchGmailOAuthClientConfigDocs();
+    const config = resolveGmailOAuthClientConfig(docs, overrides, options);
+    const { tokens } = await createOAuth2Client(config).getToken(code);
+    if (!tokens.refresh_token) throw new Error("No refresh token returned. Revoke Google access and authorize again.");
+    return normalizeValue(tokens.refresh_token);
+};
+
+const saveGmailRefreshToken = async (refreshToken) => {
+    const key = GMAIL_CONFIG_KEYS.refreshToken;
+    const config = await db.config.findOneAndUpdate(
+        { key },
+        {
+            $set: {
+                value: normalizeValue(refreshToken),
+                "audit.updatedBy": "gmail.oauth",
+                "audit.changeNote": "Gmail OAuth refresh token"
+            }
+        },
+        { new: true }
+    );
+
+    if (!config) throw new Error(`Config document not found for ${key}`);
+
+    return config;
+};
+
 const getClient = async (overrides = {}) => {
     const docs = await fetchGmailConfigDocs();
     const config = resolveGmailConfig(docs, overrides);
-    const auth = new google.auth.OAuth2(config.clientId, config.clientSecret, config.redirectUri);
+    const auth = createOAuth2Client(config);
     auth.setCredentials({ refresh_token: config.refreshToken });
     return google.gmail({ version: "v1", auth });
 };
@@ -155,6 +256,10 @@ const sendEmail = async ({ threadId, to, subject, body, inReplyTo }, overrides =
 module.exports = {
     GMAIL_CONFIG_KEYS,
     resolveGmailConfig,
+    resolveGmailOAuthClientConfig,
+    getGmailAuthUrl,
+    exchangeGmailAuthCode,
+    saveGmailRefreshToken,
     fetchThreads,
     sendEmail,
     getProfileEmail

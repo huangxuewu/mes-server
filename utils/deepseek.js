@@ -1,10 +1,6 @@
 const axios = require("axios");
 
-// NOTE: Stage 1 uses a hard-coded key (same pattern as passcodeCrypto.js).
-const MODEL = "deepseek-v4-flash";
-const API_KEY = "sk-320546cbcb7946dea0580f177fc2a40d";
-const API_URL = "https://api.deepseek.com/chat/completions";
-
+// API key and provider are read from config at runtime (see appointmentAi.js).
 const INTENTS = ["request", "confirm", "change", "eta", "other"];
 const TIME_PATTERN = /^([01]\d|2[0-3])[0-5]\d$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -66,21 +62,64 @@ ${email.body}
 Candidate loads (load number / PRO number / SCAC):
 ${candidates.map(c => `${c.loadNumber} / ${c.proNumber || "-"} / ${c.scac || "-"}`).join("\n")}`;
 
-const callDeepseek = async (email, candidates) => {
-    const { data } = await axios.post(API_URL, {
-        model: MODEL,
+const parseJsonResponse = (text) => {
+    const trimmed = String(text ?? "").trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    return JSON.parse(fenced ? fenced[1] : trimmed);
+};
+
+const callProvider = async (provider, email, candidates, apiKey) => {
+    if (!apiKey) throw new Error("Missing AI API key");
+
+    const userContent = buildUserMessage(email, candidates);
+
+    if (provider === "claude") {
+        const { data } = await axios.post("https://api.anthropic.com/v1/messages", {
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            temperature: 0,
+            system: SYSTEM_PROMPT,
+            messages: [{ role: "user", content: userContent }],
+        }, {
+            headers: {
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            timeout: 60000,
+        });
+
+        return parseJsonResponse(data.content[0].text);
+    }
+
+    const providerConfig = {
+        deepseek: {
+            url: "https://api.deepseek.com/chat/completions",
+            model: "deepseek-chat",
+        },
+        chatgpt: {
+            url: "https://api.openai.com/v1/chat/completions",
+            model: "gpt-4o-mini",
+        },
+    }[provider] ?? {
+        url: "https://api.deepseek.com/chat/completions",
+        model: "deepseek-chat",
+    };
+
+    const { data } = await axios.post(providerConfig.url, {
+        model: providerConfig.model,
         temperature: 0,
         response_format: { type: "json_object" },
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: buildUserMessage(email, candidates) },
+            { role: "user", content: userContent },
         ],
     }, {
-        headers: { Authorization: `Bearer ${API_KEY}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
         timeout: 60000,
     });
 
-    return JSON.parse(data.choices[0].message.content);
+    return parseJsonResponse(data.choices[0].message.content);
 };
 
 // Validate every AI field; anything invalid becomes null rather than stored wrong.
@@ -108,12 +147,12 @@ const validate = (result, candidates) => {
 // email: { from, subject, date, body }
 // candidates: [{ loadNumber, proNumber, scac }]
 // Never throws — a total failure degrades to a summary-less "other" so the inbox is not blocked.
-const analyzeEmail = async (email, candidates) => {
+const analyzeEmail = async (email, candidates, { apiKey, provider = "deepseek" } = {}) => {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
-            return validate(await callDeepseek(email, candidates), candidates);
+            return validate(await callProvider(provider, email, candidates, apiKey), candidates);
         } catch (error) {
-            console.error(`DeepSeek analyze failed (attempt ${attempt + 1}):`, error.message);
+            console.error(`${provider} analyze failed (attempt ${attempt + 1}):`, error.message);
         }
     }
 

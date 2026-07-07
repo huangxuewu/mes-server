@@ -1,19 +1,34 @@
 const db = require("../../models");
-const { fetchThreads, sendEmail, getProfileEmail } = require("../../utils/gmail");
+const { fetchThreads, sendEmail, getProfileEmail, getGmailAuthUrl } = require("../../utils/gmail");
 const { analyzeEmail } = require("../../utils/deepseek");
+const { fetchAppointmentAiConfig } = require("../../utils/appointmentAi");
+const { normalize, matchCandidate, resolveThreadLoad } = require("../../utils/appointmentFilter");
 
 const getCandidates = async () => {
     const groups = await db.outbound.getActiveLoads();
     return groups.map(({ loadNumber, loads }) => ({
-        loadNumber,
-        proNumber: loads[0]?.proNumber || "",
+        loadNumber: normalize(loadNumber),
+        proNumber: normalize(loads[0]?.proNumber),
         scac: loads[0]?.carrierSCAC || loads[0]?.executingSCAC || loads[0]?.assignedSCAC || "",
-    }));
+    })).filter(candidate => candidate.loadNumber);
 };
 
-// Regex fallback when the AI could not resolve a load: match any candidate identifier in the text
-const matchCandidate = (text, candidates) =>
-    candidates.find(c => text.includes(c.loadNumber) || (c.proNumber && text.includes(c.proNumber)));
+const analyzeMessage = async (message, candidates, { useAi, apiKey, provider, myEmail, subject }) => {
+    if (message.from.includes(myEmail)) return { summary: "", rich: null, proNumber: null, loadNumber: null, scac: null };
+
+    if (!useAi) {
+        const match = matchCandidate(`${message.subject || subject || ""} ${message.body}`, candidates);
+        return {
+            summary: "",
+            rich: null,
+            proNumber: match?.proNumber ?? null,
+            loadNumber: match?.loadNumber ?? null,
+            scac: match?.scac ?? null,
+        };
+    }
+
+    return analyzeEmail(message, candidates, { apiKey, provider });
+};
 
 module.exports = (socket, io) => {
     socket.on("appointments:query", async (payload, callback) => {
@@ -30,33 +45,46 @@ module.exports = (socket, io) => {
             const existing = await db.emailThread.find({}, { threadId: 1, loadNumber: 1, "messages.messageId": 1 });
             const knownIds = new Set(existing.flatMap(t => t.messages.map(m => m.messageId)));
 
-            const [fetched, candidates, myEmail] = await Promise.all([
+            const [fetched, candidates, myEmail, aiConfig] = await Promise.all([
                 fetchThreads(knownIds),
                 getCandidates(),
                 getProfileEmail(),
+                fetchAppointmentAiConfig(),
             ]);
+
+            // Stage 1 filter-only when AI off; AI analysis when enabled + API key set
+            const { apiKey, provider, useAi } = aiConfig;
 
             let newMessages = 0;
 
             for (const thread of fetched) {
                 const existingThread = existing.find(t => t.threadId === thread.threadId);
                 const messages = [];
-                let loadNumber = existingThread?.loadNumber || "";
-                let proNumber = "";
-                let scac = "";
+                let loadNumber = normalize(existingThread?.loadNumber);
+                let proNumber = normalize(existingThread?.proNumber);
+                let scac = existingThread?.scac || "";
                 let latestIntent = null;
 
                 for (const message of thread.newMessages) {
                     const isOutgoing = message.from.includes(myEmail);
-                    const analysis = isOutgoing
-                        ? { summary: "", rich: null, proNumber: null }
-                        : await analyzeEmail(message, candidates);
+                    const analysis = await analyzeMessage(message, candidates, {
+                        useAi,
+                        apiKey,
+                        provider,
+                        myEmail,
+                        subject: thread.subject,
+                    });
 
-                    if (analysis.rich?.loadNumber) {
-                        loadNumber = analysis.rich.loadNumber;
-                        proNumber = analysis.proNumber || proNumber;
+                    if (useAi && analysis.rich?.loadNumber) {
+                        loadNumber = normalize(analysis.rich.loadNumber);
+                        proNumber = normalize(analysis.proNumber) || proNumber;
                         scac = analysis.rich.scac || scac;
+                    } else if (!useAi && analysis.loadNumber) {
+                        loadNumber = normalize(analysis.loadNumber);
+                        proNumber = normalize(analysis.proNumber) || proNumber;
+                        scac = analysis.scac || scac;
                     }
+
                     if (!isOutgoing && analysis.rich) latestIntent = analysis.rich.intent;
 
                     messages.push({
@@ -72,18 +100,17 @@ module.exports = (socket, io) => {
                     });
                 }
 
-                // Fallback: match load/pro number directly in subject or bodies
                 if (!loadNumber) {
-                    const match = matchCandidate(`${thread.subject} ${messages.map(m => m.body).join(" ")}`, candidates);
-                    if (match) {
-                        loadNumber = match.loadNumber;
-                        proNumber = match.proNumber;
-                        scac = scac || match.scac;
+                    const resolved = resolveThreadLoad(thread, candidates);
+                    if (resolved) {
+                        loadNumber = resolved.loadNumber;
+                        proNumber = resolved.proNumber || proNumber;
+                        scac = scac || resolved.scac;
                     }
                 }
 
                 // Threads that cannot be tied to any load are not persisted
-                if (!loadNumber) continue;
+                if (!loadNumber || !messages.length) continue;
 
                 newMessages += messages.length;
 
@@ -171,6 +198,19 @@ module.exports = (socket, io) => {
                 status: "success",
                 message: "Gmail configuration is valid",
                 payload: { emailAddress }
+            });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("appointment:config:auth-url", async (payload, callback) => {
+        try {
+            const url = await getGmailAuthUrl(payload);
+            callback({
+                status: "success",
+                message: "Gmail authorization URL created",
+                payload: { url }
             });
         } catch (error) {
             callback({ status: "error", message: error.message });

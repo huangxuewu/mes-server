@@ -8,6 +8,7 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 // Import API routes
 const apiRoutes = require('./api');
+const oauthRouter = require('./routes/oauth');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -22,6 +23,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount API routes
 app.use('/api', apiRoutes);
+app.use(oauthRouter);
 
 // Socket.IO connection
 io.on("connection", (socket) => socketHandler(socket, io));
