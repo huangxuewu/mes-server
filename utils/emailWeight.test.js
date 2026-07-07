@@ -94,3 +94,41 @@ test("all-fresh email keeps everything with mild top-down decay", () => {
     assert.equal(sections[1].weight, 0.85);
     assert.ok(sections.every(section => section.kept));
 });
+
+test("name block after the sign-off is signature, not content", () => {
+    const body = "Pickup confirmed for load 75736164 at 2pm.\n\nThank you\nBest Regards,\n\nJeff Miller\nOperations Manager\nARKA Freight";
+    const { sections, anchorIndex } = weighEmail(body, { from, candidates });
+
+    assert.equal(sections[0].type, "content");
+    assert.ok(sections.slice(1).every(section => section.type === "signature"));
+    assert.equal(anchorIndex, 1);
+});
+
+test("sender-less machine email anchors on the load reference", () => {
+    const body = "This is an automated notification from the TMS system.\n\nLoad 75736164 pickup window 06/08 13:00.\n\nDo not reply to this message.";
+    const { sections, anchorIndex } = weighEmail(body, { from: "noreply@tms.example.com", candidates });
+
+    assert.equal(anchorIndex, 1);
+    assert.equal(sections[1].weight, 1);
+    assert.equal(sections[1].kept, true);
+    assert.equal(sections[0].weight, 0.7);
+    assert.equal(sections[2].kept, false);
+});
+
+test("carrier vocabulary boosts a section below the anchor", () => {
+    const body = "Works for us.\n\nThanks,\nJeff\n\nDriver will check in at dock 12.";
+    const { sections } = weighEmail(body, { from, candidates });
+
+    assert.equal(sections[1].type, "signature");
+    assert.equal(sections[2].type, "content");
+    assert.equal(sections[2].weight, 0.45);
+    assert.equal(sections[2].kept, true);
+});
+
+test("long unspaced strings are dampened as non-prose", () => {
+    const body = "Please review the shipment details below.\n\nhttps://tms.example.com/track/abcdef1234567890?token=zyxwvut9876543210";
+    const { sections } = weighEmail(body, { from, candidates });
+
+    assert.equal(sections[1].weight, 0.26);
+    assert.equal(sections[1].kept, false);
+});
