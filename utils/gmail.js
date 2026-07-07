@@ -169,28 +169,28 @@ const findPart = (payload, mimeType) => {
     return null;
 };
 
+// Preserve line breaks so emailWeight can segment the body into sections
 const stripHtml = html => html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-// Cut quoted reply tails so the AI only reads the new content
-const REPLY_MARKERS = [/^On .+ wrote:$/m, /^-{2,}\s*Original Message\s*-{2,}/mi, /^From:\s.+$/m, /^>+\s/m];
+// Quoted reply chains are weighted downstream (utils/emailWeight), not cut here —
+// the stored body keeps the whole conversation so operators can expand it.
+const BODY_CHAR_CAP = 12000;
 
 const extractBody = (message) => {
     const plain = findPart(message.payload, "text/plain");
     const html = plain ? null : findPart(message.payload, "text/html");
-    let body = plain ? decodeBody(plain) : html ? stripHtml(decodeBody(html)) : message.snippet ?? "";
-
-    for (const marker of REPLY_MARKERS) {
-        const match = body.match(marker);
-        if (match && match.index > 0) body = body.slice(0, match.index);
-    }
-
-    return body.trim().slice(0, 4000);
+    const body = plain ? decodeBody(plain) : html ? stripHtml(decodeBody(html)) : message.snippet ?? "";
+    return body.trim().slice(0, BODY_CHAR_CAP);
 };
 
 const toMessage = message => ({

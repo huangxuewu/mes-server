@@ -1,8 +1,8 @@
 const axios = require("axios");
+const { parseMilitaryTime } = require("./appointmentTime");
 
 // API key and provider are read from config at runtime (see appointmentAi.js).
 const INTENTS = ["request", "confirm", "change", "eta", "other"];
-const TIME_PATTERN = /^([01]\d|2[0-3])[0-5]\d$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const SYSTEM_PROMPT = `You are a logistics email analyst for a warehouse shipping department.
@@ -137,7 +137,7 @@ const validate = (result, candidates) => {
             action: rich.action ? String(rich.action).trim() : null,
             loadNumber: match?.loadNumber ?? null,
             date: DATE_PATTERN.test(rich.date) ? rich.date : null,
-            time: TIME_PATTERN.test(rich.time) ? rich.time : null,
+            time: parseMilitaryTime(rich.time),
             intent: INTENTS.includes(rich.intent) ? rich.intent : "other",
         },
         proNumber: match?.proNumber ?? null,

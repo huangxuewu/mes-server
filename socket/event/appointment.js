@@ -3,6 +3,8 @@ const { fetchThreads, sendEmail, getProfileEmail, getGmailAuthUrl } = require(".
 const { analyzeEmail } = require("../../utils/deepseek");
 const { fetchAppointmentAiConfig } = require("../../utils/appointmentAi");
 const { normalize, matchCandidate, resolveThreadLoad } = require("../../utils/appointmentFilter");
+const { buildSignatureSuffixBySender } = require("../../utils/emailSignature");
+const { weighEmail } = require("../../utils/emailWeight");
 
 const getCandidates = async () => {
     const groups = await db.outbound.getActiveLoads();
@@ -11,6 +13,11 @@ const getCandidates = async () => {
         proNumber: normalize(loads[0]?.proNumber),
         scac: loads[0]?.carrierSCAC || loads[0]?.executingSCAC || loads[0]?.assignedSCAC || "",
     })).filter(candidate => candidate.loadNumber);
+};
+
+const resolveLoadScac = (loadNumber, candidates, fallback = "") => {
+    const match = candidates.find(candidate => candidate.loadNumber === normalize(loadNumber));
+    return match?.scac || fallback;
 };
 
 const analyzeMessage = async (message, candidates, { useAi, apiKey, provider, myEmail, subject }) => {
@@ -65,9 +72,17 @@ module.exports = (socket, io) => {
                 let scac = existingThread?.scac || "";
                 let latestIntent = null;
 
+                const signatureContext = [
+                    ...(existingThread?.messages ?? []),
+                    ...(thread.messages ?? []),
+                ];
+                const suffixBySender = buildSignatureSuffixBySender(signatureContext);
+
                 for (const message of thread.newMessages) {
                     const isOutgoing = message.from.includes(myEmail);
-                    const analysis = await analyzeMessage(message, candidates, {
+                    // AI reads only the weighted relevant sections; Stage-1 matching keeps the full body
+                    const { relevantText } = weighEmail(message.body, { from: message.from, candidates, scac, suffixBySender });
+                    const analysis = await analyzeMessage({ ...message, body: useAi ? relevantText : message.body }, candidates, {
                         useAi,
                         apiKey,
                         provider,
@@ -112,6 +127,7 @@ module.exports = (socket, io) => {
                 // Threads that cannot be tied to any load are not persisted
                 if (!loadNumber || !messages.length) continue;
 
+                scac = resolveLoadScac(loadNumber, candidates, scac);
                 newMessages += messages.length;
 
                 const update = {
