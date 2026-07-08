@@ -69,21 +69,27 @@ module.exports = (socket, io) => {
         try {
             const lines = await db.order.aggregate([
                 { $match: query },
-                { $project: { poNumber: 1, shipWindow: 1, buyers: 1 } },
+                { $project: { poNumber: 1, orderStatus: 1, shipWindow: 1, buyers: 1 } },
                 { $unwind: '$buyers' },
                 { $unwind: '$buyers.items' },
                 {
                     $project: {
                         _id: 0,
                         poNumber: 1,
+                        orderStatus: 1,
                         buyerPo: '$buyers.poNumber',
+                        buyerStatus: '$buyers.status',
+                        buyerDone: '$buyers.done',
                         shipStart: '$shipWindow.start',
+                        buyerShipStart: { $ifNull: ['$buyers.shipWindow.start', '$shipWindow.start'] },
                         state: '$buyers.state',
                         city: '$buyers.city',
                         name: '$buyers.name',
                         location: '$buyers.location',
                         styleCode: '$buyers.items.styleCode',
                         quantity: '$buyers.items.quantity',
+                        adjust: '$buyers.items.adjust',
+                        casePack: '$buyers.items.casePack',
                     }
                 },
             ]);
