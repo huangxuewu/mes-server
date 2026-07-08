@@ -81,7 +81,7 @@ module.exports = (socket, io) => {
                 for (const message of thread.newMessages) {
                     const isOutgoing = message.from.includes(myEmail);
                     // AI reads only the weighted relevant sections; Stage-1 matching keeps the full body
-                    const { relevantText } = weighEmail(message.body, { from: message.from, candidates, scac, suffixBySender });
+                    const { relevantText } = weighEmail(message.body, { from: message.from, candidates, scac, suffixBySender, outgoing: isOutgoing });
                     const analysis = await analyzeMessage({ ...message, body: useAi ? relevantText : message.body }, candidates, {
                         useAi,
                         apiKey,
