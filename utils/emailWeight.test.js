@@ -329,3 +329,99 @@ test("thank you reply with auto signature shows only thank you as content", () =
     assert.ok(!sections[1].closingLines.some(line => line.role === "signoff"));
     assert.equal(sections[1].closingLines.find(line => line.role === "name")?.text, "Kylee Rusch");
 });
+
+test("long magellan signature block is closing, not content", () => {
+    const body = `Confirmed for pickup at 2pm.\n\nGodspeed,\nNicholas Singley\nSenior Account Manager\nMagellan Transport Logistics\nEmail: nsingley@magellanlogistics.com\nOffice: (904) 872-2227\nThe Nation's Largest Service Disabled Veteran Owned Business Logistics Provider\n[Magellan Transport Logistics]\nOTR | Flatbed | LTL | Intermodal | International | Project Management |`;
+    const { sections, relevantText } = weighEmail(body, {
+        from: "Nicholas Singley <nsingley@magellanlogistics.com>",
+        candidates: [{ loadNumber: "75736164" }],
+    });
+
+    assert.equal(sections[0].type, "content");
+    assert.equal(sections[1].type, "closing");
+    assert.equal(sections[1].closingLines.find(l => l.role === "signoff")?.text, "Godspeed,");
+    assert.equal(sections[1].closingLines.find(l => l.role === "name")?.text, "Nicholas Singley");
+    assert.ok(sections[1].closingLines.find(l => l.role === "slogan")?.text.includes("Nation"));
+    assert.equal(relevantText, "Confirmed for pickup at 2pm.");
+});
+
+test("partial learned suffix still folds full magellan signature into closing", () => {
+    const from = "Nicholas Singley <nsingley@magellanlogistics.com>";
+    const sigTail = "OTR | Flatbed | LTL | Intermodal | International | Project Management |";
+    const body = `Rescheduling this del and will reach back out as soon as possible\n\nGodspeed,\nNicholas Singley\nSenior Account Manager\nMagellan Transport Logistics\nEmail: nsingley@magellanlogistics.com\nOffice: (904) 872-2227\nThe Nation's Largest Service Disabled Veteran Owned Business Logistics Provider\n[Magellan Transport Logistics]\n${sigTail}`;
+    const { sections, relevantText } = weighEmail(body, {
+        from,
+        candidates: [{ loadNumber: "75736164" }],
+        suffixBySender: { "nsingley@magellanlogistics.com": [sigTail] },
+    });
+
+    assert.equal(sections.filter(section => section.type === "content").length, 1);
+    assert.equal(sections.find(section => section.type === "closing")?.closingLines.find(l => l.role === "signoff")?.text, "Godspeed,");
+    assert.equal(relevantText, "Rescheduling this del and will reach back out as soon as possible");
+    assert.ok(!relevantText.includes("Godspeed"));
+});
+
+test("arka thank-you keeps message content and folds signoff tagline signature into closing", () => {
+    const from = "Elise Hovera <elise.h@arkaexpress.com>";
+    const body = [
+        "Thank you much, Houston!",
+        "",
+        "Have a great evening ahead",
+        "",
+        "Kind Regards,",
+        "[cid:f7a6d549-fdc2-4669-b20a-f233f68450b1]",
+        "",
+        "We're Pulling for You!",
+        "Elise Hovera",
+        "Customer Service Analyst",
+        "",
+        "[https://arkaexpress.com/images/signature/phone.png]",
+        "Office (404) 800-1010 ext.838",
+        "elise.h@arkaexpress.com",
+        "",
+        "________________________________",
+        "From: Houston Matthews <hmatthews@downhomeusa.com>",
+        "Sent: Tuesday, July 7, 2026 21:59",
+        "Subject: Re: ARKA || 07/08",
+        "",
+        "892714/75915847 - 8:00",
+    ].join("\n");
+    const { sections, relevantText } = weighEmail(body, { from, candidates: [{ loadNumber: "75915847" }] });
+    const closing = sections.find(section => section.type === "closing");
+
+    assert.equal(relevantText, "Thank you much, Houston!\n\nHave a great evening ahead");
+    assert.ok(!relevantText.includes("Pulling for You"));
+    assert.ok(!relevantText.includes("Kind Regards"));
+    assert.equal(closing?.closingLines.find(line => line.role === "signoff")?.text, "Kind Regards,");
+    assert.equal(closing?.closingLines.find(line => line.role === "slogan")?.text, "We're Pulling for You!");
+    assert.equal(closing?.closingLines.find(line => line.role === "name")?.text, "Elise Hovera");
+    assert.ok(sections.some(section => section.type === "quote"));
+});
+
+test("outgoing markdown signature keeps reply content and folds asterisk block into closing", () => {
+    const from = "Houston Matthews <hmatthews@downhomeusa.com>";
+    const body = [
+        "Thank you, you too!",
+        "*Houston Matthews*",
+        "*Down Home Manufacturing*",
+        "402 Maxwell Avenue",
+        "Greenwood, SC  29646",
+        "Cell: 864-980-6429",
+        "",
+        "On Tue, Jul 7, 2026 at 3:46 PM Elise Hovera <elise.h@arkaexpress.com> wrote:",
+        "",
+        "> Thank you much, Houston!",
+    ].join("\n");
+    const { sections, relevantText } = weighEmail(body, { from, candidates: [{ loadNumber: "75915847" }], outgoing: true });
+    const closing = sections.find(section => section.type === "closing");
+
+    assert.equal(relevantText, "Thank you, you too!");
+    assert.equal(sections[0].type, "content");
+    assert.equal(sections[0].kept, true);
+    assert.equal(closing?.closingLines.find(line => line.role === "name")?.text, "Houston Matthews");
+    assert.equal(closing?.closingLines.find(line => line.role === "company")?.text, "Down Home Manufacturing");
+    assert.ok(closing?.closingLines.some(line => line.role === "address" && line.text.includes("402 Maxwell Avenue")));
+    assert.ok(closing?.closingLines.some(line => line.role === "contact" && line.text.includes("864-980-6429")));
+    assert.ok(sections.some(section => section.type === "quote"));
+    assert.ok(!relevantText.includes("Down Home Manufacturing"));
+});

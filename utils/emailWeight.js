@@ -1,36 +1,30 @@
-// Section-weighting for carrier emails: outline the body into typed sections,
-// anchor on the sender's signature (name/company) — or on the load/PRO
-// reference for sender-less machine emails — weight top-down with hard decay
-// below the anchor, and stop once enough appointment facts are found.
-// Nothing is deleted — dropped sections stay in `sections` for the UI to expand.
+// Section-weighting for carrier emails: label lines by role, fold into macro
+// sections (greeting / content / closing / quote), weight by section type with
+// appointment-fact boosts on content only.
 // CommonJS mirror of client/src/renderer/src/utils/emailWeight.js — keep both in sync.
 
 // ---------- tunables ----------
 
-const ABOVE_TOP = 1;           // first content section above the anchor
-const ABOVE_DECAY = 0.85;      // per content section moving down toward the anchor
+const ABOVE_TOP = 1;
+const ABOVE_DECAY = 0.85;
 const ABOVE_FLOOR = 0.6;
 const GREETING_WEIGHT = 0.2;
-const ANCHOR_WEIGHT = 0.25;    // signature identifies sender but should not usually be extracted as facts
-const BELOW_FIRST = 0.3;       // first content section below the anchor
-const BELOW_DECAY = 0.5;       // per content section further below
-const QUOTE_CAP = 0.2;         // quoted history may be our own words — never weight it as sender content
-const REFERENCE_DECAY = 0.7;   // machine emails: outward decay from the load/PRO reference anchor
+const ANCHOR_WEIGHT = 0.25;
+const BELOW_FIRST = 0.3;
+const BELOW_DECAY = 0.5;
+const QUOTE_CAP = 0.2;
+const REFERENCE_DECAY = 0.7;
 const KEEP_THRESHOLD = 0.3;
-const CHAR_BUDGET = 1500;      // stop keeping sections once relevantText reaches this size
+const CHAR_BUDGET = 1500;
 
-// Carrier-appointment info gets extra attention: boosts stack (cap 1.0) on content sections
-const REFERENCE_BOOST = 0.3;   // candidate load / PRO / BOL / PO number
-const TIME_DATE_BOOST = 0.2;   // a stated time or date
-const INTENT_BOOST = 0.15;     // trucking / appointment vocabulary
+const REFERENCE_BOOST = 0.3;
+const TIME_DATE_BOOST = 0.2;
+const INTENT_BOOST = 0.15;
 
-// Long runs without spaces (emails, URLs, phone strings) are signature/footer-ish, not prose
 const LONG_TOKEN = /\S{20,}/;
 const UNSPACED_THRESHOLD = 0.4;
 const UNSPACED_PENALTY = 0.3;
 
-// Pure numeric references shorter than this are too easy to confuse with dates/times.
-// If your carriers use 4-digit load numbers, require a nearby label before accepting them.
 const MIN_NORMALIZED_REFERENCE_LENGTH = 5;
 
 const GENERIC_DOMAINS = new Set(['gmail', 'yahoo', 'outlook', 'hotmail', 'aol', 'icloud', 'live', 'msn', 'mail', 'comcast', 'att', 'verizon', 'protonmail']);
@@ -48,15 +42,16 @@ const QUOTE_AT_TIME = /\s+at\s+\d{1,2}(:\d{2})?(?:[\s\u202f]+(AM|PM|am|pm|a\.m\.
 const HEADER_FIELD = /^(From|Sent|To|Subject|Date|Cc|Bcc|Reply-To):\s/i;
 const EMAIL_IN_LINE = /\S+@\S+\.\S+/;
 
-const SIGN_OFF = /^(thanks|thank you|many thanks|thx|thanks?\s*(and|&)\s*regards|best|(with )?(kind|best|warm) regards|regards|sincerely|cheers|respectfully|take care)\s*[,!.]*$/i;
-const SIGN_OFF_SHORT = /^(thanks?|best|regards|sincerely|cheers|respectfully)\s*[,!.]*$/i;
-const TITLE_HINTS = /\b(manager|director|coordinator|specialist|supervisor|dispatcher|representative|rep|analyst|assistant|associate|lead|clerk|agent|executive|officer|president|vp|head|captain|planner)\b/i;
+const SIGN_OFF = /^(thanks|thank you|many thanks|thx|thanks?\s*(and|&)\s*regards|best|(with )?(kind|best|warm) regards|regards|sincerely|cheers|respectfully|take care|godspeed|warmly|all the best|yours truly|cordially)\s*[,!.]*$/i;
+const SIGN_OFF_SHORT = /^(thanks?|best|regards|sincerely|cheers|respectfully|godspeed|warmly)\s*[,!.]*$/i;
+const TITLE_HINTS = /\b(manager|director|coordinator|specialist|supervisor|dispatcher|representative|rep|analyst|assistant|associate|lead|clerk|agent|executive|officer|president|vp|head|captain|planner|account)\b/i;
 const GREETING = /^(hi|hello|hey|dear|good (morning|afternoon|evening))\b[^,\n]{0,40}[,!.]*$/i;
 const DISCLAIMER = /confidential|privileged|intended (recipient|solely)|do not (disseminate|distribute)|received this (e-?mail )?in error/i;
 const FOOTER = /^sent from my |unsubscribe|view (this|it) in your browser/im;
 const PHONE = /(\(\d{3}\)\s*\d{3}[-.\s]?\d{4})|(\b\d{3}[-.]\d{3}[-.]\d{4}\b)|(\+\d{1,2}[\s.-]?\d{3}[\s.-]?\d{3}[\s.-]?\d{4})/;
 const URL = /(https?:\/\/|www\.)\S+/i;
 const EMBEDDED_CID = /\[cid:[^\]]+\]/i;
+const CONTACT_PREFIX = /^(email|office|phone|mobile|tel|fax|e-mail):\s*/i;
 
 const TIME_HINTS = [
     /\b\d{1,2}(:\d{2})?\s*(a\.?m\.?|p\.?m\.?)\b/i,
@@ -80,6 +75,8 @@ const INTENT_HINTS = [/\b(appointment|appt|pick\s?up|drop\s?off|deliver|delivery
 const RESCHEDULE_HINTS = /\b(reschedul|re-?schedul|postpone|push\s+back|move\s+(the\s+)?(pickup|appointment|time|window)|change\s+(the\s+)?(pickup|appointment|time|window))\b/i;
 const QUESTION_HINTS = /\?|\b(can you|could you|would you|please confirm|what time|when can|when will|any update|let me know|do you have)\b/i;
 const OUTGOING_REST_WEIGHT = 0.2;
+
+const SIGNATURE_TAIL_ROLES = new Set(['title', 'company', 'contact', 'address', 'slogan', 'link', 'gibberish']);
 
 const extractEmail = from =>
     String(from ?? '').match(/<([^>]+)>/)?.[1]?.toLowerCase()
@@ -109,10 +106,7 @@ const createFactDetector = candidates => {
         const normalizedText = normalizeReference(text);
 
         return references.some(reference => {
-            // Exact raw match catches references containing separators, e.g. "123-456".
             if (reference.raw.length >= MIN_NORMALIZED_REFERENCE_LENGTH && rawText.includes(reference.raw.toLowerCase())) return true;
-
-            // Normalized match catches carrier formatting changes, e.g. candidate "123456" vs "PRO #123-456".
             return normalizedText.includes(reference.normalized);
         });
     };
@@ -148,7 +142,9 @@ const firstSentence = (text) => {
 
 const cleanLine = line => String(line ?? '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-')
+    .replace(/\*([^*\n]+)\*/g, '$1')
     .trim();
 
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -178,17 +174,26 @@ const isSignOffLine = (line) => {
     return words.length <= 3 && SIGN_OFF_SHORT.test(trimmed);
 };
 
+const isShortFarewell = (line) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed) return false;
+    if (isSignOffLine(trimmed)) return true;
+    if (looksLikeJobTitle(trimmed) || TITLE_HINTS.test(trimmed)) return false;
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length > 3 || !words.length) return false;
+    if (PHONE.test(trimmed) || EMAIL_IN_LINE.test(trimmed) || URL.test(trimmed)) return false;
+    if (words.length > 1 && trimmed.includes('.')) return false;
+    return /^[A-Za-z][A-Za-z\s'-]*[,!.]*$/.test(trimmed) && words.length <= 2;
+};
+
 const looksLikeAddressLine = (line) => {
     const trimmed = cleanLine(line);
     if (!trimmed) return false;
     if (/\bP\.?\s*O\.?\s*Box\b/i.test(trimmed)) return true;
+    if (/^\d{1,6}\s+\S/.test(trimmed) && /\b(ave|avenue|st|street|rd|road|blvd|boulevard|drive|dr|lane|ln|way|court|ct|pkwy|parkway|hwy|highway)\b/i.test(trimmed)) return true;
     return /\b[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(trimmed) && /\d/.test(trimmed);
 };
 
-// ---------- outline: segment into typed sections ----------
-
-// Break inline quote markers onto their own lines so flattened HTML bodies still segment.
-// Also turns simple <br> boundaries into newlines when Gmail/HTML text has been lightly flattened.
 const prepare = body => String(body ?? '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -197,8 +202,6 @@ const prepare = body => String(body ?? '')
     .replace(/(-{2,}\s*(?:Original|Forwarded) Message\s*-{2,})/gi, '\n$1\n')
     .replace(/([^\n])[ \t]+(On (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|\d)[^\n]{3,160}? wrote:)/g, '$1\n$2\n');
 
-// A "From:" line is only a forwarded header when it carries an email address
-// or is followed by other header fields — "From: my side..." stays content.
 const isQuoteHeaderLine = (line) => {
     if (QUOTE_HEADERS.some(pattern => pattern.test(line))) return true;
     if (!QUOTE_ON_DATE.test(line)) return false;
@@ -213,33 +216,14 @@ const isQuoteHeader = (lines, index) => {
     return lines.slice(index + 1, index + 4).some(next => HEADER_FIELD.test(next));
 };
 
-const groupSections = (lines) => {
-    const groups = [];
-    let current = null;
-    const close = () => {
-        if (current?.lines.length) groups.push(current);
-        current = null;
-    };
-
-    lines.forEach((line, index) => {
-        if (!line) return close();
-
-        const quoted = line.startsWith('>');
-        const header = isQuoteHeader(lines, index);
-        const signoff = isSignOffLine(line);
-
-        if (header || signoff || (current && quoted !== current.quoted)) close();
-        if (!current) current = { lines: [], quoted, header, signoff };
-        current.lines.push(line);
-    });
-
-    close();
-    return groups;
-};
-
-const isContactLine = line => PHONE.test(cleanLine(line)) || EMAIL_IN_LINE.test(line) || LONG_TOKEN.test(line) || /<tel:/i.test(line) || /<mailto:/i.test(line);
+const isContactLine = line => PHONE.test(cleanLine(line)) || EMAIL_IN_LINE.test(line) || /<tel:/i.test(line) || /<mailto:/i.test(line) || CONTACT_PREFIX.test(cleanLine(line));
 const isLinkLine = line => URL.test(cleanLine(line));
 const isGibberishLine = line => EMBEDDED_CID.test(cleanLine(line));
+const isPipeGibberish = line => {
+    const trimmed = cleanLine(line);
+    return trimmed.includes('|') && trimmed.split('|').filter(part => part.trim()).length >= 3;
+};
+const isBracketCompany = line => /^\[[^\]]+\]$/.test(cleanLine(line));
 const isShortWorded = line => cleanLine(line).split(/\s+/).filter(Boolean).length <= 6;
 
 const looksLikeJobTitle = (line) => {
@@ -257,6 +241,14 @@ const looksLikePersonName = (line) => {
     if (PHONE.test(trimmed) || EMAIL_IN_LINE.test(trimmed) || URL.test(trimmed)) return false;
     if (isSignOffLine(trimmed) || looksLikeAddressLine(trimmed) || looksLikeJobTitle(trimmed)) return false;
     return words.every(word => /^[A-Z][A-Za-z'-]+$/.test(word) || /^[A-Z]\.$/.test(word));
+};
+
+const looksLikeNameCandidate = (line, sender) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed || trimmed === '|') return false;
+    if (lineContainsSenderName(trimmed, sender) || looksLikePersonName(trimmed)) return true;
+    if (!sender) return false;
+    return new RegExp(`^${escapeRegex(sender.first)}$`, 'i').test(trimmed);
 };
 
 const splitNameTitleHyphen = (line, sender) => {
@@ -278,259 +270,408 @@ const expandClosingInputLines = (lines, sender) =>
         return split ? [split.name, split.title] : [line];
     });
 
-const findSenderClosingStart = (lines, sender) => {
-    if (!sender) return null;
-    const cleaned = lines.map(cleanLine);
-    let nameLineIndex = -1;
-
-    for (let i = cleaned.length - 1; i >= 0; i--) {
-        if (isQuoteHeaderLine(cleaned[i]) || isQuoteHeader(lines, i) || /^From:\s/i.test(cleaned[i])) continue;
-        if (lineContainsSenderName(cleaned[i], sender) || splitNameTitleHyphen(cleaned[i], sender)) {
-            nameLineIndex = i;
-            break;
-        }
-    }
-
-    if (nameLineIndex === -1) return null;
-
-    let start = nameLineIndex;
-    while (start > 0 && isSignOffLine(cleaned[start - 1])) start--;
-
-    let end = lines.length;
-    for (let i = start; i < lines.length; i++) {
-        if (isQuoteHeaderLine(cleaned[i]) || isQuoteHeader(lines, i)) {
-            end = i;
-            break;
-        }
-    }
-
-    if (start >= end) return null;
-
-    return { start, end, nameLineIndex };
-};
-
-const anchorGroupsBySender = (lines, from) => {
-    const sender = parseSenderName(from);
-    if (!sender) return null;
-
-    const anchor = findSenderClosingStart(lines, sender);
-    if (!anchor) return null;
-
-    const closingLines = expandClosingInputLines(lines.slice(anchor.start, anchor.end), sender);
-    const bodyGroups = groupSections(lines.slice(0, anchor.start));
-    if (!closingLines.length) return bodyGroups.length ? bodyGroups : null;
-
-    return [
-        ...bodyGroups,
-        {
-            lines: closingLines,
-            quoted: false,
-            header: false,
-            signoff: closingLines.some(isSignOffLine),
-            inlineSignature: true,
-            senderAnchored: true,
-        },
-    ];
-};
-
-const closingLinesCleaned = lines =>
-    lines.map(cleanLine).filter(line => line && line !== '|');
-
-const looksLikeClosingBlock = (lines, detector) => {
-    const cleaned = closingLinesCleaned(lines);
-    if (cleaned.length < 2) return false;
-    if (cleaned.some(line => detector.hasTimeOrDate(line) || detector.hasReference(line))) return false;
-
-    const nameLines = cleaned.filter(looksLikePersonName);
-    if (nameLines.length !== 1) return false;
-
-    const nameIndex = cleaned.findIndex(looksLikePersonName);
-    const afterName = cleaned.slice(nameIndex + 1);
-    const titleLines = afterName.filter(looksLikeJobTitle);
-    if (titleLines.length > 1) return false;
-
-    const hasTitle = titleLines.length === 1;
-    const hasAddress = afterName.some(looksLikeAddressLine);
-
-    if (hasTitle && (hasAddress || afterName.length >= 1)) return true;
-    if (hasAddress && cleaned.length - nameIndex >= 3) return true;
-    if (afterName.length >= 1 && !afterName.some(looksLikePersonName) && afterName.every(line => isShortWorded(line) && line.length <= 50))
-        return true;
-    return looksLikeSignatureBlock(cleaned, detector);
-};
-
-const isSignatureShaped = (lines, detector) => {
-    const cleaned = closingLinesCleaned(lines);
-    return cleaned.length <= 6
-        && cleaned.every(line => line.length <= 60 && isShortWorded(line))
-        && !cleaned.some(line => detector.hasTimeOrDate(line) || detector.hasReference(line));
-};
-
-const looksLikeSignatureBlock = (lines, detector) =>
-    isSignatureShaped(lines, detector) && closingLinesCleaned(lines).some(isContactLine);
-
-const isClosingShaped = (lines, detector) => {
-    const cleaned = closingLinesCleaned(lines);
-    if (!cleaned.length || cleaned.length > 8) return false;
-    if (cleaned.some(line => detector.hasTimeOrDate(line) || detector.hasReference(line))) return false;
-    if (cleaned.filter(looksLikePersonName).length > 1) return false;
-    if (looksLikeClosingBlock(cleaned, detector)) return true;
-    if (cleaned.length < 2) return false;
-    return isSignatureShaped(cleaned, detector);
-};
-
-const splitContentAndClosing = (lines, detector) => {
-    for (let start = 1; start < lines.length; start++) {
-        const tail = lines.slice(start);
-        if (!looksLikeClosingBlock(tail, detector)) continue;
-        return { body: lines.slice(0, start), signature: tail };
-    }
-    return null;
-};
-
-const splitGroupContentClosing = (group, detector) => {
-    if (group.quoted || group.header) return [group];
-    const split = splitContentAndClosing(group.lines, detector);
-    if (!split) return [group];
-
-    const chunks = [];
-    if (split.body.length) chunks.push({ ...group, lines: split.body });
-    if (split.signature.length) chunks.push({
-        lines: split.signature,
-        quoted: false,
-        header: false,
-        signoff: split.signature.some(line => isSignOffLine(line)),
-        inlineSignature: true,
-    });
-    return chunks;
-};
-
-const expandGroupsForClosing = (groups, detector) =>
-    groups.flatMap(group => splitGroupContentClosing(group, detector));
-
-const isSignatureCandidateLine = (line, detector, suffixSet) => {
+const looksLikeSlogan = (line, detector) => {
     const trimmed = cleanLine(line);
-    if (!trimmed || trimmed === '|') return false;
-    if (suffixSet.has(trimmed)) return true;
-    if (isSignOffLine(trimmed)) return true;
-    if (looksLikeAddressLine(trimmed)) return true;
-    if (isLinkLine(trimmed) || isGibberishLine(trimmed)) return true;
-    if (looksLikePersonName(trimmed)) return true;
-    if (TITLE_HINTS.test(trimmed) && isShortWorded(trimmed)) return true;
-    if (trimmed.length > 80 || !isShortWorded(trimmed)) return false;
+    if (!trimmed || trimmed.length <= 50) return false;
+    if (isContactLine(trimmed) || isLinkLine(trimmed) || looksLikeAddressLine(trimmed)) return false;
+    if (isPipeGibberish(trimmed) || isBracketCompany(trimmed)) return false;
     if (detector.hasTimeOrDate(trimmed) || detector.hasReference(trimmed)) return false;
+    if (/\b(will|can|please|reach|back out|as soon|let me know|need to|want to|reschedul|confirm)\b/i.test(trimmed)) return false;
+    if (detector.hasIntent(trimmed) && !/\b(largest|nation'?s|leading|premier|veteran|owned business|provider|since \d{4})\b/i.test(trimmed)) return false;
     return true;
 };
 
-const peelTrailingSignature = (lines, detector, suffixSet, suffixLines) => {
-    if (lines.length < 2) return { body: lines, signature: [] };
+const looksLikeCompanyTagline = (line) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed || trimmed.length > 60) return false;
+    if (isSignOffLine(trimmed)) return false;
+    if (/^thank\b/i.test(trimmed) || /\b(you too|thanks again|much appreciated)\b/i.test(trimmed)) return false;
+    if (/\b(we'?re|pulling for you|for you)\b/i.test(trimmed)) return true;
+    if (looksLikePersonName(trimmed) || looksLikeJobTitle(trimmed)) return false;
+    return isShortWorded(trimmed) && /!$/.test(trimmed) && /\b(for you|pulling)\b/i.test(trimmed);
+};
 
-    const trimmed = lines.map(line => line.trim());
-    if (suffixLines?.length) {
-        for (let start = trimmed.length - suffixLines.length; start >= 0; start--) {
-            const tail = trimmed.slice(start, start + suffixLines.length);
-            if (!suffixLines.every((line, index) => tail[index] === line)) continue;
-            if (!start) return { body: [], signature: lines };
-            return { body: lines.slice(0, start), signature: lines.slice(start) };
+const isSignatureLeadLine = (line, sender, detector) => {
+    const trimmed = cleanLine(line);
+    if (isSignOffLine(trimmed)) return true;
+    if (isGibberishLine(trimmed) || isPipeGibberish(trimmed)) return true;
+    if (isLinkLine(trimmed) && !/\b(office|cell|phone|ext\.)\b/i.test(trimmed)) return true;
+    if (looksLikeSlogan(trimmed, detector) || looksLikeCompanyTagline(trimmed)) return true;
+    return false;
+};
+
+const expandSignaturePreludeStart = (nonEmpty, startIndex, sender, detector) => {
+    let start = startIndex;
+    while (start > 0) {
+        const prev = nonEmpty[start - 1].text;
+        if (isProseContentLine(prev, detector, sender)) break;
+        const trimmedPrev = cleanLine(prev);
+        if (/^thank\b/i.test(trimmedPrev) && !isSignOffLine(trimmedPrev)) break;
+        if (/\b(you too|thanks again)\b/i.test(trimmedPrev)) break;
+        if (isSignatureLeadLine(prev, sender, detector)) {
+            start--;
+            continue;
         }
+        break;
+    }
+    return start;
+};
+
+const looksLikeCompanyLine = (line, sender) => {
+    const trimmed = cleanLine(line);
+    if (isBracketCompany(trimmed)) return true;
+    if (sender && lineContainsSenderName(trimmed, sender)) return false;
+    return /\b(freight|transport|logistics|trucking|manufacturing|inc\.?|llc|corp|corporation|ltd)\b/i.test(trimmed);
+};
+
+const countNameLines = (lines, sender) =>
+    lines.filter(line => looksLikeNameCandidate(line, sender) && !looksLikeCompanyLine(line, sender)).length;
+
+const validateClosingBlock = (lines, sender, detector) => {
+    const cleaned = lines.map(cleanLine).filter(line => line && line !== '|');
+    if (cleaned.length < 2) return false;
+    if (cleaned.some(line => detector.hasTimeOrDate(line) || detector.hasReference(line))) return false;
+
+    const nameCount = countNameLines(cleaned, sender);
+    if (nameCount > 1) return false;
+    if (nameCount === 0 && !cleaned.some(isSignOffLine)) return false;
+
+    const nameIndex = cleaned.findIndex(line => looksLikeNameCandidate(line, sender));
+    if (nameCount === 0) {
+        const signoffCount = cleaned.filter(isSignOffLine).length;
+        return signoffCount > 0 && signoffCount === cleaned.length;
     }
 
-    let peelFrom = lines.length;
-    while (peelFrom > 1 && isSignatureCandidateLine(lines[peelFrom - 1], detector, suffixSet)) peelFrom--;
+    const afterName = cleaned.slice(nameIndex + 1);
+    const hasTitle = afterName.some(looksLikeJobTitle);
+    const hasContact = afterName.some(isContactLine);
+    const hasAddress = afterName.some(looksLikeAddressLine);
+    const hasTail = afterName.length >= 1;
 
-    let body = lines.slice(0, peelFrom);
-    let signature = lines.slice(peelFrom);
-    while (body.length && isSignOffLine(body[body.length - 1].trim()))
-        signature.unshift(body.pop());
+    if (nameCount === 1 && cleaned.some(isSignOffLine) && !afterName.length) return true;
 
-    if (!signature.length || !body.length) return { body: lines, signature: [] };
-
-    const hasSuffix = signature.some(line => suffixSet.has(cleanLine(line)));
-    const hasContact = signature.some(isContactLine);
-    const closingTail = looksLikeClosingBlock(signature, detector);
-    if (!(hasSuffix || hasContact || signature.some(line => isSignOffLine(line)) || closingTail))
-        return { body: lines, signature: [] };
-
-    return { body, signature };
+    if (hasTitle || hasContact || hasAddress) return true;
+    if (hasTail && !afterName.some(line => looksLikePersonName(line) && !looksLikeNameCandidate(line, sender))) return true;
+    return afterName.some(line => isLinkLine(line) || isGibberishLine(line) || isPipeGibberish(line) || looksLikeSlogan(line, detector));
 };
 
-const splitGroupsForInlineSignatures = (groups, detector, suffixLines) => {
-    const suffixSet = new Set((suffixLines ?? []).map(line => cleanLine(line)).filter(Boolean));
-
-    return expandGroupsForClosing(groups, detector).flatMap((group) => {
-        if (group.quoted || group.header || group.inlineSignature) return [group];
-
-        const { body, signature } = peelTrailingSignature(group.lines, detector, suffixSet, suffixLines);
-        if (!signature.length) return [group];
-        if (!body.length) return [{ lines: signature, quoted: false, header: false, signoff: signature.some(isSignOffLine), inlineSignature: true }];
-
-        const chunks = [];
-        if (body.length) chunks.push({ ...group, lines: body, signoff: body.some(isSignOffLine) });
-        chunks.push({
-            lines: signature,
-            quoted: false,
-            header: false,
-            signoff: signature.some(isSignOffLine),
-            inlineSignature: true,
-        });
-        return chunks;
-    });
+const isSignatureTailLine = (line, sender, detector) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed || trimmed === '|') return false;
+    if (isContactLine(trimmed) || isLinkLine(trimmed) || isGibberishLine(trimmed) || isPipeGibberish(trimmed)) return true;
+    if (looksLikeAddressLine(trimmed) || looksLikeJobTitle(trimmed) || looksLikeCompanyLine(trimmed, sender) || looksLikeSlogan(trimmed, detector)) return true;
+    if (isBracketCompany(trimmed) || isSignOffLine(trimmed)) return true;
+    if (detector.hasTimeOrDate(trimmed) || detector.hasReference(trimmed) || detector.hasIntent(trimmed)) return false;
+    if (looksLikeNameCandidate(trimmed, sender)) return false;
+    return isShortWorded(trimmed) && trimmed.length <= 80;
 };
 
-const classifyClosingLine = (line, state, sender) => {
+const extendClosingEnd = (nonEmpty, start, sender, detector) => {
+    const nameIdx = nonEmpty.slice(start).findIndex(item =>
+        looksLikeNameCandidate(item.text, sender) || splitNameTitleHyphen(item.text, sender));
+    if (nameIdx === -1) return Math.min(start + 1, nonEmpty.length);
+
+    let end = start + nameIdx + 1;
+    while (end < nonEmpty.length) {
+        if (nonEmpty[end].text === '|') {
+            end++;
+            continue;
+        }
+        if (!isSignatureTailLine(nonEmpty[end].text, sender, detector)) break;
+        end++;
+    }
+    return end;
+};
+
+const labelPreliminaryRole = (line, sender, detector) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed || trimmed === '|') return null;
+    if (isSignOffLine(trimmed)) return 'signoff';
+    if (isContactLine(trimmed)) return 'contact';
+    if (isLinkLine(trimmed)) return 'link';
+    if (isGibberishLine(trimmed) || isPipeGibberish(trimmed)) return 'gibberish';
+    if (looksLikeAddressLine(trimmed)) return 'address';
+    if (splitNameTitleHyphen(trimmed, sender)) return 'name';
+    if (looksLikeNameCandidate(trimmed, sender) && !looksLikeCompanyLine(trimmed, sender)) return 'name';
+    if (looksLikeJobTitle(trimmed)) return 'title';
+    if (looksLikeCompanyLine(trimmed, sender) || isBracketCompany(trimmed)) return 'company';
+    if (looksLikeSlogan(trimmed, detector)) return 'slogan';
+    if (detector.hasTimeOrDate(trimmed) || detector.hasReference(trimmed)) return 'content';
+    if (detector.hasIntent(trimmed) && trimmed.length > 40) return 'content';
+    return null;
+};
+
+const signatureCorePresent = (roles, start, end) => {
+    let name = false;
+    let title = false;
+    let company = false;
+    let contact = false;
+
+    for (let i = start; i <= end; i++) {
+        const text = roles[i]?.text ?? '';
+        if (roles[i]?.role === 'name' || splitNameTitleHyphen(text, roles[i]?.sender)) name = true;
+        if (roles[i]?.role === 'title' || splitNameTitleHyphen(text, roles[i]?.sender)) title = true;
+        if (roles[i]?.role === 'company') company = true;
+        if (roles[i]?.role === 'contact') contact = true;
+    }
+
+    return name && title && company && contact;
+};
+
+const isProseContentLine = (line, detector, sender) => {
+    const trimmed = cleanLine(line);
+    if (!trimmed) return false;
+    if (detector.hasReference(trimmed) || detector.hasTimeOrDate(trimmed)) return true;
+    if (detector.hasIntent(trimmed) && trimmed.length > 35 && !isContactLine(trimmed) && !looksLikeJobTitle(trimmed)) return true;
+    if (trimmed.length > 120) return true;
+    if (looksLikeNameCandidate(trimmed, sender) || isSignOffLine(trimmed)) return false;
+    return trimmed.split(/\s+/).filter(Boolean).length > 8;
+};
+
+const findSignatureCoreRange = (nonEmpty, sender, detector) => {
+    const labeled = nonEmpty.map(item => ({
+        ...item,
+        role: labelPreliminaryRole(item.text, sender, detector),
+        sender,
+    }));
+
+    const coreIndices = labeled
+        .map((item, index) => ({ index, role: item.role }))
+        .filter(item => ['name', 'title', 'company', 'contact'].includes(item.role));
+
+    if (coreIndices.length < 4) return null;
+
+    for (let anchor = coreIndices.length - 1; anchor >= 0; anchor--) {
+        const anchorIndex = coreIndices[anchor].index;
+        let start = anchorIndex;
+        let end = anchorIndex;
+
+        while (!signatureCorePresent(labeled, start, end)) {
+            const canGrowEnd = end < nonEmpty.length - 1;
+            const canGrowStart = start > 0;
+            if (!canGrowEnd && !canGrowStart) break;
+
+            const growEndScore = canGrowEnd
+                ? ['name', 'title', 'company', 'contact'].includes(labeled[end + 1]?.role) ? 2 : 0
+                : -1;
+            const growStartScore = canGrowStart
+                ? ['name', 'title', 'company', 'contact'].includes(labeled[start - 1]?.role) ? 2 : 0
+                : -1;
+
+            if (growEndScore >= growStartScore && canGrowEnd) end++;
+            else if (canGrowStart) start--;
+            else if (canGrowEnd) end++;
+        }
+
+        if (!signatureCorePresent(labeled, start, end)) continue;
+        if (labeled.slice(start, end + 1).some(item => item.role === 'content' || isProseContentLine(item.text, detector, sender))) continue;
+
+        let expandedEnd = end + 1;
+        while (expandedEnd < nonEmpty.length && isSignatureTailLine(nonEmpty[expandedEnd].text, sender, detector)) expandedEnd++;
+
+        return { start, end: expandedEnd };
+    }
+
+    return null;
+};
+
+const findClosingRangeByNameAnchor = (nonEmpty, sender, detector) => {
+    for (let i = nonEmpty.length - 1; i >= 0; i--) {
+        const text = nonEmpty[i].text;
+        if (!looksLikeNameCandidate(text, sender) && !splitNameTitleHyphen(text, sender)) continue;
+
+        let start = i;
+        while (start > 0 && isSignOffLine(nonEmpty[start - 1].text)) start--;
+
+        const end = extendClosingEnd(nonEmpty, start, sender, detector);
+        const block = nonEmpty.slice(start, end).map(item => item.text);
+        if (!validateClosingBlock(block, sender, detector)) continue;
+        return { start, end };
+    }
+
+    return null;
+};
+
+const expandClosingStart = (nonEmpty, startIndex, sender, detector) => {
+    let start = startIndex;
+    while (start > 0) {
+        const prev = nonEmpty[start - 1].text;
+        if (isProseContentLine(prev, detector, sender)) break;
+        if (isSignOffLine(prev) || looksLikeNameCandidate(prev, sender) || isSignatureTailLine(prev, sender, detector)) {
+            start--;
+            continue;
+        }
+        break;
+    }
+    return start;
+};
+
+const findClosingRangeBySuffix = (nonEmpty, sender, suffixLines, detector) => {
+    if (!suffixLines?.length) return null;
+
+    for (let start = nonEmpty.length - suffixLines.length; start >= 0; start--) {
+        const tail = nonEmpty.slice(start, start + suffixLines.length).map(item => item.text);
+        if (!suffixLines.every((line, index) => tail[index] === line)) continue;
+
+        const end = start + suffixLines.length;
+        start = expandClosingStart(nonEmpty, start, sender, detector);
+        const block = nonEmpty.slice(start, end).map(item => item.text);
+        if (!validateClosingBlock(block, sender, detector)) continue;
+        return { start, end };
+    }
+
+    return null;
+};
+
+const finalizeClosingRange = (range, nonEmpty, sender, detector) => {
+    if (!range) return null;
+
+    const nameIdx = nonEmpty.findIndex((item, idx) =>
+        idx >= range.start && idx < range.end
+        && (looksLikeNameCandidate(item.text, sender) || splitNameTitleHyphen(item.text, sender)));
+    const pivot = nameIdx === -1 ? range.start : nameIdx;
+    const start = expandSignaturePreludeStart(nonEmpty, pivot, sender, detector);
+
+    return start < range.end ? { start, end: range.end } : null;
+};
+
+const findClosingRange = (nonEmpty, sender, suffixLines, suffixSet, detector) => {
+    if (nonEmpty.length < 2) return null;
+
+    return finalizeClosingRange(findSignatureCoreRange(nonEmpty, sender, detector), nonEmpty, sender, detector)
+        ?? finalizeClosingRange(findClosingRangeBySuffix(nonEmpty, sender, suffixLines, detector), nonEmpty, sender, detector)
+        ?? finalizeClosingRange(findClosingRangeByNameAnchor(nonEmpty, sender, detector), nonEmpty, sender, detector);
+};
+
+const classifyClosingLine = (line, state, sender, detector) => {
     const trimmed = cleanLine(line);
     if (!trimmed || trimmed === '|') return null;
     if (isSignOffLine(trimmed)) return { text: trimmed, role: 'signoff', next: { ...state, seenSignoff: true } };
     if (isLinkLine(trimmed)) return { text: trimmed, role: 'link', next: state };
-    if (isGibberishLine(trimmed)) return { text: trimmed, role: 'gibberish', next: state };
+    if (isGibberishLine(trimmed) || isPipeGibberish(trimmed)) return { text: trimmed, role: 'gibberish', next: state };
     if (isContactLine(trimmed)) return { text: trimmed, role: 'contact', next: state };
+    if (state.seenSignoff && !state.seenName && looksLikeCompanyTagline(trimmed))
+        return { text: trimmed, role: 'slogan', next: state };
     if (!state.seenName && sender && lineContainsSenderName(trimmed, sender))
         return { text: trimmed, role: 'name', next: { ...state, seenName: true } };
-    if (!state.seenName && looksLikePersonName(trimmed)) return { text: trimmed, role: 'name', next: { ...state, seenName: true } };
-    if (state.seenSignoff && !state.seenName && (lineContainsSenderName(trimmed, sender) || looksLikePersonName(trimmed)))
+    if (!state.seenName && looksLikeNameCandidate(trimmed, sender))
+        return { text: trimmed, role: 'name', next: { ...state, seenName: true } };
+    if (state.seenSignoff && !state.seenName && looksLikeNameCandidate(trimmed, sender))
         return { text: trimmed, role: 'name', next: { ...state, seenName: true } };
     if (state.seenName && looksLikeAddressLine(trimmed)) return { text: trimmed, role: 'address', next: state };
+    if (state.seenName && !state.seenTitle && TITLE_HINTS.test(trimmed))
+        return { text: trimmed, role: 'title', next: { ...state, seenTitle: true } };
+    if (state.seenName && !state.seenTitle && looksLikeCompanyLine(trimmed, sender))
+        return { text: trimmed, role: 'company', next: { ...state, seenTitle: true } };
     if (state.seenName && !state.seenTitle && looksLikeJobTitle(trimmed))
         return { text: trimmed, role: 'title', next: { ...state, seenTitle: true } };
-    if (state.seenName && isShortWorded(trimmed) && trimmed.length <= 50)
+    if (state.seenName && looksLikeSlogan(trimmed, detector))
+        return { text: trimmed, role: 'slogan', next: state };
+    if (state.seenName && isBracketCompany(trimmed))
         return { text: trimmed, role: 'company', next: state };
-    if (!state.seenSignoff && isShortWorded(trimmed) && trimmed.split(/\s+/).filter(Boolean).length <= 3)
+    if (state.seenName && isShortWorded(trimmed) && trimmed.length <= 80)
+        return { text: trimmed, role: 'company', next: state };
+    if (!state.seenSignoff && isShortFarewell(trimmed))
         return { text: trimmed, role: 'signoff', next: { ...state, seenSignoff: true } };
+    if (state.seenName) return { text: trimmed, role: 'gibberish', next: state };
     return { text: trimmed, role: 'gibberish', next: state };
 };
 
-const consolidateClosingSections = (sections, sender) => {
-    const result = [];
-    let index = 0;
+const buildClosingSection = (lines, sender, detector) => {
+    const expanded = expandClosingInputLines(lines, sender);
+    const closingLines = [];
+    let state = { seenSignoff: false, seenName: false, seenTitle: false };
 
-    while (index < sections.length) {
-        if (sections[index].type !== 'signature') {
-            result.push(sections[index]);
-            index++;
-            continue;
-        }
+    expanded.forEach((line) => {
+        const part = classifyClosingLine(line, state, sender, detector);
+        if (!part) return;
+        state = part.next;
+        closingLines.push({ role: part.role, text: part.text });
+    });
 
-        const closingLines = [];
-        let state = { seenSignoff: false, seenName: false, seenTitle: false };
-        while (index < sections.length && sections[index].type === 'signature') {
-            for (const line of sections[index].text.split('\n').map(value => cleanLine(value)).filter(Boolean)) {
-                const part = classifyClosingLine(line, state, sender);
-                if (!part) continue;
-                state = part.next;
-                closingLines.push({ role: part.role, text: part.text });
+    if (!closingLines.length) return null;
+    return {
+        type: 'closing',
+        text: closingLines.map(line => line.text).join('\n'),
+        closingLines,
+    };
+};
+
+const splitParagraphSections = (lines, type) => {
+    const sections = [];
+    let current = [];
+
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            if (current.length) {
+                sections.push({ type, text: current.join('\n') });
+                current = [];
             }
-            index++;
+            return;
         }
+        current.push(trimmed);
+    });
 
-        if (!closingLines.length) continue;
-        result.push({
-            type: 'closing',
-            text: closingLines.map(line => line.text).join('\n'),
-            closingLines,
-        });
+    if (current.length) sections.push({ type, text: current.join('\n') });
+    return sections;
+};
+
+const foldSections = (body, { from, suffixLines = [], detector }) => {
+    const sender = parseSenderName(from);
+    const suffixSet = new Set((suffixLines ?? []).map(line => cleanLine(line)).filter(Boolean));
+    const allLines = prepare(body).split('\n');
+
+    let quoteStart = allLines.length;
+    for (let i = 0; i < allLines.length; i++) {
+        const trimmed = allLines[i].trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('>') || isQuoteHeader(allLines.map(line => line.trim()), i)) {
+            quoteStart = i;
+            break;
+        }
     }
 
-    return result;
+    const bodyLines = allLines.slice(0, quoteStart);
+    const quoteLines = allLines.slice(quoteStart);
+    const nonEmpty = bodyLines
+        .map((text, index) => ({ text: text.trim(), index }))
+        .filter(item => item.text);
+
+    const closingRange = findClosingRange(nonEmpty, sender, suffixLines, suffixSet, detector);
+    const sections = [];
+
+    if (!closingRange) {
+        sections.push(...splitParagraphSections(bodyLines, 'content'));
+    } else {
+        const prefixEnd = nonEmpty[closingRange.start].index;
+        const closingEnd = nonEmpty[closingRange.end - 1].index + 1;
+        const prefixLines = bodyLines.slice(0, prefixEnd);
+        const closingLines = bodyLines.slice(prefixEnd, closingEnd).map(line => line.trim()).filter(Boolean);
+        const afterClosingLines = bodyLines.slice(closingEnd);
+        const closing = buildClosingSection(closingLines, sender, detector);
+
+        sections.push(...splitParagraphSections(prefixLines, 'content'));
+        if (closing) sections.push(closing);
+        sections.push(...splitParagraphSections(afterClosingLines, 'content'));
+    }
+
+    sections.push(...splitParagraphSections(quoteLines, 'quote'));
+
+    if (sections.length && sections[0].type === 'content') {
+        const firstLine = sections[0].text.split('\n')[0]?.trim() ?? '';
+        if (GREETING.test(firstLine) && sections[0].text.split('\n').filter(Boolean).length === 1)
+            sections[0] = { type: 'greeting', text: sections[0].text };
+    }
+
+    return sections
+        .map((section) => {
+            if (section.type !== 'content') return section;
+            if (DISCLAIMER.test(section.text) && section.text.length >= 60) return { type: 'disclaimer', text: section.text };
+            if (FOOTER.test(section.text)) return { type: 'footer', text: section.text };
+            return section;
+        })
+        .filter(section => section.text?.trim());
 };
 
 const demoteSignOffOnlyClosing = sections =>
@@ -558,6 +699,9 @@ const promoteSignOffReplyToContent = sections => {
     const tail = lines.slice(index);
     if (!signoffLines.length || !tail.length) return sections;
 
+    const keepSignoffInClosing = signoffLines.some(line => /[,!]$/.test(line.text.trim()));
+    if (keepSignoffInClosing) return sections;
+
     return [
         ...sections.filter((_, i) => i !== closingIndex),
         { type: 'content', text: signoffLines.map(line => line.text).join('\n') },
@@ -567,40 +711,6 @@ const promoteSignOffReplyToContent = sections => {
 
 const isClosingSection = section => section?.type === 'closing';
 const firstClosingIndex = sections => sections.findIndex(isClosingSection);
-
-const classifySections = (groups, suffixLines, detector) => {
-    const suffixSet = new Set((suffixLines ?? []).map(line => line.trim()).filter(Boolean));
-    let quoteMode = false;
-    let signatureMode = false;
-
-    return groups.map((group, index) => {
-        const text = group.lines.join('\n');
-
-        if (group.quoted || group.header) {
-            quoteMode = true;
-            return { text, type: 'quote' };
-        }
-        if (DISCLAIMER.test(text) && text.length >= 60) return { text, type: 'disclaimer' };
-        if (FOOTER.test(text)) return { text, type: 'footer' };
-        if (quoteMode) return { text, type: 'quote' };
-
-        if (group.inlineSignature || group.senderAnchored) {
-            signatureMode = true;
-            return { text, type: 'signature' };
-        }
-
-        // After a sign-off, short fact-free blocks (name / title / company) are still the signature.
-        const learned = suffixSet.size > 0 && group.lines.every(line => suffixSet.has(cleanLine(line)));
-        const closingCandidate = group.lines.every(line => isSignatureCandidateLine(line, detector, suffixSet));
-        const continuation = signatureMode && (isClosingShaped(group.lines, detector) || closingCandidate);
-        if (learned || group.signoff || continuation || group.inlineSignature || (index > 0 && isClosingShaped(group.lines, detector))) {
-            signatureMode = true;
-            return { text, type: 'signature' };
-        }
-        if (index === 0 && group.lines.length === 1 && GREETING.test(group.lines[0])) return { text, type: 'greeting' };
-        return { text, type: 'content' };
-    });
-};
 
 const looksLikeQuoteBlock = (text) => {
     const lines = String(text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
@@ -625,11 +735,8 @@ const markPostClosingQuotes = sections => {
             : section);
 };
 
-// ---------- anchor: sender name / company — or the reference for machine emails ----------
-
 const containsWord = (text, word) => new RegExp(`\\b${escapeRegex(word)}\\b`, 'i').test(text);
 
-// A From header without a display name ("noreply@tms.com") is software-generated.
 const hasSenderName = (from) => {
     const display = String(from ?? '').replace(/<[^>]+>/, '').replace(/"/g, '').trim();
     return Boolean(display) && !display.includes('@');
@@ -657,11 +764,8 @@ const referenceAnchorScore = (section, detector) => {
         + (section.type === 'content' ? 1 : 0);
 };
 
-// index -1 means no divider found: the whole email is fresh content (virtual anchor past the end)
 const findAnchor = (sections, hints, detector, machine) => {
     if (machine) {
-        // Use the best reference-bearing section, not blindly the first one.
-        // Machine messages often repeat the same load in a preheader, body table, and footer.
         const bestReference = sections
             .map((section, index) => ({ index, score: referenceAnchorScore(section, detector) }))
             .filter(candidate => candidate.score >= 0)
@@ -672,7 +776,6 @@ const findAnchor = (sections, hints, detector, machine) => {
     const signatureIndex = firstClosingIndex(sections);
     if (signatureIndex !== -1) return { index: signatureIndex, kind: 'standard' };
 
-    // Skip the first content section — an intro like "this is Jeff from ARKA" is content, not the divider.
     const firstContent = sections.findIndex(section => section.type === 'content');
     const identityIndex = sections.findIndex((section, index) =>
         index !== firstContent
@@ -683,7 +786,6 @@ const findAnchor = (sections, hints, detector, machine) => {
     return { index: sections.findIndex(section => section.type === 'quote'), kind: 'standard' };
 };
 
-// Share of characters living in long unbroken runs — high means links/ids, not prose.
 const unspacedRatio = (text) => {
     const compact = text.replace(/\s+/g, '');
     if (!compact) return 0;
@@ -698,7 +800,7 @@ const fallbackIndex = sections => {
         .map((section, index) => ({ index, section }))
         .filter(item => item.section.type === 'content')
         .sort((a, b) => b.section.weight - a.section.weight || a.index - b.index);
-    return ranked[0]?.index ?? Math.max(sections.findIndex(section => section.type !== 'quote'), 0);
+    return ranked[0]?.index ?? Math.max(sections.findIndex(section => section.type === 'content'), 0);
 };
 
 const splitLeadContentSection = (sections, detector) => {
@@ -784,46 +886,31 @@ const weighOutgoingTopHeavy = (sections, detector) => {
     };
 };
 
-// ---------- weigh + select ----------
-
-// weighEmail(body, { from, candidates, scac, suffixBySender, outgoing })
-// -> { sections: [{ text, type, weight, kept }], relevantText, anchorIndex, anchorKind }
 const weighEmail = (body, { from = '', candidates = [], scac = '', suffixBySender = {}, outgoing = false } = {}) => {
     const detector = createFactDetector(candidates);
     const suffixLines = suffixBySender[extractEmail(from)] ?? [];
-    const rawLines = prepare(body).split('\n').map(line => line.trim());
-    const anchoredGroups = anchorGroupsBySender(rawLines, from);
-    const groups = anchoredGroups ?? splitGroupsForInlineSignatures(
-        groupSections(rawLines),
-        detector,
-        suffixLines,
-    );
-    const sender = parseSenderName(from);
     const sections = markPostClosingQuotes(reclassifyQuoteLikeSections(
-        promoteSignOffReplyToContent(demoteSignOffOnlyClosing(consolidateClosingSections(classifySections(groups, suffixLines, detector), sender))),
+        promoteSignOffReplyToContent(demoteSignOffOnlyClosing(foldSections(body, { from, suffixLines, detector }))),
     ));
     if (!sections.length) return { sections: [], relevantText: '', anchorIndex: -1, anchorKind: 'none' };
 
-    let normalizedSections = sections;
-
-    const substantiveText = normalizedSections
+    const substantiveText = sections
         .filter(section => section.type !== 'quote' && section.type !== 'disclaimer' && section.type !== 'footer')
         .map(section => section.text)
         .join('\n');
     if (outgoing) {
         return hasSubstantiveOutgoingContent(detector, substantiveText)
-            ? weighOutgoingTopHeavy(normalizedSections, detector)
-            : weighOutgoingSimple(normalizedSections, detector);
+            ? weighOutgoingTopHeavy(sections, detector)
+            : weighOutgoingSimple(sections, detector);
     }
 
-    const anchor = findAnchor(normalizedSections, senderHints(from, scac), detector, !hasSenderName(from));
+    const anchor = findAnchor(sections, senderHints(from, scac), detector, !hasSenderName(from));
 
     let aboveContentRank = 0;
-    const weighted = normalizedSections.map((section, index) => {
+    const weighted = sections.map((section, index) => {
         const base = (() => {
             if (section.type === 'disclaimer' || section.type === 'footer') return 0;
 
-            // Machine email: the reference is the center point, weight decays outward.
             if (anchor.kind === 'reference') {
                 if (index === anchor.index) return 1;
                 const decayed = REFERENCE_DECAY ** Math.abs(index - anchor.index);
@@ -849,7 +936,6 @@ const weighEmail = (body, { from = '', candidates = [], scac = '', suffixBySende
             ? base * UNSPACED_PENALTY
             : base;
 
-        // Appointment facts stack only on real prose — signatures/quotes stay capped.
         const boostable = damped > 0 && section.type === 'content';
         const weight = boostable
             ? Math.min(1, damped
@@ -887,8 +973,6 @@ const weighEmail = (body, { from = '', candidates = [], scac = '', suffixBySende
         haveTimeOrDate ||= section.facts.timeOrDate;
         haveIntent ||= section.facts.intent;
 
-        // With known candidates, stop once we have the target reference and schedule fact.
-        // Without candidates, stop once the sender gives a schedule fact plus carrier intent.
         sufficient = requireReference
             ? haveReference && haveTimeOrDate
             : haveTimeOrDate && haveIntent;
@@ -911,3 +995,4 @@ const weighEmail = (body, { from = '', candidates = [], scac = '', suffixBySende
 };
 
 module.exports = { weighEmail, isClosingSection, isSignatureSection: isClosingSection };
+
