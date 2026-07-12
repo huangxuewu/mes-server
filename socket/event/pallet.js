@@ -137,6 +137,15 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("pallets:get", async (query = {}, callback) => {
+        try {
+            const pallets = await db.pallet.find(query).sort({ printedAt: 1 });
+            callback({ status: "success", message: "Pallets fetched successfully", payload: pallets });
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
     socket.on("pallet:count", async (query, callback) => {
         try {
             const count = await db.pallet.countDocuments(query);
