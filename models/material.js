@@ -39,9 +39,23 @@ const dimensionsSchema = new mongoose.Schema({
  */
 const storageSchema = new mongoose.Schema({
     location: { type: String, trim: true },
+    storageUnit: {
+        type: String,
+        trim: true,
+        default: 'box',
+        enum: ['box', 'piece', 'case', 'bag', 'bale', 'roll', 'tote'],
+    },
     casePack: { type: Number, default: 0, min: 0 },
-    maxHeight: { type: Number, default: 0, min: 0 },
+    unitsPerBox: { type: Number, default: 0, min: 0 },
+    boxesPerPallet: { type: Number, default: 0, min: 0 },
     unitsPerPallet: { type: Number, default: 0, min: 0 },
+    defaultPickLevel: {
+        type: String,
+        trim: true,
+        default: 'box',
+        enum: ['case', 'box', 'pallet', 'bale', 'bag', 'roll', 'tote', 'piece'],
+    },
+    maxHeight: { type: Number, default: 0, min: 0 },
     allowOverHang: { type: Boolean, default: false },
     allowStacking: { type: Boolean, default: false },
 }, { _id: false });
@@ -163,7 +177,7 @@ const materialSchema = new mongoose.Schema({
     weight: weightSchema,
     dimensions: dimensionsSchema,
 
-    // Storage
+    // Storage / packaging quantities (case → box → pallet)
     storage: storageSchema,
 
     // Specifications (grouped object: { [groupName]: [[type, key, ...values], ...] })
