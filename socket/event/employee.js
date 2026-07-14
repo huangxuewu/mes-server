@@ -358,8 +358,12 @@ module.exports = (socket, io) => {
                     ...(_id ? { _id: { $ne: _id } } : {})
                 }, { $set: { isDefault: false } });
 
-            const existingCount = await db.workScheduleTemplate.countDocuments({ ...(_id ? { _id: { $ne: _id } } : {}) });
-            const shouldDefault = !!isDefault || existingCount === 0;
+            const scopeDefaultCount = await db.workScheduleTemplate.countDocuments({
+                ...scopeFilter,
+                isDefault: true,
+                ...(_id ? { _id: { $ne: _id } } : {})
+            });
+            const shouldDefault = !!isDefault || scopeDefaultCount === 0;
 
             if (shouldDefault && !isDefault)
                 await db.workScheduleTemplate.updateMany({
