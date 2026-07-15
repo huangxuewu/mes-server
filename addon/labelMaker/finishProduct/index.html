@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f1c1e">
+    <title>Finished Product Label Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/addon/labelMaker/finishProduct/assets/styles.css">
+    <script defer src="/addon/labelMaker/finishProduct/assets/config.js"></script>
+    <script defer src="/socket/socket.io.js"></script>
+    <script defer src="/addon/labelMaker/finishProduct/assets/heatshrink.js"></script>
+    <script defer src="/addon/labelMaker/finishProduct/assets/app.js"></script>
+</head>
+<body>
+    <main class="app">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <div>
+                    <p class="brand-kicker">Label Maker</p>
+                    <h1>Finished Product</h1>
+                </div>
+            </div>
+            <button id="printer-selector" class="printer-chip" type="button">
+                <span id="printer-indicator" class="printer-indicator" aria-hidden="true"></span>
+                <span id="printer-name">RW403B</span>
+            </button>
+        </header>
+
+        <section class="stage">
+            <button id="print-button" class="print-button" type="button" disabled>Print</button>
+        </section>
+
+        <footer class="dock">
+            <button id="product-picker-button" class="dock-product" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <span class="dock-label">Product</span>
+                <span class="dock-value-row">
+                    <strong id="selected-product">—</strong>
+                    <span class="dock-chevron" aria-hidden="true"></span>
+                </span>
+            </button>
+            <button id="boxes-button" class="dock-boxes" type="button" aria-haspopup="dialog" aria-expanded="false" disabled>
+                <span class="dock-label">Boxes per pallet</span>
+                <strong id="boxes-value">—</strong>
+            </button>
+        </footer>
+    </main>
+
+    <div id="boxes-pad" class="boxes-pad" hidden>
+        <div class="boxes-pad-panel" role="dialog" aria-modal="true" aria-labelledby="boxes-pad-title">
+            <div class="boxes-pad-display" aria-live="polite">
+                <span id="boxes-pad-title">Boxes per pallet</span>
+                <strong id="boxes-pad-value">—</strong>
+            </div>
+            <div class="boxes-pad-keys" id="boxes-pad-keys">
+                <button type="button" data-key="7">7</button>
+                <button type="button" data-key="8">8</button>
+                <button type="button" data-key="9">9</button>
+                <button type="button" data-key="4">4</button>
+                <button type="button" data-key="5">5</button>
+                <button type="button" data-key="6">6</button>
+                <button type="button" data-key="1">1</button>
+                <button type="button" data-key="2">2</button>
+                <button type="button" data-key="3">3</button>
+                <button type="button" data-key="clear" class="pad-muted">CLR</button>
+                <button type="button" data-key="0">0</button>
+                <button type="button" data-key="back" class="pad-muted" aria-label="Backspace">⌫</button>
+            </div>
+            <button id="boxes-pad-done" class="boxes-pad-done" type="button">Done</button>
+        </div>
+    </div>
+
+    <div id="product-sheet" class="sheet" hidden>
+        <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="product-sheet-title">
+            <header class="sheet-topbar">
+                <h2 id="product-sheet-title">Products</h2>
+                <div class="sheet-actions">
+                    <span id="product-count" class="count-badge">0</span>
+                    <button id="product-sheet-close" class="sheet-close" type="button" aria-label="Close">Done</button>
+                </div>
+            </header>
+            <div id="product-list" class="product-list" role="listbox" aria-label="Active products"></div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,6 +1,7 @@
 const path = require('path');
 const dns = require("node:dns");
 const express = require('express');
+const session = require('express-session');
 const { io, app, server } = require("./socket/io");
 const socketHandler = require("./socket/index");
 
@@ -9,6 +10,7 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 // Import API routes
 const apiRoutes = require('./api');
 const oauthRouter = require('./routes/oauth');
+const finishProductLabelRouter = require('./routes/finishProductLabel');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -27,10 +29,17 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false }
+}));
 
 // Mount API routes
 app.use('/api', apiRoutes);
 app.use(oauthRouter);
+app.use('/addon/labelMaker/finishProduct', finishProductLabelRouter);
 
 // Socket.IO connection
 io.on("connection", (socket) => socketHandler(socket, io));
