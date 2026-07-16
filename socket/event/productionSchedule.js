@@ -49,13 +49,24 @@ module.exports = (socket) => {
 
             const updatedBy = getSessionUserId(socket);
 
-            await Promise.all(dates.map(({ date, assignments }) =>
-                db.productionSchedule.findOneAndUpdate(
-                    { date },
-                    { $set: { date, assignments: normalizeAssignments(assignments), updatedBy } },
-                    { upsert: true, new: true },
-                )
-            ));
+            if (dates.length) {
+                await db.productionSchedule.bulkWrite(
+                    dates.map(({ date, assignments }) => ({
+                        updateOne: {
+                            filter: { date },
+                            update: {
+                                $set: {
+                                    date,
+                                    assignments: normalizeAssignments(assignments),
+                                    updatedBy,
+                                },
+                            },
+                            upsert: true,
+                        },
+                    })),
+                    { ordered: false },
+                );
+            }
 
             if (settings) {
                 await db.productionSetting.findOneAndUpdate(
