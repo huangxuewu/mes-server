@@ -227,11 +227,59 @@ module.exports = (socket, io) => {
         }
     });
 
+    const sumCartons = (items = []) => Math.round(
+        items.reduce((acc, item) => {
+            const casePack = Number(item?.casePack);
+            if (!(casePack > 0)) return acc;
+            return acc + Number(item?.quantity ?? 0) / casePack;
+        }, 0)
+    );
+
+    // PO items minus quantities already allocated on other loads (exclude the load being filled).
+    const getRemainingItems = (shipment, excludeShipmentId) => {
+        const excludeId = String(excludeShipmentId ?? '').trim();
+        const pool = new Map();
+
+        for (const item of shipment.items ?? []) {
+            const styleCode = item?.styleCode;
+            if (!styleCode) continue;
+            const casePack = Number(item.casePack);
+            if (!(casePack > 0)) continue;
+
+            const existing = pool.get(styleCode);
+            if (existing) {
+                existing.quantity += Number(item.quantity ?? 0);
+                continue;
+            }
+
+            pool.set(styleCode, {
+                styleCode,
+                upc: item.upc,
+                quantity: Number(item.quantity ?? 0),
+                casePack: item.casePack,
+                description: item.description,
+            });
+        }
+
+        for (const load of shipment.loads ?? []) {
+            const shipmentId = String(load?.shipmentId ?? '').trim();
+            if (!shipmentId || shipmentId === excludeId || !load?.items?.length) continue;
+
+            for (const item of load.items) {
+                const remain = pool.get(item?.styleCode);
+                if (!remain) continue;
+                remain.quantity = Math.max(0, remain.quantity - Number(item.quantity ?? 0));
+            }
+        }
+
+        return [...pool.values()].filter(item => item.quantity > 0);
+    };
+
     socket.on("load:sync", async (payloads, callback) => {
         try {
-            if (!Array.isArray(payloads) || !payloads.length) 
+            if (!Array.isArray(payloads) || !payloads.length)
                 return callback?.({ status: "error", message: "Invalid or empty payloads" });
-            
+
             const startTime = performance.now();
 
             // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
@@ -248,65 +296,69 @@ module.exports = (socket, io) => {
                 )
                 .lean();
 
-            // Create a lookup map for shipments
             const shipmentMap = new Map(shipments.map(s => [s.poNumber, s]));
+            const touchedPos = new Set();
 
-            // Prepare bulk operations
-            const bulkOps = [];
-
+            // Pass 1: merge ShipIQ load metadata
             for (const payload of payloads) {
-
                 const { poNumber, load } = payload;
                 const shipmentId = String(load?.shipmentId ?? '').trim();
 
-                if (!poNumber || !shipmentId) continue; // Validate input
+                if (!poNumber || !shipmentId) continue;
 
                 const shipment = shipmentMap.get(poNumber);
-
                 if (!shipment) continue;
 
-                const { loads, items } = shipment;
+                const { loads } = shipment;
                 const loadIndex = loads.findIndex(doc => String(doc?.shipmentId ?? '').trim() === shipmentId);
                 const updatedLoad = { ...load, shipmentId };
 
-                // Update or add load
                 loadIndex !== -1
-                    ? Object.assign(loads[loadIndex], { ...loads[loadIndex], ...updatedLoad }) // Merge load data
+                    ? Object.assign(loads[loadIndex], { ...loads[loadIndex], ...updatedLoad })
                     : loads.push(updatedLoad);
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
-                // if (loadRef.status === 'Completed') continue;
-
-                // Calculate carton count only if necessary
-                const shipmentCartonCount = items.reduce((acc, item) => acc + item.quantity / item.casePack, 0);
-
-                // if (loadRef.cartons !== shipmentCartonCount) {
-                //     loadRef.items = getCartonBreakdown(shipment, loadRef.cartons);
-                // }
-
-                // Update status if BOL exists
                 loadRef.status = loadRef.bol?.url ? "Completed" : loadRef.status;
+                touchedPos.add(poNumber);
+            }
 
-                // Clean up items if empty
-                if (!loadRef?.items?.length) delete loadRef.items;
+            // Pass 2: if empty load's ShipIQ cartons match PO remaining, assign remaining items
+            const bulkOps = [];
 
-                // Add update operation to bulk
+            for (const poNumber of touchedPos) {
+                const shipment = shipmentMap.get(poNumber);
+                if (!shipment) continue;
+
+                for (const loadRef of shipment.loads) {
+                    const shipmentId = String(loadRef?.shipmentId ?? '').trim();
+                    const isCompleted = !!(loadRef.bol?.url) || loadRef.status === 'Completed';
+                    if (isCompleted || loadRef.items?.length) continue;
+
+                    const shipIqCartons = Math.round(Number(loadRef.cartons) || 0);
+                    if (shipIqCartons <= 0) continue;
+
+                    const remainingItems = getRemainingItems(shipment, shipmentId);
+                    if (shipIqCartons !== sumCartons(remainingItems)) continue;
+
+                    loadRef.items = remainingItems;
+                }
+
+                for (const loadRef of shipment.loads) {
+                    if (!loadRef?.items?.length) delete loadRef.items;
+                }
+
                 bulkOps.push({
                     updateOne: {
                         filter: { poNumber },
-                        update: { $set: { loads } }
+                        update: { $set: { loads: shipment.loads } }
                     }
                 });
             }
 
-            // Execute bulk updates if any
-            if (bulkOps.length > 0) {
+            if (bulkOps.length > 0)
                 await db.outbound.bulkWrite(bulkOps);
-            }
 
-            const endTime = performance.now();
-            const elapsedTimeMs = endTime - startTime;
-
+            const elapsedTimeMs = performance.now() - startTime;
             console.log(`Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`);
             callback?.({ status: "success", message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms` });
         } catch (error) {
@@ -314,55 +366,6 @@ module.exports = (socket, io) => {
             callback?.({ status: "error", message: error.message });
         }
     });
-
-    const getCartonBreakdown = (shipment, cartons) => {
-
-        // 1. Sort items small to large by carton count
-        const shipmentItems = [...shipment.items].sort((a, b) => a.quantity / a.casePack - b.quantity / b.casePack);
-
-        // 2. Calculate remaining items after subtracting already allocated loads
-        const remainItems = shipment.loads.reduce((items, load) => {
-
-            if (!load?.items) return items;
-
-            load.items.forEach(item => {
-                const index = items.findIndex(i => i.styleCode === item.styleCode && i.quantity > 0);
-
-                if (index === -1) return;
-
-                items[index].quantity -= item.quantity;
-            });
-
-            return items;
-        }, shipmentItems).filter(item => item.quantity > 0);
-
-        // 3. Allocate items to fit the target carton count
-        const result = [];
-        let totalCarton = 0;
-
-        for (const item of remainItems) {
-            const carton = item.quantity / item.casePack;
-
-            //Target reached, break the loop
-            if (totalCarton === cartons) break;
-
-            if (totalCarton + carton <= cartons) {
-                result.push(item);
-                totalCarton += carton;
-            } else {
-                const remainingCarton = cartons - totalCarton;
-
-                result.push({
-                    ...item,
-                    quantity: remainingCarton * item.casePack
-                });
-                totalCarton += remainingCarton;
-            }
-
-        }
-
-        return result;
-    };
 
     // socket.on("loads:history", async (query, callback) => {
     //     try {
@@ -652,7 +655,7 @@ module.exports = (socket, io) => {
                             docId: { $first: "$_id" }
                         }
                     },
-                    { $project: { bol: 1, status: 1, _id: "$docId" } }
+                    { $project: { bol: "$_id", status: 1, _id: "$docId" } }
                 ]),
             ]);
 
