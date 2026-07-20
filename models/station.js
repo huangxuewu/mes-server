@@ -27,7 +27,29 @@ const stationSchema = new mongoose.Schema({
         enum: ['Active', 'Inactive', 'Disabled'],
         default: 'Active'
     },
-    allowedModules: [String]
+    allowedModules: [String],
+    config: {
+        boardType: {
+            type: String,
+            enum: ['loadboard', 'bulletin'],
+        },
+        departmentId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'department',
+            default: null
+        },
+        bulletin: {
+            pages: {
+                type: [String],
+                default: ['schedule', 'performance']
+            },
+            rotateSeconds: {
+                type: Number,
+                default: 20,
+                min: 5
+            }
+        }
+    }
 }, {
     timestamps: true
 });
