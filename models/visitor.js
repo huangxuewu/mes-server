@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const database = require("../config/database");
 
 const visitorSchema = new mongoose.Schema({
-    hostId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true },
+    hostId: { type: mongoose.Schema.Types.ObjectId, ref: "employee", required: true },
     hostName: { type: String, required: true },
     hostPosition: { type: String, default: "" },
     visitorName: { type: String, required: true, trim: true },
