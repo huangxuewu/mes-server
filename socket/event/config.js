@@ -71,7 +71,7 @@ module.exports = (socket, io) => {
     socket.on("station:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
-            const station = await db.station.findByIdAndUpdate(_id, data, { new: true });
+            const station = await db.station.findByIdAndUpdate(_id, { $set: data }, { new: true, runValidators: true });
             callback({ status: "success", message: "Station updated successfully", payload: station });
         } catch (error) {
             callback({ status: "error", message: error.message });
