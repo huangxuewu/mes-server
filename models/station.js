@@ -18,7 +18,7 @@ const stationSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    application:{
+    application: {
         type: String,
         required: true
     },
