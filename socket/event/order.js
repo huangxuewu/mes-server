@@ -48,7 +48,7 @@ module.exports = (socket, io) => {
     // Reload order buyers/items from PO Items Export and sync outbound.items (never touch loads)
     socket.on('order:po-update', async (payload, callback) => {
         try {
-            const { _id, buyers, items, poDate, cancelDate, shipWindow, client } = payload;
+            const { _id, buyers, items, poDate, cancelDate, shipWindow, client, shipIqSnapshot } = payload;
             if (!_id) throw new Error('Missing order _id');
             if (!Array.isArray(buyers) || !buyers.length) throw new Error('Missing buyers from PO export');
 
@@ -66,6 +66,7 @@ module.exports = (socket, io) => {
             if (cancelDate !== undefined) update.cancelDate = cancelDate;
             if (shipWindow !== undefined) update.shipWindow = shipWindow;
             if (client !== undefined) update.client = client;
+            if (shipIqSnapshot !== undefined) update.shipIqSnapshot = shipIqSnapshot;
 
             const order = await db.order.findByIdAndUpdate(_id, { $set: update }, { new: true });
 

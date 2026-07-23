@@ -170,6 +170,61 @@ module.exports = (socket, io) => {
         }
     });
 
+    const normalizeShipmentIds = (payload = {}) =>
+        [...new Set(
+            [
+                ...(Array.isArray(payload.shipmentIds) ? payload.shipmentIds : []),
+                payload.shipmentId,
+            ]
+                .map(id => String(id ?? '').trim())
+                .filter(Boolean)
+        )];
+
+    const deleteEmptyOutbounds = () =>
+        db.outbound.deleteMany({
+            $or: [
+                { loads: { $size: 0 } },
+                { loads: { $exists: false } },
+                { loads: null },
+            ],
+        });
+
+    socket.on("load:delete", async (payload, callback) => {
+        try {
+            const shipmentIds = normalizeShipmentIds(payload);
+            if (!shipmentIds.length)
+                return callback?.({ status: "error", message: "Missing shipmentId" });
+
+            await db.outbound.updateMany(
+                { 'loads.shipmentId': { $in: shipmentIds } },
+                { $pull: { loads: { shipmentId: { $in: shipmentIds } } } }
+            );
+            await deleteEmptyOutbounds();
+
+            callback?.({ status: "success", message: "Load deleted successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("loads:delete", async (payload, callback) => {
+        try {
+            const loadNumber = payload?.loadNumber;
+            if (!loadNumber)
+                return callback?.({ status: "error", message: "Missing loadNumber" });
+
+            await db.outbound.updateMany(
+                { 'loads.loadNumber': loadNumber },
+                { $pull: { loads: { loadNumber } } }
+            );
+            await deleteEmptyOutbounds();
+
+            callback?.({ status: "success", message: "Loads deleted successfully" });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
     socket.on("load:update", async (payload, callback) => {
         try {
             const { shipmentId, ...data } = payload;

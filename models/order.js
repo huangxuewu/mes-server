@@ -63,6 +63,7 @@ const orderSchema = new mongoose.Schema({
     note: String,
     items: {},
     buyers: [buyerSchema],
+    shipIqSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
     productionLogs: [productionLogSchema],
     inspections: [inspectionSchema],
     priority: {
