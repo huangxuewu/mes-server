@@ -233,9 +233,11 @@ module.exports = (socket, io) => {
             const { _id, ...rest } = data;
             const update = { ...rest };
 
-            if (Object.prototype.hasOwnProperty.call(update, 'punches')) {
-                update.punches = db.timecard.sanitizePunches(update.punches, { preserveUndefined: true });
-            }
+            if (Object.prototype.hasOwnProperty.call(update, 'punches'))
+                return callback({
+                    status: "error",
+                    message: "Punch edits require approval. Submit a change request instead.",
+                });
 
             const timecard = await db.timecard.findByIdAndUpdate(
                 { _id },
