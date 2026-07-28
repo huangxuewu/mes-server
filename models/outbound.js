@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
+const { shouldMarkCompleted } = require("../utils/outboundScac");
 
 const itemSchema = new mongoose.Schema({
     upc: String,
@@ -141,7 +142,7 @@ Outbound.hooks.pre("save", async function (next) {
     if (this.isModified('loads')) {
         try {
             // Check if any load has been completed
-            const hasCompletedLoad = this.loads.some(load => load.status === "Completed" || load.bol?.url);
+            const hasCompletedLoad = this.loads.some(load => load.status === "Completed" || shouldMarkCompleted(load));
 
             if (hasCompletedLoad) {
                 // Update corresponding order buyers to done = true

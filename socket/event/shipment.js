@@ -3,6 +3,7 @@ const db = require("../../models");
 const mongoose = require("mongoose");
 const { Types: { ObjectId } } = mongoose;
 const { performance } = require('node:perf_hooks');
+const { shouldMarkCompleted, requiresBol } = require("../../utils/outboundScac");
 
 module.exports = (socket, io) => {
 
@@ -229,13 +230,31 @@ module.exports = (socket, io) => {
         try {
             const { shipmentId, ...data } = payload;
 
+            // DMSP (FedEx/UPS parcel): no BOL — mark Completed once loaded
+            if (data.checklist?.loaded?.status === true && !data.status) {
+                const doc = await db.outbound.findOne(
+                    { 'loads.shipmentId': shipmentId },
+                    { loads: { $elemMatch: { shipmentId } } }
+                ).lean();
+                const load = doc?.loads?.[0];
+                if (load && !requiresBol({ ...load, ...data }))
+                    data.status = 'Completed';
+            }
+
             const update = Object.keys(data).reduce((acc, key) =>
                 Object.assign(acc, { [`loads.$[target].${key}`]: data[key] })
                 , {});
 
-            await db.outbound.updateOne({ 'loads.shipmentId': shipmentId }, { $set: update }, { arrayFilters: [{ 'target.shipmentId': shipmentId }] });
+            const shipment = await db.outbound.findOneAndUpdate(
+                { 'loads.shipmentId': shipmentId },
+                { $set: update },
+                { arrayFilters: [{ 'target.shipmentId': shipmentId }], new: true }
+            );
 
             callback?.({ status: "success", message: "Load updated successfully" });
+
+            if (data.status === 'Completed' && shipment)
+                await db.order.updateShipmentStatus(shipment);
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
@@ -258,7 +277,7 @@ module.exports = (socket, io) => {
         const { _id, load } = payload;
 
         try {
-            load.status = load.bol?.url ? "Completed" : load.status;
+            load.status = shouldMarkCompleted(load) ? "Completed" : load.status;
 
             const update = Object.keys(load).reduce((acc, key) =>
                 Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
@@ -373,7 +392,7 @@ module.exports = (socket, io) => {
                     : loads.push(updatedLoad);
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
-                loadRef.status = loadRef.bol?.url ? "Completed" : loadRef.status;
+                loadRef.status = shouldMarkCompleted(loadRef) ? "Completed" : loadRef.status;
                 touchedPos.add(poNumber);
             }
 
@@ -386,7 +405,7 @@ module.exports = (socket, io) => {
 
                 for (const loadRef of shipment.loads) {
                     const shipmentId = String(loadRef?.shipmentId ?? '').trim();
-                    const isCompleted = !!(loadRef.bol?.url) || loadRef.status === 'Completed';
+                    const isCompleted = shouldMarkCompleted(loadRef) || loadRef.status === 'Completed';
                     if (isCompleted || loadRef.items?.length) continue;
 
                     const shipIqCartons = Math.round(Number(loadRef.cartons) || 0);
