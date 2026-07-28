@@ -363,13 +363,8 @@ module.exports = (socket, io) => {
                 isDefault: true,
                 ...(_id ? { _id: { $ne: _id } } : {})
             });
-            const shouldDefault = !!isDefault || scopeDefaultCount === 0;
-
-            if (shouldDefault && !isDefault)
-                await db.workScheduleTemplate.updateMany({
-                    ...scopeFilter,
-                    ...(_id ? { _id: { $ne: _id } } : {})
-                }, { $set: { isDefault: false } });
+            // Auto-default only on create when the scope has none; allow unsetting on update
+            const shouldDefault = !!isDefault || (!_id && scopeDefaultCount === 0);
 
             const doc = {
                 name: trimmedName,
@@ -401,7 +396,10 @@ module.exports = (socket, io) => {
             if (!removed) return callback({ status: "error", message: "Template not found" });
 
             if (removed.isDefault) {
-                const next = await db.workScheduleTemplate.findOne().sort({ createdAt: 1 });
+                const scopeFilter = removed.applyScope === 'department'
+                    ? { applyScope: 'department', departmentId: removed.departmentId }
+                    : { applyScope: 'all' };
+                const next = await db.workScheduleTemplate.findOne(scopeFilter).sort({ createdAt: 1 });
                 if (next) await db.workScheduleTemplate.updateOne({ _id: next._id }, { $set: { isDefault: true } });
             }
 

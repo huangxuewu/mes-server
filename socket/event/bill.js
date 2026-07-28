@@ -22,6 +22,13 @@ module.exports = (socket, io) => {
 
     socket.on("bill:create", async (data, callback) => {
         try {
+            const duplicate = await db.bill.exists({
+                providerId: data.providerId,
+                periodStart: data.periodStart,
+                periodEnd: data.periodEnd,
+            });
+            if (duplicate) return callback({ status: "error", message: "A bill already exists for this service provider and period" });
+
             const bill = await db.bill.create(data);
             callback({ status: "success", message: "Bill created", payload: bill });
         } catch (error) {
