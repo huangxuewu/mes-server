@@ -3,6 +3,14 @@ const { io } = require("../socket/io");
 const database = require("../config/database");
 
 const stationSchema = new mongoose.Schema({
+    stationId: {
+        type: String,
+        unique: true,
+        sparse: true,
+        lowercase: true,
+        trim: true,
+        match: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    },
     name: {
         type: String,
         required: true
@@ -16,11 +24,12 @@ const stationSchema = new mongoose.Schema({
     },
     macAddress: {
         type: String,
-        required: true
+        default: null
     },
     application: {
         type: String,
-        required: true
+        required: true,
+        enum: ['SOFTWARE', 'SIGNAGE', 'TIMECARD', 'VISITOR', 'LOADBOARD', 'PORTAL']
     },
     status: {
         type: String,
@@ -28,6 +37,10 @@ const stationSchema = new mongoose.Schema({
         default: 'Active'
     },
     allowedModules: [String],
+    lastSeenAt: {
+        type: Date,
+        default: null
+    },
     config: {
         boardType: {
             type: String,

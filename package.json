@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "node index.js",
-    "start": "node ./bin/www"
+    "start": "node ./bin/www",
+    "audit:stations": "node scripts/audit-station-identities.js",
+    "test:station-identity": "node --test test/stationIdentity.test.js"
   },
   "engines": {
     "node": "20.x",
