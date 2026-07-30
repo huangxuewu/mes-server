@@ -16,6 +16,79 @@ const punchesEqual = (a = [], b = []) => {
     return a.every((punch, i) => punchFingerprint(punch) === punchFingerprint(b[i]));
 };
 
+const punchRowKey = row =>
+    `${row?.beforeIndex ?? "x"}:${row?.afterIndex ?? "x"}`;
+
+const buildPunchRows = (before = [], after = []) => {
+    const usedAfter = new Set();
+    const rows = [];
+
+    before.forEach((punch, beforeIndex) => {
+        let match = null;
+        let afterIndex = -1;
+        if (punch._id) {
+            afterIndex = after.findIndex(p => String(p._id) === String(punch._id));
+            if (afterIndex >= 0) match = after[afterIndex];
+        }
+
+        if (!match && after[beforeIndex] && !usedAfter.has(beforeIndex) && !after[beforeIndex]._id) {
+            afterIndex = beforeIndex;
+            match = after[afterIndex];
+        }
+
+        if (afterIndex >= 0) usedAfter.add(afterIndex);
+        if (!match) {
+            rows.push({ status: "removed", beforeIndex, afterIndex: null });
+            return;
+        }
+
+        rows.push({
+            status: punchFingerprint(punch) === punchFingerprint(match) ? "same" : "changed",
+            beforeIndex,
+            afterIndex,
+        });
+    });
+
+    after.forEach((punch, afterIndex) => {
+        if (usedAfter.has(afterIndex)) return;
+        if (punch._id && before.some(p => String(p._id) === String(punch._id))) return;
+        rows.push({ status: "added", beforeIndex: null, afterIndex });
+    });
+
+    return rows;
+};
+
+const reviewAfter = (before = [], after = [], rejectedChanges = []) => {
+    const changedRows = buildPunchRows(before, after).filter(row => row.status !== "same");
+    const available = new Map(changedRows.map(row => [punchRowKey(row), row]));
+    const rejected = [...new Map(
+        (Array.isArray(rejectedChanges) ? rejectedChanges : [])
+            .map(change => available.get(punchRowKey(change)))
+            .filter(Boolean)
+            .map(row => [punchRowKey(row), row])
+    ).values()];
+    const reviewed = [...after];
+
+    rejected
+        .filter(row => row.status === "changed")
+        .forEach(row => reviewed[row.afterIndex] = before[row.beforeIndex]);
+
+    rejected
+        .filter(row => row.status === "added")
+        .sort((a, b) => b.afterIndex - a.afterIndex)
+        .forEach(row => reviewed.splice(row.afterIndex, 1));
+
+    rejected
+        .filter(row => row.status === "removed")
+        .sort((a, b) => a.beforeIndex - b.beforeIndex)
+        .forEach(row => reviewed.splice(Math.min(row.beforeIndex, reviewed.length), 0, before[row.beforeIndex]));
+
+    return {
+        afterValue: reviewed,
+        rejectedChanges: rejected.map(({ beforeIndex, afterIndex }) => ({ beforeIndex, afterIndex })),
+    };
+};
+
 const markManualWhereChanged = (before = [], after = []) => {
     const beforeById = new Map(
         before.filter(p => punchKey(p)).map(p => [punchKey(p), p])
@@ -80,6 +153,8 @@ const timecardPunchesHandler = {
     sanitizeAfter: (afterValue) => db.timecard.sanitizePunches(afterValue),
 
     hasMeaningfulDiff: (beforeValue, afterValue) => !punchesEqual(beforeValue, afterValue),
+
+    reviewAfter,
 
     checkConflict: async (referenceId, _baseHash, beforeValue) => {
         const timecard = await db.timecard.findById(referenceId);

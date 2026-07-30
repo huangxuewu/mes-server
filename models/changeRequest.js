@@ -15,6 +15,7 @@ const changeRequestSchema = new mongoose.Schema({
     },
     beforeValue: { type: mongoose.Schema.Types.Mixed, default: null },
     afterValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    rejectedChanges: { type: mongoose.Schema.Types.Mixed, default: () => [] },
     reason: { type: String, required: true, trim: true },
     status: {
         type: String,

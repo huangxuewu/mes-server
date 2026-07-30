@@ -142,15 +142,22 @@ module.exports = (socket) => {
                 });
             }
 
+            const review = handler.reviewAfter
+                ? handler.reviewAfter(request.beforeValue, request.afterValue, data.rejectedChanges)
+                : { afterValue: request.afterValue, rejectedChanges: [] };
+            if (!handler.hasMeaningfulDiff(request.beforeValue, review.afterValue))
+                return callback({ status: "error", message: "Reject the request when all row changes are rejected" });
+
             await handler.apply({
                 referenceId: request.referenceId,
                 beforeValue: request.beforeValue,
-                afterValue: request.afterValue,
+                afterValue: review.afterValue,
                 reason: request.reason,
                 submittedBy: request.submittedBy,
             });
 
             request.status = "Approved";
+            request.rejectedChanges = review.rejectedChanges;
             request.verdictBy = user._id;
             request.verdictAt = new Date();
             request.verdictNote = String(verdictNote || "").trim();
