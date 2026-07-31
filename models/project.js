@@ -66,6 +66,7 @@ const milestoneSchema = new mongoose.Schema({
 const projectSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true, trim: true },
     name: { type: String, required: true, trim: true },
+    type: { type: String, default: "", trim: true },
     problem: { type: String, default: "", trim: true },
     goal: { type: String, default: "", trim: true },
     area: { type: String, default: "", trim: true },

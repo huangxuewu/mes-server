@@ -181,8 +181,9 @@ module.exports = (socket, io) => {
                 .filter(Boolean)
         )];
 
-    const deleteEmptyOutbounds = () =>
+    const deleteEmptyOutbounds = (query) =>
         db.outbound.deleteMany({
+            ...query,
             $or: [
                 { loads: { $size: 0 } },
                 { loads: { $exists: false } },
@@ -196,11 +197,15 @@ module.exports = (socket, io) => {
             if (!shipmentIds.length)
                 return callback?.({ status: "error", message: "Missing shipmentId" });
 
+            const outboundIds = await db.outbound.distinct('_id', {
+                'loads.shipmentId': { $in: shipmentIds }
+            });
+
             await db.outbound.updateMany(
-                { 'loads.shipmentId': { $in: shipmentIds } },
+                { _id: { $in: outboundIds } },
                 { $pull: { loads: { shipmentId: { $in: shipmentIds } } } }
             );
-            await deleteEmptyOutbounds();
+            await deleteEmptyOutbounds({ _id: { $in: outboundIds } });
 
             callback?.({ status: "success", message: "Load deleted successfully" });
         } catch (error) {
@@ -214,11 +219,13 @@ module.exports = (socket, io) => {
             if (!loadNumber)
                 return callback?.({ status: "error", message: "Missing loadNumber" });
 
+            const outboundIds = await db.outbound.distinct('_id', { 'loads.loadNumber': loadNumber });
+
             await db.outbound.updateMany(
-                { 'loads.loadNumber': loadNumber },
+                { _id: { $in: outboundIds } },
                 { $pull: { loads: { loadNumber } } }
             );
-            await deleteEmptyOutbounds();
+            await deleteEmptyOutbounds({ _id: { $in: outboundIds } });
 
             callback?.({ status: "success", message: "Loads deleted successfully" });
         } catch (error) {
