@@ -57,10 +57,25 @@ const milestoneImageSchema = new mongoose.Schema({
 }, { _id: false });
 
 const milestoneSchema = new mongoose.Schema({
-    at: { type: Date, default: null },
+    at: { type: Date, default: Date.now },
+    stage: { type: String, default: "Beginning", trim: true },
+    actor: { type: String, default: "", trim: true },
+    action: { type: String, default: "", trim: true },
+    target: { type: String, default: "", trim: true },
+    targetLabel: { type: String, default: "", trim: true },
+    summary: { type: String, default: "", trim: true },
     title: { type: String, default: "", trim: true },
     note: { type: String, default: "", trim: true },
     images: { type: [milestoneImageSchema], default: [] },
+    source: { type: String, default: "system", trim: true },
+}, { _id: false });
+
+const imageRegistrySchema = new mongoose.Schema({
+    path: { type: String, default: "", trim: true },
+    name: { type: String, default: "", trim: true },
+    figure: { type: Number, default: 0, min: 0 },
+    uploadedAt: { type: Date, default: Date.now },
+    uploadedBy: { type: String, default: "", trim: true },
 }, { _id: false });
 
 const projectSchema = new mongoose.Schema({
@@ -77,6 +92,7 @@ const projectSchema = new mongoose.Schema({
     selectedQuote: { type: selectedQuoteSchema, default: () => ({}) },
     approvals: { type: [approvalSchema], default: [] },
     milestones: { type: [milestoneSchema], default: [] },
+    imageRegistry: { type: [imageRegistrySchema], default: [] },
     fileSummary: {
         document: { type: Number, default: 0, min: 0 },
         image: { type: Number, default: 0, min: 0 },
