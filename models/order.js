@@ -88,16 +88,34 @@ orderSchema.methods.checkDuplication = async function () {
 }
 
 orderSchema.statics.updateShipmentStatus = async function (shipment) {
-    const { poNumber, loads } = shipment;
+    const poNumber = shipment?.poNumber;
+    const loads = shipment?.loads ?? [];
+    if (!poNumber) return;
+    if (!loads.some(load => ["Picked Up", "Completed"].includes(load.status))) return;
 
-    for (const load of loads) {
-        if (!["Picked Up", "Completed"].includes(load.status)) continue;
+    const orders = await this.find({ "buyers.poNumber": poNumber });
+    for (const order of orders) {
+        let buyersChanged = false;
+        const buyers = order.buyers.map(buyer => {
+            if (buyer.poNumber !== poNumber || buyer.done) return buyer;
+            buyersChanged = true;
+            const plain = typeof buyer.toObject === 'function' ? buyer.toObject() : buyer;
+            return { ...plain, done: true };
+        });
 
-        // Update buyers to done
-        await this.updateMany({ "buyers.poNumber": poNumber }, { $set: { "buyers.$.done": true } });
-        
-        // Check and update order status for affected orders
-        await this.checkOrderStatusByBuyerPO(poNumber);
+        if (!buyersChanged) {
+            await checkAndUpdateOrderStatus(order._id, this);
+            continue;
+        }
+
+        const allDone = buyers.every(buyer => buyer.done);
+        const update = { buyers };
+        if (allDone && order.orderStatus !== "Completed") {
+            update.orderStatus = "Completed";
+            update.fulfilledAt = order.fulfilledAt || new Date();
+        }
+
+        await this.findByIdAndUpdate(order._id, { $set: update }, { new: true });
     }
 }
 

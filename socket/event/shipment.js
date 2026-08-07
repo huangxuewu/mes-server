@@ -105,6 +105,12 @@ module.exports = (socket, io) => {
 
             await db.outbound.updateMany({ masterPO }, { $set: update }); // [] update all loads
 
+            if (['Picked Up', 'Completed'].includes(data.status)) {
+                const shipments = await db.outbound.find({ masterPO });
+                for (const shipment of shipments)
+                    await db.order.updateShipmentStatus(shipment);
+            }
+
             callback?.({ status: "success", message: "Outbound shipments updated successfully" });
 
         } catch (error) {
@@ -260,7 +266,7 @@ module.exports = (socket, io) => {
 
             callback?.({ status: "success", message: "Load updated successfully" });
 
-            if (data.status === 'Completed' && shipment)
+            if (['Picked Up', 'Completed'].includes(data.status) && shipment)
                 await db.order.updateShipmentStatus(shipment);
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -439,6 +445,13 @@ module.exports = (socket, io) => {
             if (bulkOps.length > 0)
                 await db.outbound.bulkWrite(bulkOps);
 
+            // Keep order.buyers.done in sync with live load statuses (ShipIQ path skips outbound.save hooks)
+            for (const poNumber of touchedPos) {
+                const shipment = shipmentMap.get(poNumber);
+                if (!shipment?.loads?.some(l => ['Picked Up', 'Completed'].includes(l.status))) continue;
+                await db.order.updateShipmentStatus(shipment);
+            }
+
             const elapsedTimeMs = performance.now() - startTime;
             console.log(`Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`);
             callback?.({ status: "success", message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms` });
@@ -502,6 +515,12 @@ module.exports = (socket, io) => {
             //     ? await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
             await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+
+            if (['Picked Up', 'Completed'].includes(data.status)) {
+                const shipments = await db.outbound.find({ 'loads.loadNumber': loadNumber });
+                for (const shipment of shipments)
+                    await db.order.updateShipmentStatus(shipment);
+            }
 
             callback?.({ status: "success", message: "Loads updated successfully" });
 
@@ -580,8 +599,10 @@ module.exports = (socket, io) => {
             await db.gate.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
             await db.hauler.updateOne({ loadNumber, 'status': 'Loading' }, { $set: { finishLoadAt: new Date(), status: 'Available' } });
 
-            // also update the order buyer status
-            // await db.order.updateOne({poNumber:poNumber.split('-')[0]}, { $set: { 'buyers.$[dc].done': true } }, { arrayFilters: [{ 'dc.poNumber': poNumber.split('-')[0] }] });
+            // Keep order.buyers.done in sync (was previously commented out / incorrect filter)
+            const linkedShipments = await db.outbound.find({ 'loads.shipmentId': { $in: shipmentIdArray } });
+            for (const shipment of linkedShipments)
+                await db.order.updateShipmentStatus(shipment);
 
             callback?.({ status: "success", message: "Bill of Lading linked successfully" });
         } catch (error) {
