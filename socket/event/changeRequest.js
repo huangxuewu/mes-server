@@ -6,24 +6,6 @@ const USER_SELECT = "username displayName firstName lastName";
 
 const actorId = (user) => String(user._id);
 
-const stripPunchImages = (punches) => {
-    if (!Array.isArray(punches)) return punches;
-    return punches.map((punch) => {
-        if (!punch || typeof punch !== "object") return punch;
-        const { image, ...rest } = punch;
-        return rest;
-    });
-};
-
-const stripRequestPunchImages = (doc) => {
-    if (!doc) return doc;
-    return {
-        ...doc,
-        beforeValue: stripPunchImages(doc.beforeValue),
-        afterValue: stripPunchImages(doc.afterValue),
-    };
-};
-
 module.exports = (socket) => {
     const requireUser = async (callback) => {
         const userId = getSessionUserId(socket);
@@ -120,7 +102,7 @@ module.exports = (socket) => {
                 .populate("verdictBy", USER_SELECT)
                 .lean();
 
-            callback({ status: "success", message: "Change requests fetched", payload: list.map(stripRequestPunchImages) });
+            callback({ status: "success", message: "Change requests fetched", payload: list });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
