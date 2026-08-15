@@ -6,6 +6,24 @@ const USER_SELECT = "username displayName firstName lastName";
 
 const actorId = (user) => String(user._id);
 
+const stripPunchImages = (punches) => {
+    if (!Array.isArray(punches)) return punches;
+    return punches.map((punch) => {
+        if (!punch || typeof punch !== "object") return punch;
+        const { image, ...rest } = punch;
+        return rest;
+    });
+};
+
+const stripRequestPunchImages = (doc) => {
+    if (!doc) return doc;
+    return {
+        ...doc,
+        beforeValue: stripPunchImages(doc.beforeValue),
+        afterValue: stripPunchImages(doc.afterValue),
+    };
+};
+
 module.exports = (socket) => {
     const requireUser = async (callback) => {
         const userId = getSessionUserId(socket);
@@ -85,20 +103,24 @@ module.exports = (socket) => {
             const user = await requireUser(callback);
             if (!user) return;
 
+            const { select, ...rest } = query;
             const filter = {};
-            if (query.status) filter.status = query.status;
-            if (query.referenceId) filter.referenceId = query.referenceId;
-            if (query.targetField) filter.targetField = query.targetField;
-            if (Array.isArray(query.targetFields) && query.targetFields.length)
-                filter.targetField = { $in: query.targetFields };
+            if (rest._id) filter._id = rest._id;
+            if (rest.status) filter.status = rest.status;
+            if (rest.referenceId) filter.referenceId = rest.referenceId;
+            if (rest.targetField) filter.targetField = rest.targetField;
+            if (Array.isArray(rest.targetFields) && rest.targetFields.length)
+                filter.targetField = { $in: rest.targetFields };
+            if (rest.submittedAt) filter.submittedAt = rest.submittedAt;
 
-            const list = await db.changeRequest.find(filter)
-                .sort({ submittedAt: -1 })
+            let finder = db.changeRequest.find(filter).sort({ submittedAt: -1 });
+            if (select) finder = finder.select(select);
+            const list = await finder
                 .populate("submittedBy", USER_SELECT)
                 .populate("verdictBy", USER_SELECT)
                 .lean();
 
-            callback({ status: "success", message: "Change requests fetched", payload: list });
+            callback({ status: "success", message: "Change requests fetched", payload: list.map(stripRequestPunchImages) });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

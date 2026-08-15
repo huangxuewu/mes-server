@@ -208,11 +208,17 @@ module.exports = (socket, io) => {
         }
     });
 
-    socket.on('timecard:fetch', async (query, callback) => {
+    socket.on('timecard:fetch', async (payload, callback) => {
         try {
-            const timecards = await db.timecard.find(query);
-            callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
+            const query = payload?.query ?? payload;
+            const select = payload?.select;
+            if (!query || typeof query !== 'object' || Array.isArray(query) || !Object.keys(query).length)
+                return callback({ status: "error", message: "Timecard query is required" });
 
+            let finder = db.timecard.find({ ...query, isDeleted: { $ne: true } });
+            if (select) finder = finder.select(select);
+            const timecards = await finder.lean();
+            callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

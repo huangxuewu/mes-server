@@ -151,6 +151,9 @@ const timecardSchema = new mongoose.Schema({
     timestamps: true
 });
 
+timecardSchema.index({ date: 1, employeeId: 1 });
+timecardSchema.index({ employeeId: 1, date: 1 });
+
 timecardSchema.statics.clockIn = async function (payload) {
     const { _id, image, station, location, method, ip, note } = payload;
     const eventId = payload?.eventId || payload?.idempotencyKey || null;
