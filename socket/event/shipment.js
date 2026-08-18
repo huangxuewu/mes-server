@@ -493,12 +493,21 @@ module.exports = (socket, io) => {
         });
 
         try {
-            const shipments = await db.outbound.aggregate([
+            const preMatch = {};
+            if (query.pickupDate) preMatch['loads.pickupDate'] = query.pickupDate;
+            if (query.loadNumber) preMatch['loads.loadNumber'] = query.loadNumber;
+
+            const pipeline = [];
+            if (Object.keys(preMatch).length) pipeline.push({ $match: preMatch });
+
+            pipeline.push(
                 { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                 { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
                 { $project: { loads: 0 } },
                 { $match: query }
-            ]);
+            );
+
+            const shipments = await db.outbound.aggregate(pipeline);
 
             callback({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
