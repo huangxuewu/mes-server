@@ -131,7 +131,7 @@ const timecardSchema = new mongoose.Schema({
             start: { type: Date, default: null },
             end: { type: Date, default: null },
         },
-
+        honorShortMealBreak: { type: Boolean, default: false },
     },
     status: { type: String, enum: ['Draft', 'Pending', 'Approved', 'Rejected'], default: 'Pending' },
     isDeleted: { type: Boolean, default: false },
@@ -375,11 +375,14 @@ async function resolveScheduleBounds(employeeId, date) {
 // Function to calculate timecard totals based on punches.
 // Overtime follows the work schedule: worked minutes before the scheduled start
 // or after the scheduled end (all worked minutes on a scheduled day off).
-function calculateTimecardTotals(punches, scheduleBounds = null) {
+function calculateTimecardTotals(punches, scheduleBounds = null, options = {}) {
     let workMinutes = 0;
     let breakMinutes = 0;
     let grossMinutes = 0;
     let overtimeMinutes = 0;
+
+    const honorShortMeal = !!options.honorShortMeal;
+    const mealMinutes = Number(options.mealMinutes) > 0 ? Number(options.mealMinutes) : 30;
 
     // Sort punches by time to ensure proper order
     const sortedPunches = punches.sort((a, b) => new Date(a.time) - new Date(b.time));
@@ -423,6 +426,26 @@ function calculateTimecardTotals(punches, scheduleBounds = null) {
         }
     }
 
+    if (!honorShortMeal && mealMinutes > 0 && workIntervals.length >= 2) {
+        const floorMs = mealMinutes * 60 * 1000;
+        let best = -1;
+        let bestGap = 0;
+        for (let i = 0; i < workIntervals.length - 1; i++) {
+            const gap = workIntervals[i + 1].start - workIntervals[i].end;
+            if (gap > 0 && gap < floorMs && gap > bestGap) {
+                bestGap = gap;
+                best = i;
+            }
+        }
+        if (best >= 0) {
+            workIntervals[best + 1].start = workIntervals[best].end + floorMs;
+            totalBreakTime += floorMs - bestGap;
+        }
+    }
+
+    const flooredIntervals = workIntervals.filter(interval => interval.end > interval.start);
+    totalWorkTime = flooredIntervals.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
+
     // Convert milliseconds to minutes
     workMinutes = Math.round(totalWorkTime / (1000 * 60));
     breakMinutes = Math.round(totalBreakTime / (1000 * 60));
@@ -434,7 +457,7 @@ function calculateTimecardTotals(punches, scheduleBounds = null) {
         if (scheduleBounds.dayOff) {
             overtimeMinutes = workMinutes;
         } else {
-            const outsideMs = workIntervals.reduce((total, interval) =>
+            const outsideMs = flooredIntervals.reduce((total, interval) =>
                 total
                 + Math.max(0, Math.min(interval.end, scheduleBounds.startMs) - interval.start)
                 + Math.max(0, interval.end - Math.max(interval.start, scheduleBounds.endMs)), 0);
@@ -463,7 +486,9 @@ timecardSchema.pre('save', async function (next) {
             // Sort punches by time to ensure they're always in chronological order
             this.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
             const scheduleBounds = await resolveScheduleBounds(this.employeeId, this.date);
-            this.totals = calculateTimecardTotals(this.punches, scheduleBounds);
+            this.totals = calculateTimecardTotals(this.punches, scheduleBounds, {
+                honorShortMeal: this.overtime?.honorShortMealBreak,
+            });
         }
 
         // Maintain hash chain

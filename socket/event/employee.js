@@ -217,6 +217,7 @@ module.exports = (socket, io) => {
 
             let finder = db.timecard.find({ ...query, isDeleted: { $ne: true } });
             if (select) finder = finder.select(select);
+            else finder = finder.populate({ path: "overtime.approvedBy", model: "User", select: "displayName username" });
             const timecards = await finder.lean();
             callback({ status: "success", message: "Timecards fetched successfully", payload: timecards });
         } catch (error) {
