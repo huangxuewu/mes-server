@@ -60,6 +60,10 @@ const stationSchema = new mongoose.Schema({
                 type: Number,
                 default: 20,
             },
+            teamIds: {
+                type: [mongoose.Schema.Types.ObjectId],
+                default: [],
+            },
         },
     },
 }, {
