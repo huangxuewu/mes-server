@@ -24,6 +24,17 @@ const messageSchema = new mongoose.Schema({
     summary: { type: String, default: "", description: "Plain-text AI one-liner" },
     rich: { type: richSchema, default: null, description: "Structured version of the summary for styled rendering" },
     isOutgoing: { type: Boolean, default: false },
+    loadNumbers: [{ type: String }],
+}, {
+    _id: false
+});
+
+const loadAssociationSchema = new mongoose.Schema({
+    loadNumber: { type: String, required: true },
+    proNumber: { type: String, default: "" },
+    scac: { type: String, default: "" },
+    status: { type: String, default: "New", enum: ["New", "Time Proposed", "Confirmed", "Scheduled", "Closed"] },
+    proposedTime: { type: Date, default: null },
 }, {
     _id: false
 });
@@ -36,6 +47,7 @@ const emailThreadSchema = new mongoose.Schema({
     subject: { type: String, default: "" },
     status: { type: String, default: "New", enum: ["New", "Time Proposed", "Confirmed", "Scheduled", "Closed"] },
     proposedTime: { type: Date, default: null, description: "Time the manager proposed in a reply" },
+    loadAssociations: [loadAssociationSchema],
     messages: [messageSchema],
 }, {
     timestamps: true

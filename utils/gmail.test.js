@@ -85,3 +85,20 @@ test("resolveGmailConfig throws a clear error when required keys are missing", (
         /integration\.gmail\.clientSecret, integration\.gmail\.refreshToken, integration\.gmail\.redirectUri/
     );
 });
+
+test("buildPrioritySearchQueries puts active load numbers in Gmail OR searches", () => {
+    assert.deepEqual(
+        gmail.buildPrioritySearchQueries([" 77750565 ", "77750565", "ABC-123"]),
+        ['{"77750565" "ABC-123"}']
+    );
+});
+
+test("buildPrioritySearchQueries batches large active load lists", () => {
+    const queries = gmail.buildPrioritySearchQueries(
+        Array.from({ length: 31 }, (_, index) => String(70000000 + index))
+    );
+
+    assert.equal(queries.length, 2);
+    assert.match(queries[0], /"70000000"/);
+    assert.match(queries[1], /"70000030"/);
+});

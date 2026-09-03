@@ -34,17 +34,27 @@ const candidateReferences = candidates =>
         .filter(({ reference }) => reference)
         .sort((a, b) => b.reference.length - a.reference.length);
 
-const matchCandidate = (text, candidates) => {
+const matchCandidates = (text, candidates) => {
     const haystack = normalize(text);
-    if (!haystack || !candidates.length) return null;
+    if (!haystack || !candidates.length) return [];
 
-    const match = candidateReferences(candidates)
+    const matches = candidateReferences(candidates)
         .map(entry => ({ ...entry, index: findReferenceIndex(haystack, entry.reference) }))
         .filter(entry => entry.index >= 0)
-        .sort((a, b) => a.index - b.index || b.reference.length - a.reference.length)[0];
+        .sort((a, b) => a.index - b.index || b.reference.length - a.reference.length);
+    const seen = new Set();
 
-    return match?.candidate ?? null;
+    return matches
+        .filter(({ candidate }) => {
+            const key = normalize(candidate.loadNumber);
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .map(({ candidate }) => candidate);
 };
+
+const matchCandidate = (text, candidates) => matchCandidates(text, candidates)[0] ?? null;
 
 const buildThreadSearchText = (thread) => {
     const parts = [thread.subject];
@@ -77,9 +87,61 @@ const resolveThreadLoad = (thread, candidates, existing = {}) => {
     };
 };
 
+const resolveThreadLoads = (thread, candidates) =>
+    matchCandidates(buildThreadSearchText(thread), candidates).map(match => ({
+        loadNumber: normalize(match.loadNumber),
+        proNumber: normalize(match.proNumber),
+        scac: match.scac || "",
+    }));
+
+const mergeLoadAssociations = (thread = {}, matches = []) => {
+    const associations = new Map();
+    const add = (association) => {
+        const loadNumber = normalize(association?.loadNumber);
+        if (!loadNumber) return;
+
+        const current = associations.get(loadNumber);
+        if (current) {
+            if (!current.proNumber) current.proNumber = normalize(association.proNumber);
+            if (!current.scac) current.scac = association.scac || "";
+            return;
+        }
+
+        associations.set(loadNumber, {
+            loadNumber,
+            proNumber: normalize(association.proNumber),
+            scac: association.scac || "",
+            status: association.status || "New",
+            proposedTime: association.proposedTime || null,
+        });
+    };
+
+    (thread.loadAssociations ?? []).forEach(add);
+    add({
+        loadNumber: thread.loadNumber,
+        proNumber: thread.proNumber,
+        scac: thread.scac,
+        status: thread.status,
+        proposedTime: thread.proposedTime,
+    });
+    matches.forEach(add);
+
+    return [...associations.values()];
+};
+
+const hydrateThread = (thread, candidates) => {
+    const value = thread?.toObject ? thread.toObject() : thread;
+    const matches = resolveThreadLoads(value, candidates);
+    return { ...value, loadAssociations: mergeLoadAssociations(value, matches) };
+};
+
 module.exports = {
     normalize,
     matchCandidate,
+    matchCandidates,
     buildThreadSearchText,
     resolveThreadLoad,
+    resolveThreadLoads,
+    mergeLoadAssociations,
+    hydrateThread,
 };

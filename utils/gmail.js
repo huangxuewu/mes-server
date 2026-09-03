@@ -2,6 +2,7 @@ const { google } = require("googleapis");
 const db = require("../models");
 
 const SEARCH_QUERY = "newer_than:14d -category:{promotions social}";
+const PRIORITY_REFERENCE_BATCH_SIZE = 30;
 
 const GMAIL_CONFIG_KEYS = {
     clientId: "integration.gmail.clientId",
@@ -28,6 +29,22 @@ const isProductionServer = () => process.env.NODE_ENV === "production";
 const isLocalHost = host => /localhost|127\.0\.0\.1/i.test(host || "");
 
 const normalizeValue = value => String(value ?? "").trim();
+
+const escapeSearchPhrase = value => normalizeValue(value).replace(/["\\]/g, "\\$&");
+
+const buildPrioritySearchQueries = (references = []) => {
+    const unique = [...new Set(references.map(normalizeValue).filter(Boolean))];
+    const queries = [];
+
+    for (let index = 0; index < unique.length; index += PRIORITY_REFERENCE_BATCH_SIZE) {
+        const terms = unique
+            .slice(index, index + PRIORITY_REFERENCE_BATCH_SIZE)
+            .map(reference => `"${escapeSearchPhrase(reference)}"`);
+        queries.push(`{${terms.join(" ")}}`);
+    }
+
+    return queries;
+};
 
 const getOverrideValue = (overrides, key) =>
     normalizeValue(overrides?.[key] ?? overrides?.[GMAIL_CONFIG_KEYS[key]]);
@@ -204,13 +221,21 @@ const toMessage = message => ({
     body: extractBody(message),
 });
 
-// Returns recent threads with parsed messages, excluding already-known message ids
-const fetchThreads = async (knownMessageIds = new Set(), overrides = {}) => {
+// Active load references are searched across every Gmail category before the normal inbox scan.
+// The appointment matcher still verifies the load number in the parsed subject/body.
+const fetchThreads = async (knownMessageIds = new Set(), overrides = {}, priorityReferences = []) => {
     const gmail = await getClient(overrides);
-    const { data } = await gmail.users.threads.list({ userId: "me", q: SEARCH_QUERY, maxResults: 50 });
-    if (!data.threads?.length) return [];
+    const priorityQueries = buildPrioritySearchQueries(priorityReferences);
+    const results = await Promise.all([
+        ...priorityQueries.map(q => gmail.users.threads.list({ userId: "me", q, maxResults: 500 })),
+        gmail.users.threads.list({ userId: "me", q: SEARCH_QUERY, maxResults: 50 }),
+    ]);
+    const threadRefs = [...new Map(
+        results.flatMap(({ data }) => data.threads ?? []).map(thread => [thread.id, thread])
+    ).values()];
+    if (!threadRefs.length) return [];
 
-    const threads = await Promise.all(data.threads.map(async ({ id }) => {
+    const threads = await Promise.all(threadRefs.map(async ({ id }) => {
         const { data: thread } = await gmail.users.threads.get({ userId: "me", id, format: "full" });
         const messages = (thread.messages ?? []).map(toMessage);
         return {
@@ -255,6 +280,7 @@ const sendEmail = async ({ threadId, to, subject, body, inReplyTo }, overrides =
 
 module.exports = {
     GMAIL_CONFIG_KEYS,
+    buildPrioritySearchQueries,
     resolveGmailConfig,
     resolveGmailOAuthClientConfig,
     getGmailAuthUrl,
