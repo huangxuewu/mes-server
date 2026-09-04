@@ -4,6 +4,7 @@ const db = require("../../models");
 const { getSessionUserId, hasPermission } = require("../session");
 const { ensureDocumentCenterSeed } = require("../../utils/documentSeed");
 const { createDocumentDocx } = require("../../utils/documentDocx");
+const { createFormPdf } = require("../../utils/formPdf");
 const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { createDocumentThumbnail } = require("../../utils/documentThumbnail");
 
@@ -12,6 +13,7 @@ const DOCUMENT_POPULATE = [
     { path: "auditReferences", select: "name code description status sourceLinks" },
     { path: "owner", select: USER_SELECT },
     { path: "updatedBy", select: USER_SELECT },
+    { path: "relatedDocuments.document", select: "title documentNumber documentCategory status currentRevision" },
 ];
 
 const asText = (node) => {
@@ -27,6 +29,54 @@ const cleanStrings = (values) => Array.from(new Set(
         .map((value) => String(value || "").trim())
         .filter(Boolean),
 )).slice(0, 30);
+
+const FORM_FIELD_TYPES = new Set([
+    "section", "instruction", "text", "textarea", "number", "date", "time",
+    "checkbox", "yesno", "choice", "select", "signature",
+]);
+
+const cleanFormSchema = (value = {}) => ({
+    instructions: String(value.instructions || "").trim().slice(0, 2000),
+    page: {
+        size: value.page?.size === "A4" ? "A4" : "LETTER",
+        orientation: value.page?.orientation === "landscape" ? "landscape" : "portrait",
+    },
+    fields: (Array.isArray(value.fields) ? value.fields : []).slice(0, 150).map((field) => ({
+        id: String(field.id || crypto.randomUUID()).trim().slice(0, 100),
+        type: FORM_FIELD_TYPES.has(field.type) ? field.type : "text",
+        label: String(field.label || "Untitled field").trim().slice(0, 300),
+        help: String(field.help || "").trim().slice(0, 500),
+        required: Boolean(field.required),
+        unit: String(field.unit || "").trim().slice(0, 50),
+        min: Number.isFinite(Number(field.min)) && field.min !== "" ? Number(field.min) : null,
+        max: Number.isFinite(Number(field.max)) && field.max !== "" ? Number(field.max) : null,
+        options: cleanStrings(field.options).slice(0, 30),
+    })),
+});
+
+const formSchemaText = (schema) => [
+    schema.instructions,
+    ...schema.fields.flatMap((field) => [field.label, field.help, ...(field.options || [])]),
+].filter(Boolean).join(" ");
+
+const resolveRelatedDocuments = async (values) => {
+    const ids = cleanStrings(values).filter((id) => mongoose.isValidObjectId(id));
+    if (!ids.length) return [];
+    const documents = await db.document.find({
+        _id: { $in: ids },
+        isTemplate: false,
+        documentCategory: { $in: ["Procedure", "Work Instruction"] },
+        status: { $in: ["Published", "Review Overdue"] },
+    }).select("title documentNumber currentRevision").lean();
+    const byId = new Map(documents.map((document) => [String(document._id), document]));
+    return ids.map((id) => byId.get(id)).filter(Boolean).map((document) => ({
+        document: document._id,
+        role: "SOP",
+        revision: document.currentRevision,
+        title: document.title,
+        documentNumber: document.documentNumber,
+    }));
+};
 
 const cleanSourceLinks = (values) => (Array.isArray(values) ? values : [])
     .map((item) => {
@@ -48,6 +98,36 @@ const toDate = (value) => {
     if (!value) return null;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const DOCUMENT_CATEGORY_CODES = {
+    Policy: "POL",
+    Procedure: "SOP",
+    "Work Instruction": "WI",
+    Manual: "MAN",
+    Form: "FRM",
+    Plan: "PLN",
+    Record: "REC",
+    Report: "RPT",
+    Specification: "SPEC",
+    Guideline: "GDL",
+    Other: "DOC",
+};
+
+const normalizeDocumentCategory = (value) => Object.hasOwn(DOCUMENT_CATEGORY_CODES, value) ? value : "Other";
+
+const nextDocumentNumber = async (documentCategory) => {
+    const type = DOCUMENT_CATEGORY_CODES[normalizeDocumentCategory(documentCategory)];
+
+    while (true) {
+        const counter = await db.counter.findByIdAndUpdate(
+            `document:${type}`,
+            { $inc: { sequence: 1 } },
+            { new: true, upsert: true, setDefaultsOnInsert: true },
+        );
+        const documentNumber = `QMS-${type}-${String(counter.sequence).padStart(3, "0")}`;
+        if (!await db.document.exists({ documentNumber })) return documentNumber;
+    }
 };
 
 const liveStatus = (document) => {
@@ -73,7 +153,7 @@ const serializeDocument = (document) => {
 const hasDocumentPermission = (user, action, resource) => {
     if (!user) return false;
     if (user.role === "System") return true;
-    return hasPermission(user, "module", "module.document")
+    return hasPermission(user, "module", "document")
         || hasPermission(user, action, resource);
 };
 
@@ -167,20 +247,41 @@ module.exports = (socket, io) => {
             }
 
             const title = String(input.title || source?.title || "Untitled document").trim();
+            const folder = String(input.folder || (source ? "Policies" : "General")).trim();
+            const isForm = input.documentMode === "form" || source?.type === "form";
+            const documentCategory = isForm
+                ? "Form"
+                : normalizeDocumentCategory(input.documentCategory || source?.documentCategory);
+            const documentNumber = input.autoDocumentNumber === true
+                ? await nextDocumentNumber(documentCategory)
+                : String(input.documentNumber || "").trim();
+            if (isForm && !documentNumber)
+                return callback({ status: "error", message: "A document number is required for every form" });
+            const formSchema = isForm ? cleanFormSchema(source?.formSchema || input.formSchema) : undefined;
+            const sourceRelatedDocumentIds = source?.relatedDocuments?.map((item) => item.document);
+            const relatedDocuments = isForm
+                ? await resolveRelatedDocuments(input.relatedDocumentIds ?? sourceRelatedDocumentIds)
+                : [];
             const document = await db.document.create({
                 title,
-                documentNumber: String(input.documentNumber || "").trim(),
+                documentNumber,
+                documentCategory,
                 summary: String(input.summary || source?.summary || "").trim(),
-                type: "article",
-                folder: String(input.folder || (source ? "Policies" : "General")).trim(),
+                type: isForm ? "form" : "article",
+                folder,
                 tags: cleanStrings(input.tags),
                 auditReferences: Array.isArray(input.auditReferenceIds) ? input.auditReferenceIds : [],
                 status: "Draft",
                 contentJson: source?.contentJson || input.contentJson,
-                plainText: source?.plainText || asText(input.contentJson),
+                watermark: source?.watermark || "",
+                watermarkText: source?.watermarkText || "",
+                formSchema,
+                relatedDocuments,
+                plainText: isForm ? formSchemaText(formSchema) : source?.plainText || asText(input.contentJson),
                 owner: user._id,
                 createdBy: user._id,
                 updatedBy: user._id,
+                sourceTemplate: source?._id,
                 reviewIntervalMonths: Number(input.reviewIntervalMonths) || 12,
                 expiresAt: toDate(input.expiresAt),
                 expiryBehavior: input.expiryBehavior === "Deactivate" ? "Deactivate" : "Warn",
@@ -209,12 +310,17 @@ module.exports = (socket, io) => {
             const template = await db.document.create({
                 title: String(input.title || `${source.title} template`).trim(),
                 summary: String(input.summary || source.summary || "").trim(),
-                type: "article",
+                type: source.type === "form" ? "form" : "article",
+                documentCategory: source.documentCategory || "Other",
                 folder: "Policy templates",
                 tags: source.tags,
                 auditReferences: source.auditReferences,
                 status: "Published",
                 contentJson: source.contentJson,
+                watermark: source.watermark || "",
+                watermarkText: source.watermarkText || "",
+                formSchema: source.type === "form" ? source.formSchema : undefined,
+                relatedDocuments: source.type === "form" ? source.relatedDocuments : [],
                 plainText: source.plainText,
                 owner: user._id,
                 createdBy: user._id,
@@ -285,6 +391,7 @@ module.exports = (socket, io) => {
                 title,
                 summary: "Externally managed document file.",
                 type: "uploaded-file",
+                documentCategory: "Record",
                 folder: String(input.folder || "Uploaded files").trim(),
                 status: "Draft",
                 contentJson: {
@@ -314,7 +421,7 @@ module.exports = (socket, io) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
-            if (!user || !requireAccess(user, "edit", "document.article.edit", callback)) return;
+            if (!user || !requireAccess(user, "update", "document.article.update", callback)) return;
             if (!mongoose.isValidObjectId(input._id))
                 return callback({ status: "error", message: "A valid document id is required" });
 
@@ -328,6 +435,8 @@ module.exports = (socket, io) => {
             if (input.title !== undefined) document.title = String(input.title).trim();
             if (!document.title) return callback({ status: "error", message: "Title is required" });
             if (input.documentNumber !== undefined) document.documentNumber = String(input.documentNumber).trim();
+            if (input.documentCategory !== undefined)
+                document.documentCategory = normalizeDocumentCategory(input.documentCategory);
             if (input.summary !== undefined) document.summary = String(input.summary).trim();
             if (input.folder !== undefined) document.folder = String(input.folder).trim() || "General";
             if (input.tags !== undefined) document.tags = cleanStrings(input.tags);
@@ -338,6 +447,23 @@ module.exports = (socket, io) => {
                 document.plainText = asText(input.contentJson).replace(/\s+/g, " ").trim();
                 document.markModified("contentJson");
             }
+            if (input.watermark !== undefined) {
+                document.watermark = ["manufacturer", "confidential"].includes(input.watermark)
+                    ? input.watermark
+                    : "";
+                document.watermarkText = document.watermark
+                    ? String(input.watermarkText || (document.watermark === "confidential" ? "CONFIDENTIAL" : "MANUFACTURING"))
+                        .trim()
+                        .slice(0, 120)
+                    : "";
+            }
+            if (document.type === "form" && input.formSchema !== undefined) {
+                document.formSchema = cleanFormSchema(input.formSchema);
+                document.plainText = formSchemaText(document.formSchema);
+                document.markModified("formSchema");
+            }
+            if (document.type === "form" && input.relatedDocumentIds !== undefined)
+                document.relatedDocuments = await resolveRelatedDocuments(input.relatedDocumentIds);
             if (input.status === "In Review" || input.status === "Draft") document.status = input.status;
             if (input.reviewIntervalMonths !== undefined)
                 document.reviewIntervalMonths = Math.min(120, Math.max(1, Number(input.reviewIntervalMonths) || 12));
@@ -370,8 +496,14 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Document not found" });
             if (document.status !== "In Review")
                 return callback({ status: "error", message: "Submit the document for review before publishing" });
-            if (!document.plainText.trim())
+            if (document.type === "form" && !document.documentNumber)
+                return callback({ status: "error", message: "A document number is required for every form" });
+            if (document.type === "form" && !document.formSchema?.fields?.length)
+                return callback({ status: "error", message: "Add at least one field before publishing the form" });
+            if (document.type !== "form" && !document.plainText.trim())
                 return callback({ status: "error", message: "Add document content before publishing" });
+            if (document.type === "form" && !getDropbox())
+                return callback({ status: "error", message: "Dropbox storage is required to publish a form" });
 
             const now = new Date();
             const nextRevision = document.currentRevision + 1;
@@ -382,8 +514,13 @@ module.exports = (socket, io) => {
                 revision: nextRevision,
                 title: document.title,
                 documentNumber: document.documentNumber,
+                documentCategory: document.documentCategory,
                 summary: document.summary,
                 contentJson: document.contentJson,
+                watermark: document.watermark,
+                watermarkText: document.watermarkText,
+                formSchema: document.formSchema,
+                relatedDocuments: document.relatedDocuments,
                 plainText: document.plainText,
                 tags: document.tags,
                 auditReferences: document.auditReferences,
@@ -395,9 +532,36 @@ module.exports = (socket, io) => {
                 publishedBy: user._id,
                 publishedAt: now,
             };
+            const revisionContent = document.type === "form"
+                ? snapshot.formSchema
+                : {
+                    contentJson: snapshot.contentJson,
+                    watermark: snapshot.watermark,
+                    watermarkText: snapshot.watermarkText,
+                };
             snapshot.contentHash = crypto.createHash("sha256")
-                .update(JSON.stringify(snapshot.contentJson))
+                .update(JSON.stringify(revisionContent))
                 .digest("hex");
+
+            if (document.type === "form") {
+                const fileName = `${normalizePathPart(document.documentNumber)}-rev-${nextRevision}-blank.pdf`;
+                const buffer = await createFormPdf({
+                    document,
+                    revision: nextRevision,
+                    formSchema: snapshot.formSchema,
+                    relatedDocuments: snapshot.relatedDocuments,
+                });
+                const artifact = await uploadDocumentFile({
+                    documentId: document._id,
+                    documentNumber: document.documentNumber,
+                    revision: nextRevision,
+                    fileName,
+                    contents: buffer,
+                    category: "published-form",
+                });
+                if (!artifact) throw new Error("Unable to store the published form in Dropbox");
+                snapshot.artifacts = [{ format: "pdf", ...artifact }];
+            }
 
             const revision = await db.documentRevision.create(snapshot);
             document.status = "Published";
@@ -409,18 +573,20 @@ module.exports = (socket, io) => {
             await document.save();
 
             try {
-                const fileName = `${normalizePathPart(document.documentNumber || document.title)}-rev-${nextRevision}.docx`;
-                const buffer = await createDocumentDocx({ ...snapshot, title: document.title });
-                const artifact = await uploadDocumentFile({
-                    documentId: document._id,
-                    revision: nextRevision,
-                    fileName,
-                    contents: buffer,
-                    category: "published",
-                });
-                if (artifact) {
-                    revision.artifacts.push({ format: "docx", ...artifact });
-                    await revision.save();
+                if (document.type !== "form") {
+                    const fileName = `${normalizePathPart(document.documentNumber || document.title)}-rev-${nextRevision}.docx`;
+                    const buffer = await createDocumentDocx({ ...snapshot, title: document.title });
+                    const artifact = await uploadDocumentFile({
+                        documentId: document._id,
+                        revision: nextRevision,
+                        fileName,
+                        contents: buffer,
+                        category: "published",
+                    });
+                    if (artifact) {
+                        revision.artifacts.push({ format: "docx", ...artifact });
+                        await revision.save();
+                    }
                 }
                 const thumbnailFileName = `${normalizePathPart(document.documentNumber || document.title)}-rev-${nextRevision}.png`;
                 const thumbnail = await uploadDocumentFile({
@@ -499,7 +665,7 @@ module.exports = (socket, io) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
-            if (!user || !requireAccess(user, "export", "document.article.export", callback)) return;
+            if (!user || !requireAccess(user, "view", "document.article.export", callback)) return;
             if (!mongoose.isValidObjectId(input._id))
                 return callback({ status: "error", message: "A valid document id is required" });
 
@@ -555,7 +721,7 @@ module.exports = (socket, io) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
-            if (!user || !requireAccess(user, "edit", "document.article.edit", callback)) return;
+            if (!user || !requireAccess(user, "update", "document.article.update", callback)) return;
             if (!mongoose.isValidObjectId(input.documentId))
                 return callback({ status: "error", message: "A valid document id is required" });
 
@@ -671,7 +837,7 @@ module.exports = (socket, io) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
-            if (!user || !requireAccess(user, "edit", "document.auditReference.edit", callback)) return;
+            if (!user || !requireAccess(user, "update", "document.auditReference.update", callback)) return;
             if (!mongoose.isValidObjectId(input._id))
                 return callback({ status: "error", message: "A valid reference id is required" });
 
@@ -766,7 +932,7 @@ module.exports = (socket, io) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
-            if (!user || !requireAccess(user, "edit", "document.comment.resolve", callback)) return;
+            if (!user || !requireAccess(user, "update", "document.comment.resolve", callback)) return;
             if (!mongoose.isValidObjectId(_id))
                 return callback({ status: "error", message: "A valid comment id is required" });
             const comment = await db.documentComment.findById(_id);

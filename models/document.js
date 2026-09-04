@@ -27,11 +27,24 @@ const attachmentSchema = new mongoose.Schema({
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 }, { _id: true });
 
+const relatedDocumentSchema = new mongoose.Schema({
+    document: { type: mongoose.Schema.Types.ObjectId, ref: "Document", required: true },
+    role: { type: String, enum: ["SOP", "Reference"], default: "SOP" },
+    revision: { type: Number, min: 1 },
+    title: String,
+    documentNumber: String,
+}, { _id: false });
+
 const documentSchema = new mongoose.Schema({
     title: { type: String, required: true, trim: true },
     documentNumber: { type: String, trim: true, default: "" },
     summary: { type: String, trim: true, default: "" },
-    type: { type: String, enum: ["article", "uploaded-file"], default: "article" },
+    type: { type: String, enum: ["article", "form", "uploaded-file"], default: "article" },
+    documentCategory: {
+        type: String,
+        enum: ["Policy", "Procedure", "Work Instruction", "Manual", "Form", "Plan", "Record", "Report", "Specification", "Guideline", "Other"],
+        default: "Other",
+    },
     folder: { type: String, trim: true, default: "General" },
     tags: [{ type: String, trim: true }],
     auditReferences: [{ type: mongoose.Schema.Types.ObjectId, ref: "AuditReference" }],
@@ -41,6 +54,10 @@ const documentSchema = new mongoose.Schema({
         default: "Draft",
     },
     contentJson: { type: mongoose.Schema.Types.Mixed, default: editorDocumentDefault },
+    watermark: { type: String, enum: ["", "manufacturer", "confidential"], default: "" },
+    watermarkText: { type: String, trim: true, default: "" },
+    formSchema: { type: mongoose.Schema.Types.Mixed },
+    relatedDocuments: [relatedDocumentSchema],
     plainText: { type: String, default: "" },
     yjsState: { type: Buffer, select: false },
     schemaVersion: { type: Number, default: 1 },
@@ -50,6 +67,7 @@ const documentSchema = new mongoose.Schema({
     thumbnail: { type: thumbnailSchema, default: () => ({ kind: "generated" }) },
     attachments: [attachmentSchema],
     isTemplate: { type: Boolean, default: false },
+    sourceTemplate: { type: mongoose.Schema.Types.ObjectId, ref: "Document" },
     templateKey: { type: String, trim: true },
     systemManaged: { type: Boolean, default: false },
     templateVersion: { type: Number, default: 1 },
@@ -65,6 +83,7 @@ const documentSchema = new mongoose.Schema({
 documentSchema.index({ title: "text", documentNumber: "text", summary: "text", plainText: "text" });
 documentSchema.index({ status: 1, isTemplate: 1, updatedAt: -1 });
 documentSchema.index({ auditReferences: 1 });
+documentSchema.index({ sourceTemplate: 1, status: 1 });
 documentSchema.index({ templateKey: 1 }, { unique: true, sparse: true });
 
 module.exports = database.model("Document", documentSchema, "document");

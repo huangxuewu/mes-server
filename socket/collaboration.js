@@ -9,8 +9,8 @@ const { JWT_SECRET, hasPermission } = require("./session");
 const COLLABORATION_PATH = "/collaboration";
 
 const canUseDocumentCenter = (user) => user?.role === "System"
-    || hasPermission(user, "module", "module.document")
-    || hasPermission(user, "edit", "document.article.edit");
+    || hasPermission(user, "module", "document")
+    || hasPermission(user, "update", "document.article.update");
 
 const collaboration = new Hocuspocus({
     name: "mes-document-center",

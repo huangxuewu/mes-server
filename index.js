@@ -1,13 +1,14 @@
-const path = require('path');
 const dns = require("node:dns");
+dns.setDefaultResultOrder("ipv4first");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
+const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const { io, app, server } = require("./socket/io");
 const socketHandler = require("./socket/index");
 const { attachCollaboration } = require("./socket/collaboration");
 const { startDocumentLifecycle } = require("./utils/documentLifecycle");
-
-dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 // Import API routes
 const apiRoutes = require('./api');

@@ -41,6 +41,55 @@ const policyContent = (title, purpose, responsibilities, requirements, records) 
     ],
 });
 
+const requiredDocumentContent = (title, category) => ({
+    type: "doc",
+    content: [
+        heading(title, 1),
+        paragraph(`Required starter — this placeholder preserves the ${category} document in the manufacturing policy library. Replace the guidance with facility-specific content and evidence before approval.`),
+        heading("Purpose and requirement"),
+        paragraph("Explain why this document is required and identify the laws, customer standards, certifications, or internal controls that apply."),
+        heading("Scope"),
+        paragraph("Define the sites, departments, workers, products, suppliers, processes, and time periods covered."),
+        heading("Owner and responsibilities"),
+        bulletList([
+            "Name the document owner and approving role.",
+            "Define who maintains the process, provides evidence, and follows the requirements.",
+            "Identify escalation contacts and deputies for critical responsibilities.",
+        ]),
+        heading("Requirements and procedure"),
+        bulletList([
+            "Describe the controls and step-by-step process used at this facility.",
+            "State acceptance criteria, frequencies, deadlines, and required approvals.",
+            "Explain how exceptions, incidents, or nonconformities are reported and resolved.",
+        ]),
+        heading("Records and evidence"),
+        bulletList([
+            "List the forms, logs, reports, permits, certificates, or attachments that demonstrate implementation.",
+            "Define where records are stored, who may access them, and how long they are retained.",
+            "Link related procedures, work instructions, training, and external requirements.",
+        ]),
+        heading("Training and communication"),
+        paragraph("Identify affected roles, required training or communication, competency checks, and retraining triggers."),
+        heading("Review and approval"),
+        paragraph("Record the owner, approver, effective date, review frequency, revision history, and next review date."),
+    ],
+});
+
+const inferDocumentCategory = (title) => {
+    const value = String(title || "");
+    if (/procedure/i.test(value)) return "Procedure";
+    if (/work instruction/i.test(value)) return "Work Instruction";
+    if (/manual|handbook/i.test(value)) return "Manual";
+    if (/\bplan\b|program|schedule|calendar|timeline/i.test(value)) return "Plan";
+    if (/\breport/i.test(value)) return "Report";
+    if (/specification|standard/i.test(value)) return "Specification";
+    if (/guideline/i.test(value)) return "Guideline";
+    if (/\bform\b|certificate|license|permit|agreement/i.test(value)) return "Form";
+    if (/record|documentation|inventory|assessment|mapping|information|statement|list/i.test(value)) return "Record";
+    if (/policy|code of conduct/i.test(value)) return "Policy";
+    return "Other";
+};
+
 const templates = [
     ["quality-policy", "Quality Policy", "Define the organization's commitment to consistent product quality, customer requirements, and continual improvement.", ["Leadership sets objectives and provides resources.", "Quality owns the management system.", "All employees follow approved processes."], ["Set measurable quality objectives.", "Monitor performance and address adverse trends.", "Communicate the policy to affected personnel."], ["Quality objectives", "Management review minutes", "Improvement actions"]],
     ["document-control", "Document and Record Control", "Ensure personnel use current, approved information and required records remain identifiable and retrievable.", ["Document owners maintain technical accuracy.", "Approvers authorize releases.", "Users verify they are using the effective revision."], ["Assign an owner and document number.", "Approve before release and retain revision history.", "Remove obsolete copies from points of use.", "Protect records from unauthorized change or loss."], ["Approval history", "Revision history", "Retention schedule"]],
@@ -63,6 +112,138 @@ const templates = [
     ["emergency-response", "Emergency Preparedness and Response", "Prepare personnel to respond to foreseeable emergencies.", ["Emergency coordinators maintain plans.", "Wardens or responders carry out assigned roles.", "All personnel follow alarms and instructions."], ["Identify credible scenarios and contacts.", "Maintain evacuation, accountability, shutdown, and recovery instructions.", "Test plans and correct gaps."], ["Emergency plans", "Drill records", "Inspection and action logs"]],
     ["environmental-waste", "Environmental and Waste Management", "Control significant environmental impacts and manage waste responsibly.", ["Operations controls process impacts.", "Environmental owners maintain requirements.", "Employees segregate and report waste correctly."], ["Identify waste streams and environmental risks.", "Define storage, labeling, handling, disposal, and spill controls.", "Use authorized service providers where required."], ["Waste manifests", "Inspections", "Spill and disposal records"]],
 ];
+
+const requiredTemplateCatalog = [
+    ["Policies & Procedures", [
+        "Quality Statement",
+        "Business Integrity Policy",
+        "Supplier Code of Conduct",
+        "Anti-Corruption & Bribery Policy",
+        "Conflict of Interest Policy",
+        "Data Protection Policy",
+        "Grievance Mechanism Procedure",
+    ]],
+    ["Labor & Human Rights", [
+        "Anti-Forced Labor Policy",
+        "Child Labor Prevention Policy",
+        "Freedom of Association Policy",
+        "Collective Bargaining Guidelines",
+        "Working Hours & Overtime Policy",
+        "Minimum Wage Compliance",
+        "Digital Wage Payment Policy",
+        "Migrant Worker Protection Policy",
+        "Worker Accommodation Standards",
+        "Non-Discrimination Policy",
+        "Sexual Harassment Policy",
+        "Equal Employment Opportunity Policy",
+        "Non-Retaliation Policy",
+        "Gender Equality Policy",
+    ]],
+    ["Health, Safety & Risk Management", [
+        "Health & Safety Policy",
+        "Occupational Safety Manual",
+        "Emergency Response Plan",
+        "Fire Safety Procedures",
+        "Personal Protective Equipment (PPE) Guidelines",
+        "Machine Safety Standards",
+        "Chemical Safety & Handling Procedures",
+        "Building Safety Inspection Reports",
+        "Electrical Safety Standards",
+        "Health Monitoring Program",
+        "First Aid & Medical Emergency Procedures",
+    ]],
+    ["Environmental Compliance", [
+        "Environmental Management Policy",
+        "Environmental Permits & Licenses",
+        "Wastewater Treatment Documentation",
+        "Air Emissions Control Records",
+        "Hazardous Waste Management Plan",
+        "Chemical Inventory & MSDS",
+        "Environmental Impact Assessment",
+        "Water Usage & Conservation Reports",
+        "Environmental Monitoring Reports",
+        "Prohibited Chemicals Policy",
+        "Waste Management Policy",
+    ]],
+    ["Quality Management", [
+        "Quality Management System Manual",
+        "Product Quality Control Procedures",
+        "Incoming Material Inspection Records",
+        "Finished Product Testing Reports",
+        "Approved Supplier List",
+        "Corrective Action Procedures",
+        "Customer Complaint Handling Procedures",
+        "Inspection & Testing Equipment Calibration",
+        "Non-Conforming Product Control",
+        "Document Control Procedures",
+        "Product Specifications",
+    ]],
+    ["Training & Development", [
+        "Worker Training Program",
+        "Management Training Records",
+        "Safety Training Documentation",
+        "Skills Development Program",
+        "New Employee Orientation Manual",
+        "Competency Assessment Records",
+        "Training Calendar & Schedule",
+        "Certification & License Records",
+        "Training Effectiveness Evaluation",
+        "Employee Handbook",
+    ]],
+    ["Legal & Regulatory Compliance", [
+        "Business License & Registration",
+        "Tax Registration & Compliance",
+        "Business EIN Document",
+        "Sales Tax Certificate",
+        "Facility Permit",
+        "Building Lease Agreement",
+        "Insurance Coverage Documentation",
+        "Workers Compensation Insurance",
+        "Unemployment Insurance",
+        "Regulatory Inspection Reports",
+        "Product Safety Compliance",
+    ]],
+    ["Supply Chain Management", [
+        "Subcontractor Disclosure Form",
+        "Supplier Assessment Reports",
+        "Supply Chain Mapping",
+        "Raw Material Traceability Records",
+        "Purchase Order Management",
+        "Inventory Management System",
+        "Vendor Performance Evaluation",
+        "Contract Management Documentation",
+        "Supply Chain Risk Assessment",
+    ]],
+    ["Financial & Administrative Records", [
+        "Financial Statements & Audits",
+        "Payroll Records & Documentation",
+        "Employee Benefits Documentation",
+        "Time & Attendance Records",
+        "Social Security & Tax Contributions",
+        "Personnel Files & Records",
+        "Bank Account & Financial Information",
+        "Cost Accounting & Pricing Records",
+    ]],
+    ["Audit & Continuous Improvement", [
+        "Previous Audit Reports",
+        "Corrective Action Plans (CAPA)",
+        "Root Cause Analysis Documentation",
+        "Continuous Improvement Plans",
+        "Management Review Meeting Records",
+        "Performance Monitoring Reports",
+        "Key Performance Indicators (KPI)",
+        "Implementation Timeline & Milestones",
+        "Third-Party Audit Reports",
+    ]],
+];
+
+const requiredTemplates = requiredTemplateCatalog.flatMap(([category, titles]) => titles.map((title) => ({
+    category,
+    title,
+    templateKey: `required-${title.toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")}`,
+})));
 
 const auditReferences = [
     {
@@ -119,6 +300,7 @@ const ensureDocumentCenterSeed = () => {
             return db.document.updateOne(
                 { templateKey },
                 {
+                    $set: { documentCategory: inferDocumentCategory(title) },
                     $setOnInsert: {
                         title,
                         summary: purpose,
@@ -137,6 +319,33 @@ const ensureDocumentCenterSeed = () => {
                 { upsert: true },
             );
         }),
+        db.document.bulkWrite(requiredTemplates.map(({ category, title, templateKey }) => {
+            const contentJson = requiredDocumentContent(title, category);
+            return {
+                updateOne: {
+                    filter: { templateKey },
+                    update: {
+                        $set: { documentCategory: inferDocumentCategory(title) },
+                        $setOnInsert: {
+                            title,
+                            summary: `Required starter · ${category}`,
+                            type: "article",
+                            folder: "Policy templates",
+                            tags: ["Required starter", category],
+                            status: "Published",
+                            contentJson,
+                            plainText: [title, category, "Required starter", "Purpose and requirement", "Scope", "Owner and responsibilities", "Requirements and procedure", "Records and evidence", "Training and communication", "Review and approval"].join(" "),
+                            isTemplate: true,
+                            systemManaged: true,
+                            templateVersion: 1,
+                            currentRevision: 1,
+                            publishedAt: new Date(),
+                        },
+                    },
+                    upsert: true,
+                },
+            };
+        }), { ordered: false }),
     ]).catch((error) => {
         seedPromise = null;
         throw error;
@@ -148,4 +357,7 @@ const ensureDocumentCenterSeed = () => {
 module.exports = {
     ensureDocumentCenterSeed,
     policyContent,
+    requiredDocumentContent,
+    requiredTemplateCatalog,
+    inferDocumentCategory,
 };

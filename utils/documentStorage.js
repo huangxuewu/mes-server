@@ -24,13 +24,16 @@ const sharedUrl = async (dropbox, path) => {
     }
 };
 
-const uploadDocumentFile = async ({ documentId, revision, fileName, contents, category = "attachments" }) => {
+const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileName, contents, category = "attachments" }) => {
     const dropbox = getDropbox();
     if (!dropbox) return null;
 
     const safeName = normalizePathPart(fileName);
     const revisionFolder = revision ? `revision-${revision}` : "draft";
-    const path = `/MES/DocumentCenter/${normalizePathPart(documentId)}/${revisionFolder}/${category}/${safeName}`;
+    const documentFolder = documentNumber
+        ? `${normalizePathPart(documentNumber)}-${normalizePathPart(documentId)}`
+        : normalizePathPart(documentId);
+    const path = `/MES/DocumentCenter/${documentFolder}/${revisionFolder}/${category}/${safeName}`;
     await dropbox.filesUpload({
         path,
         contents,

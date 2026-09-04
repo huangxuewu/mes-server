@@ -1,10 +1,14 @@
+const dns = require("node:dns");
+dns.setDefaultResultOrder("ipv4first");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
 const mongoose = require("mongoose");
 const URI = `mongodb+srv://downhome:5774615@downhome.hqyh8h4.mongodb.net/Greenwood?retryWrites=true&w=majority&appName=DownHome`;
 
 // Disable pluralization
 mongoose.pluralize(null);
 
-mongoose.connect(URI);
+mongoose.connect(URI).catch(() => {});
 mongoose.connection.on("connected", () => console.log('Database connected'));
 mongoose.connection.on("error", error => console.log('Mongoose connect error: ', error));
 mongoose.connection.on("disconnected", () => console.log('Database has disconnected'));
