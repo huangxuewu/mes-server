@@ -4,20 +4,24 @@
   "private": true,
   "scripts": {
     "dev": "node index.js",
-    "start": "node ./bin/www",
+    "start": "node index.js",
     "audit:stations": "node scripts/audit-station-identities.js",
-    "test:station-identity": "node --test test/stationIdentity.test.js"
+    "test:station-identity": "node --test test/stationIdentity.test.js",
+    "test:document-center": "node --test test/documentCenter.test.js"
   },
   "engines": {
-    "node": "20.x",
-    "npm": "9.x"
+    "node": ">=22 <25",
+    "npm": ">=10"
   },
   "dependencies": {
+    "@hocuspocus/server": "^4.6.0",
     "axios": "^1.6.0",
     "canvas": "^3.2.1",
     "cookie-parser": "~1.4.4",
     "dayjs": "^1.11.13",
     "debug": "~2.6.9",
+    "docx": "^9.7.1",
+    "dropbox": "^10.46.0",
     "express": "~4.16.1",
     "express-session": "^1.18.2",
     "googleapis": "^173.0.0",
@@ -28,6 +32,8 @@
     "mongoose": "^8.10.0",
     "morgan": "~1.9.1",
     "pdf-to-img": "^5.0.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "ws": "^8.21.3",
+    "yjs": "^13.6.32"
   }
 }

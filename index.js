@@ -4,6 +4,8 @@ const express = require('express');
 const session = require('express-session');
 const { io, app, server } = require("./socket/io");
 const socketHandler = require("./socket/index");
+const { attachCollaboration } = require("./socket/collaboration");
+const { startDocumentLifecycle } = require("./utils/documentLifecycle");
 
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
@@ -43,6 +45,8 @@ app.use('/addon/labelMaker/finishProduct', finishProductLabelRouter);
 
 // Socket.IO connection
 io.on("connection", (socket) => socketHandler(socket, io));
+attachCollaboration(server);
+startDocumentLifecycle(io);
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
