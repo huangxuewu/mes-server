@@ -6,6 +6,18 @@ const editorDocumentDefault = () => ({
     content: [{ type: "paragraph" }],
 });
 
+const pageMarginSchema = new mongoose.Schema({
+    top: { type: Number, min: 0, max: 3, default: 0.75 },
+    right: { type: Number, min: 0, max: 3, default: 0.75 },
+    bottom: { type: Number, min: 0, max: 3, default: 0.75 },
+    left: { type: Number, min: 0, max: 3, default: 0.75 },
+}, { _id: false });
+
+const documentPageSchema = new mongoose.Schema({
+    size: { type: String, enum: ["LETTER", "A4", "LEGAL"], default: "LETTER" },
+    margins: { type: pageMarginSchema, default: () => ({}) },
+}, { _id: false });
+
 const thumbnailSchema = new mongoose.Schema({
     kind: {
         type: String,
@@ -19,6 +31,7 @@ const thumbnailSchema = new mongoose.Schema({
 
 const attachmentSchema = new mongoose.Schema({
     name: { type: String, required: true },
+    purpose: { type: String, enum: ["resource", "attachment"] },
     mimeType: String,
     size: Number,
     url: String,
@@ -54,6 +67,7 @@ const documentSchema = new mongoose.Schema({
         default: "Draft",
     },
     contentJson: { type: mongoose.Schema.Types.Mixed, default: editorDocumentDefault },
+    page: { type: documentPageSchema, default: () => ({}) },
     watermark: { type: String, enum: ["", "manufacturer", "confidential"], default: "" },
     watermarkText: { type: String, trim: true, default: "" },
     formSchema: { type: mongoose.Schema.Types.Mixed },

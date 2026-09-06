@@ -37,7 +37,7 @@ const collaboration = new Hocuspocus({
         };
     },
     async onLoadDocument({ documentName, document }) {
-        const record = await db.document.findById(documentName).select("+yjsState").lean();
+        const record = await db.document.findById(documentName).select("+yjsState");
         if (record?.yjsState?.length)
             Y.applyUpdate(document, new Uint8Array(record.yjsState));
     },

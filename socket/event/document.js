@@ -2,11 +2,17 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const db = require("../../models");
 const { getSessionUserId, hasPermission } = require("../session");
-const { ensureDocumentCenterSeed } = require("../../utils/documentSeed");
+const {
+    prepareAuditReferences,
+    prepareDocumentList,
+    prepareDocumentTemplates,
+} = require("../../utils/documentSeed");
 const { createDocumentDocx } = require("../../utils/documentDocx");
 const { createFormPdf } = require("../../utils/formPdf");
 const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { createDocumentThumbnail } = require("../../utils/documentThumbnail");
+const { cleanupDocumentResources } = require("../../utils/documentResources");
+const { cleanDocumentPage } = require("../../utils/documentPage");
 
 const USER_SELECT = "username displayName firstName lastName portrait";
 const DOCUMENT_POPULATE = [
@@ -186,7 +192,8 @@ module.exports = (socket, io) => {
         try {
             const user = await requireUser(callback);
             if (!user || !requireAccess(user, "view", "document.article.view", callback)) return;
-            await ensureDocumentCenterSeed();
+            if (query.isTemplate) await prepareDocumentTemplates();
+            else await prepareDocumentList();
 
             const filter = {};
             if (query.isTemplate !== undefined) filter.isTemplate = Boolean(query.isTemplate);
@@ -236,7 +243,8 @@ module.exports = (socket, io) => {
         try {
             const user = await requireUser(callback);
             if (!user || !requireAccess(user, "create", "document.article.create", callback)) return;
-            await ensureDocumentCenterSeed();
+            if (input.templateId) await prepareDocumentTemplates();
+            else await prepareDocumentList();
 
             let source = null;
             if (input.templateId) {
@@ -262,7 +270,10 @@ module.exports = (socket, io) => {
             const relatedDocuments = isForm
                 ? await resolveRelatedDocuments(input.relatedDocumentIds ?? sourceRelatedDocumentIds)
                 : [];
+            if (input._id !== undefined && !mongoose.isValidObjectId(input._id))
+                return callback({ status: "error", message: "A valid document id is required" });
             const document = await db.document.create({
+                _id: input._id || new mongoose.Types.ObjectId(),
                 title,
                 documentNumber,
                 documentCategory,
@@ -273,6 +284,7 @@ module.exports = (socket, io) => {
                 auditReferences: Array.isArray(input.auditReferenceIds) ? input.auditReferenceIds : [],
                 status: "Draft",
                 contentJson: source?.contentJson || input.contentJson,
+                page: cleanDocumentPage(source?.page || input.page),
                 watermark: source?.watermark || "",
                 watermarkText: source?.watermarkText || "",
                 formSchema,
@@ -317,6 +329,7 @@ module.exports = (socket, io) => {
                 auditReferences: source.auditReferences,
                 status: "Published",
                 contentJson: source.contentJson,
+                page: cleanDocumentPage(source.page),
                 watermark: source.watermark || "",
                 watermarkText: source.watermarkText || "",
                 formSchema: source.type === "form" ? source.formSchema : undefined,
@@ -447,6 +460,7 @@ module.exports = (socket, io) => {
                 document.plainText = asText(input.contentJson).replace(/\s+/g, " ").trim();
                 document.markModified("contentJson");
             }
+            if (input.page !== undefined) document.page = cleanDocumentPage(input.page);
             if (input.watermark !== undefined) {
                 document.watermark = ["manufacturer", "confidential"].includes(input.watermark)
                     ? input.watermark
@@ -517,6 +531,7 @@ module.exports = (socket, io) => {
                 documentCategory: document.documentCategory,
                 summary: document.summary,
                 contentJson: document.contentJson,
+                page: cleanDocumentPage(document.page),
                 watermark: document.watermark,
                 watermarkText: document.watermarkText,
                 formSchema: document.formSchema,
@@ -536,6 +551,7 @@ module.exports = (socket, io) => {
                 ? snapshot.formSchema
                 : {
                     contentJson: snapshot.contentJson,
+                    page: snapshot.page,
                     watermark: snapshot.watermark,
                     watermarkText: snapshot.watermarkText,
                 };
@@ -739,19 +755,33 @@ module.exports = (socket, io) => {
                 "application/pdf",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ];
-            if (!allowedTypes.includes(input.mimeType))
+            if (input.kind !== 'attachment' && !allowedTypes.slice(0, 3).includes(input.mimeType))
                 return callback({ status: "error", message: "Unsupported document asset type" });
+            if (input.kind === "thumbnail" && !input.mimeType.startsWith("image/"))
+                return callback({ status: "error", message: "A thumbnail must be an image" });
 
             let contents;
             if (Buffer.isBuffer(input.content)) contents = input.content;
             else if (input.content instanceof ArrayBuffer) contents = Buffer.from(input.content);
             else if (ArrayBuffer.isView(input.content)) contents = Buffer.from(input.content.buffer);
             else contents = Buffer.from(String(input.content || ""), "base64");
-            if (!contents.length || contents.length > 8 * 1024 * 1024)
+            const size = input.url ? Number(input.size) : contents.length;
+            if (!Number.isInteger(size) || size < 1 || size > 8 * 1024 * 1024)
                 return callback({ status: "error", message: "File must be between 1 byte and 8 MB" });
 
             const fileName = normalizePathPart(input.fileName);
-            const stored = await uploadDocumentFile({
+            let stored;
+            if (input.url) {
+                const url = new URL(input.url);
+                const category = input.kind === "thumbnail" ? "thumbnail" : "assets";
+                const prefix = `/DH MES/document/${document._id}/${category}/`;
+                const storagePath = String(input.storagePath || "");
+                if (url.protocol !== "https:" || !["dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com"].includes(url.hostname)
+                    || url.username || url.password || url.port
+                    || !storagePath.startsWith(prefix) || !/^[a-zA-Z0-9._-]+$/.test(storagePath.slice(prefix.length)))
+                    return callback({ status: "error", message: "Invalid Dropbox asset location" });
+                stored = { url: url.href, storagePath };
+            } else stored = await uploadDocumentFile({
                 documentId: document._id,
                 revision: document.currentRevision || 0,
                 fileName,
@@ -764,7 +794,8 @@ module.exports = (socket, io) => {
             const asset = {
                 name: fileName,
                 mimeType: input.mimeType,
-                size: contents.length,
+                size,
+                purpose: input.kind === "image" ? "resource" : "attachment",
                 ...stored,
                 uploadedAt: new Date(),
                 uploadedBy: user._id,
@@ -795,12 +826,42 @@ module.exports = (socket, io) => {
         }
     });
 
+    socket.on("documentResources:cleanup", async (input = {}, responseCallback) => {
+        const callback = safeCallback(responseCallback);
+        try {
+            const user = await requireUser(callback);
+            if (!user || !requireAccess(user, "update", "document.article.update", callback)) return;
+            if (!mongoose.isValidObjectId(input.documentId))
+                return callback({ status: "error", message: "A valid document id is required" });
+            const document = await db.document.findOne({ _id: input.documentId, isTemplate: false, status: { $ne: "Archived" } }).lean();
+            if (!document) return callback({ status: "error", message: "Document not found" });
+            if (typeof input.accessToken !== "string" || !input.accessToken)
+                return callback({ status: "error", message: "Dropbox authorization is required" });
+            if (!Array.isArray(input.resourceIds) || input.resourceIds.some((id) => !mongoose.isValidObjectId(id)))
+                return callback({ status: "error", message: "Valid resource ids are required" });
+            const { Dropbox } = require("dropbox");
+            const { collaboration } = require("../collaboration");
+            await cleanupDocumentResources({
+                documentId: document._id,
+                resourceIds: input.resourceIds,
+                db,
+                dropbox: new Dropbox({ accessToken: input.accessToken, fetch }),
+                liveDocuments: collaboration.documents,
+            });
+            const payload = await db.document.findById(document._id).populate(DOCUMENT_POPULATE).lean();
+            io.emit("document:updated", serializeDocument(payload));
+            callback({ status: "success", payload: serializeDocument(payload) });
+        } catch (error) {
+            callback({ status: "error", message: "Unable to clean up unused document resources. Please save again to retry." });
+        }
+    });
+
     socket.on("auditReferences:get", async (_, responseCallback) => {
         const callback = safeCallback(responseCallback);
         try {
             const user = await requireUser(callback);
             if (!user || !requireAccess(user, "view", "document.article.view", callback)) return;
-            await ensureDocumentCenterSeed();
+            await prepareAuditReferences();
             const references = await db.auditReference.find({ status: "Active" }).sort({ name: 1 }).lean();
             callback({ status: "success", message: "Audit references fetched", payload: references });
         } catch (error) {

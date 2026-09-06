@@ -260,41 +260,58 @@ const auditReferences = [
     },
 ];
 
-let seedPromise;
+let migrationPromise;
+let referenceSeedPromise;
+let templateSeedPromise;
 
-const ensureDocumentCenterSeed = () => {
-    if (seedPromise) return seedPromise;
-
-    seedPromise = Promise.all([
-        db.document.updateMany(
-            { title: { $exists: false }, name: { $type: "string" } },
-            [{
-                $set: {
-                    title: "$name",
-                    summary: "Legacy document migrated into Document Center.",
-                    type: "article",
-                    folder: "Imported",
-                    status: "Draft",
-                    contentJson: {
-                        type: "doc",
-                        content: [{
-                            type: "paragraph",
-                            content: [{ type: "text", text: "Review and convert the legacy document content." }],
-                        }],
-                    },
-                    plainText: "Review and convert the legacy document content.",
-                    currentRevision: 0,
-                    isTemplate: false,
-                    reviewIntervalMonths: 12,
-                    expiryBehavior: "Warn",
+const ensureLegacyDocumentMigration = () => {
+    if (migrationPromise) return migrationPromise;
+    migrationPromise = db.document.updateMany(
+        { title: { $exists: false }, name: { $type: "string" } },
+        [{
+            $set: {
+                title: "$name",
+                summary: "Legacy document migrated into Document Center.",
+                type: "article",
+                folder: "Imported",
+                status: "Draft",
+                contentJson: {
+                    type: "doc",
+                    content: [{
+                        type: "paragraph",
+                        content: [{ type: "text", text: "Review and convert the legacy document content." }],
+                    }],
                 },
-            }],
-        ),
-        ...auditReferences.map((reference) => db.auditReference.updateOne(
-            { code: reference.code },
-            { $setOnInsert: { ...reference, systemManaged: true } },
-            { upsert: true },
-        )),
+                plainText: "Review and convert the legacy document content.",
+                currentRevision: 0,
+                isTemplate: false,
+                reviewIntervalMonths: 12,
+                expiryBehavior: "Warn",
+            },
+        }],
+    ).catch((error) => {
+        migrationPromise = null;
+        throw error;
+    });
+    return migrationPromise;
+};
+
+const ensureAuditReferenceSeed = () => {
+    if (referenceSeedPromise) return referenceSeedPromise;
+    referenceSeedPromise = Promise.all(auditReferences.map((reference) => db.auditReference.updateOne(
+        { code: reference.code },
+        { $setOnInsert: { ...reference, systemManaged: true } },
+        { upsert: true },
+    ))).catch((error) => {
+        referenceSeedPromise = null;
+        throw error;
+    });
+    return referenceSeedPromise;
+};
+
+const ensureDocumentTemplateSeed = () => {
+    if (templateSeedPromise) return templateSeedPromise;
+    templateSeedPromise = Promise.all([
         ...templates.map(([templateKey, title, purpose, responsibilities, requirements, records]) => {
             const contentJson = policyContent(title, purpose, responsibilities, requirements, records);
             return db.document.updateOne(
@@ -347,15 +364,32 @@ const ensureDocumentCenterSeed = () => {
             };
         }), { ordered: false }),
     ]).catch((error) => {
-        seedPromise = null;
+        templateSeedPromise = null;
         throw error;
     });
-
-    return seedPromise;
+    return templateSeedPromise;
 };
+
+const ensureDocumentCenterSeed = () => Promise.all([
+    ensureLegacyDocumentMigration(),
+    ensureAuditReferenceSeed(),
+    ensureDocumentTemplateSeed(),
+]);
+
+const prepareDocumentList = () => ensureLegacyDocumentMigration();
+
+const prepareDocumentTemplates = () => Promise.all([
+    ensureLegacyDocumentMigration(),
+    ensureDocumentTemplateSeed(),
+]);
+
+const prepareAuditReferences = () => ensureAuditReferenceSeed();
 
 module.exports = {
     ensureDocumentCenterSeed,
+    prepareDocumentList,
+    prepareDocumentTemplates,
+    prepareAuditReferences,
     policyContent,
     requiredDocumentContent,
     requiredTemplateCatalog,

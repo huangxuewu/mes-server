@@ -7,7 +7,7 @@
     "start": "node index.js",
     "audit:stations": "node scripts/audit-station-identities.js",
     "test:station-identity": "node --test test/stationIdentity.test.js",
-    "test:document-center": "node --test test/documentCenter.test.js"
+    "test:document-center": "node --test test/documentCenter.test.js test/documentCollaboration.test.js"
   },
   "engines": {
     "node": ">=22 <25",

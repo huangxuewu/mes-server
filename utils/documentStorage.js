@@ -30,10 +30,7 @@ const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileNa
 
     const safeName = normalizePathPart(fileName);
     const revisionFolder = revision ? `revision-${revision}` : "draft";
-    const documentFolder = documentNumber
-        ? `${normalizePathPart(documentNumber)}-${normalizePathPart(documentId)}`
-        : normalizePathPart(documentId);
-    const path = `/MES/DocumentCenter/${documentFolder}/${revisionFolder}/${category}/${safeName}`;
+    const path = `/DH MES/document/${normalizePathPart(documentId)}/${revisionFolder}/${category}/${safeName}`;
     await dropbox.filesUpload({
         path,
         contents,

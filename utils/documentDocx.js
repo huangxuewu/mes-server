@@ -6,6 +6,7 @@ const {
     HorizontalPositionAlign,
     HorizontalPositionRelativeFrom,
     Packer,
+    PageOrientation,
     Paragraph,
     Table,
     TableCell,
@@ -18,6 +19,7 @@ const {
     WidthType,
     WpsShapeRun,
 } = require("docx");
+const { documentPageToDocx } = require("./documentPage");
 
 const PROFESSIONAL_FONTS = new Set([
     "Roboto",
@@ -198,6 +200,7 @@ const createDocumentDocx = async (record) => {
         ...(record.contentJson?.content || []).flatMap((node) => convertNode(node)),
     ];
     const watermarkHeader = createWatermarkHeader(record);
+    const page = documentPageToDocx(record.page);
 
     const document = new Document({
         numbering: {
@@ -212,7 +215,19 @@ const createDocumentDocx = async (record) => {
             }],
         },
         sections: [{
-            properties: {},
+            properties: {
+                page: {
+                    size: {
+                        width: page.width,
+                        height: page.height,
+                        orientation: PageOrientation.PORTRAIT,
+                    },
+                    margin: {
+                        ...page.margins,
+                        gutter: 0,
+                    },
+                },
+            },
             headers: watermarkHeader ? { default: watermarkHeader } : undefined,
             children,
         }],

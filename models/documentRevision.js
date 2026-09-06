@@ -1,6 +1,18 @@
 const mongoose = require("mongoose");
 const database = require("../config/database");
 
+const pageMarginSchema = new mongoose.Schema({
+    top: { type: Number, min: 0, max: 3, default: 0.75 },
+    right: { type: Number, min: 0, max: 3, default: 0.75 },
+    bottom: { type: Number, min: 0, max: 3, default: 0.75 },
+    left: { type: Number, min: 0, max: 3, default: 0.75 },
+}, { _id: false });
+
+const documentPageSchema = new mongoose.Schema({
+    size: { type: String, enum: ["LETTER", "A4", "LEGAL"], default: "LETTER" },
+    margins: { type: pageMarginSchema, default: () => ({}) },
+}, { _id: false });
+
 const documentRevisionSchema = new mongoose.Schema({
     document: { type: mongoose.Schema.Types.ObjectId, ref: "Document", required: true },
     revision: { type: Number, required: true },
@@ -9,6 +21,7 @@ const documentRevisionSchema = new mongoose.Schema({
     documentCategory: { type: String, default: "Other" },
     summary: { type: String, default: "" },
     contentJson: { type: mongoose.Schema.Types.Mixed, required: true },
+    page: { type: documentPageSchema, default: () => ({}) },
     watermark: { type: String, default: "" },
     watermarkText: { type: String, default: "" },
     formSchema: { type: mongoose.Schema.Types.Mixed },

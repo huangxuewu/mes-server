@@ -13,7 +13,7 @@ const buildHeaders = (config, extra = {}) => {
             ? config.authToken
             : `Bearer ${config.authToken}`;
 
-    return headers;
+    return { ...headers, ...config.customHeaders };
 };
 
 const getClient = async () => {

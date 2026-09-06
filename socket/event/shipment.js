@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const { Types: { ObjectId } } = mongoose;
 const { performance } = require('node:perf_hooks');
 const { shouldMarkCompleted, requiresBol } = require("../../utils/outboundScac");
+const { prepareShipmentDocuments } = require("../../utils/outboundOrder");
 
 module.exports = (socket, io) => {
 
@@ -35,8 +36,29 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:create", async (data, callback) => {
         try {
-            await db.order.updateOne({ _id: data._id }, { $set: { transitAt: new Date, orderStatus: "In Transit" } });
-            await db.outbound.create(data.buyers);
+            if (!data?._id) throw new Error("Missing order _id");
+
+            const order = await db.order.findById(data._id).lean();
+            if (!order) throw new Error("Order not found");
+
+            const documents = prepareShipmentDocuments(order);
+            const duplicatePoNumbers = await db.outbound.distinct("poNumber", {
+                poNumber: { $in: documents.map(document => document.poNumber) },
+            });
+
+            if (duplicatePoNumbers.length)
+                throw new Error(`Outbound shipment already exists for ${duplicatePoNumbers.join(", ")}`);
+
+            const created = await db.outbound.create(documents);
+            try {
+                await db.order.updateOne(
+                    { _id: order._id },
+                    { $set: { transitAt: new Date(), orderStatus: "In Transit" } }
+                );
+            } catch (error) {
+                await db.outbound.deleteMany({ _id: { $in: created.map(document => document._id) } });
+                throw error;
+            }
 
             callback({ status: "success", message: "Outbound shipment created successfully" })
         } catch (error) {
@@ -385,6 +407,7 @@ module.exports = (socket, io) => {
 
             const shipmentMap = new Map(shipments.map(s => [s.poNumber, s]));
             const touchedPos = new Set();
+            const allocationIssues = [];
 
             // Pass 1: merge ShipIQ load metadata
             for (const payload of payloads) {
@@ -425,7 +448,17 @@ module.exports = (socket, io) => {
                     if (shipIqCartons <= 0) continue;
 
                     const remainingItems = getRemainingItems(shipment, shipmentId);
-                    if (shipIqCartons !== sumCartons(remainingItems)) continue;
+                    const mesCartons = sumCartons(remainingItems);
+                    if (shipIqCartons !== mesCartons) {
+                        allocationIssues.push({
+                            poNumber,
+                            shipmentId,
+                            loadNumber: loadRef.loadNumber,
+                            shipIqCartons,
+                            mesCartons,
+                        });
+                        continue;
+                    }
 
                     loadRef.items = remainingItems;
                 }
@@ -454,7 +487,11 @@ module.exports = (socket, io) => {
 
             const elapsedTimeMs = performance.now() - startTime;
             console.log(`Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`);
-            callback?.({ status: "success", message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms` });
+            callback?.({
+                status: "success",
+                message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`,
+                payload: { allocationIssues },
+            });
         } catch (error) {
             console.error("Load Sync Error:", error);
             callback?.({ status: "error", message: error.message });

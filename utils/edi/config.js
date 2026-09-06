@@ -4,6 +4,7 @@ const EDI_CONFIG_KEYS = {
     baseUrl: "integration.edi.baseUrl",
     authToken: "integration.edi.authToken",
     webBaseUrl: "integration.edi.webBaseUrl",
+    customFields: "integration.edi.customFields",
 };
 
 const DEFAULTS = {
@@ -14,7 +15,7 @@ const DEFAULTS = {
 const normalizeValue = value => String(value ?? "").trim();
 
 const toConfigMap = (docs = []) =>
-    docs.reduce((acc, doc) => Object.assign(acc, { [doc.key]: normalizeValue(doc.value) }), {});
+    docs.reduce((acc, doc) => Object.assign(acc, { [doc.key]: doc.value }), {});
 
 const fetchEdiConfigDocs = () =>
     db.config.find({
@@ -30,14 +31,19 @@ const resolveEdiConfig = (docs = []) => {
 
     return {
         baseUrl: normalizeValue(process.env.EDI_API_BASE_URL)
-            || configMap[EDI_CONFIG_KEYS.baseUrl]
+            || normalizeValue(configMap[EDI_CONFIG_KEYS.baseUrl])
             || DEFAULTS.baseUrl,
         authToken: normalizeValue(process.env.EDI_API_AUTH_TOKEN)
-            || configMap[EDI_CONFIG_KEYS.authToken]
+            || normalizeValue(configMap[EDI_CONFIG_KEYS.authToken])
             || "",
         webBaseUrl: normalizeValue(process.env.EDI_WEB_BASE_URL)
-            || configMap[EDI_CONFIG_KEYS.webBaseUrl]
+            || normalizeValue(configMap[EDI_CONFIG_KEYS.webBaseUrl])
             || DEFAULTS.webBaseUrl,
+        customHeaders: Object.fromEntries(
+            (Array.isArray(configMap[EDI_CONFIG_KEYS.customFields]) ? configMap[EDI_CONFIG_KEYS.customFields] : [])
+                .filter(field => normalizeValue(field?.key))
+                .map(field => [normalizeValue(field.key).toLowerCase(), String(field.value ?? "")])
+        ),
     };
 };
 
