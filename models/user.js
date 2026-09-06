@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
+const { deliverUserChange } = require('../socket/userDelivery');
 
 const userSchema = new mongoose.Schema({
     displayName: String,
@@ -43,10 +44,10 @@ User.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("user:update", change.fullDocument);
+                if (change.fullDocument) deliverUserChange(io, 'user:update', change.fullDocument).catch(error => console.error('User delivery failed:', error.message));
                 break;
             case "delete":
-                io.emit("user:delete", change.documentKey._id);
+                deliverUserChange(io, 'user:delete', change.documentKey._id).catch(error => console.error('User delivery failed:', error.message));
                 break;
         }
     });

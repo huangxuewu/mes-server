@@ -80,6 +80,8 @@ module.exports = (socket, io) => {
             status: { $in: ["Published", "Review Overdue"] },
         }).lean();
         if (!document) throw new Error("Published form not found");
+        if (document.expiryBehavior === "Deactivate" && document.expiresAt && new Date(document.expiresAt).getTime() <= Date.now())
+            throw new Error("This form has expired. Use the current published form.");
         const revision = await db.documentRevision.findOne({
             document: document._id,
             revision: document.currentRevision,
@@ -101,7 +103,7 @@ module.exports = (socket, io) => {
     const storeSubmissionPdf = async (document, revision, submission) => {
         if (!getDropbox()) throw new Error("Dropbox storage is required to submit a form entry");
         const buffer = await createFormPdf({
-            document,
+            document: revision,
             revision: revision.revision,
             formSchema: revision.formSchema,
             relatedDocuments: revision.relatedDocuments,
@@ -110,7 +112,7 @@ module.exports = (socket, io) => {
         const fileName = `${normalizePathPart(submission.entryNumber)}.pdf`;
         const artifact = await uploadDocumentFile({
             documentId: document._id,
-            documentNumber: document.documentNumber,
+            documentNumber: revision.documentNumber,
             revision: revision.revision,
             fileName,
             contents: buffer,
@@ -129,8 +131,6 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "A valid form id is required" });
             const document = await db.document.findOne({ _id: documentId, type: "form", isTemplate: false }).lean();
             if (!document) return callback({ status: "error", message: "Form not found" });
-            if (!document.documentNumber)
-                return callback({ status: "error", message: "A document number is required to generate the form" });
             if (!getDropbox())
                 return callback({ status: "error", message: "Dropbox storage is required to generate a form" });
 
@@ -145,18 +145,20 @@ module.exports = (socket, io) => {
                 ? await db.documentRevision.findOne({ document: document._id, revision }).lean()
                 : document;
             if (!snapshot?.formSchema) return callback({ status: "error", message: "Form definition not found" });
+            if (!snapshot.documentNumber)
+                return callback({ status: "error", message: "A document number is required to generate the form" });
 
             const buffer = await createFormPdf({
-                document,
+                document: snapshot,
                 revision,
                 formSchema: snapshot.formSchema,
                 relatedDocuments: snapshot.relatedDocuments,
             });
             const suffix = revision ? `rev-${revision}` : "draft";
-            const fileName = `${normalizePathPart(document.documentNumber)}-${suffix}-blank.pdf`;
+            const fileName = `${normalizePathPart(snapshot.documentNumber)}-${suffix}-blank.pdf`;
             const artifact = await uploadDocumentFile({
                 documentId: document._id,
-                documentNumber: document.documentNumber,
+                documentNumber: snapshot.documentNumber,
                 revision,
                 fileName,
                 contents: buffer,

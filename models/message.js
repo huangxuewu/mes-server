@@ -1,15 +1,22 @@
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
+const { deliverMessageChange } = require('../socket/messageDelivery');
 
 const attachmentSchema = new mongoose.Schema({
     type: { type: String, enum: ["Image", "Video", "Audio", "Document", "Other"], required: true },
-    url: { type: String, required: true },
+    url: String,
+    attachmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'MessageAttachment' },
+    mime: String,
     size: { type: Number, required: true },
     filename: { type: String, required: true },
 })
 
 const messageSchema = new mongoose.Schema({
+    clientRequestId: String,
+    requestHash: String,
+    revision: { type: Number, default: 0 },
+    history: [{ content: mongoose.Schema.Types.Mixed, status: String, by: mongoose.Schema.Types.ObjectId, at: Date }],
     type: {
         type: String,
         enum: ["Text", "Todo", "Poll"],
@@ -26,6 +33,8 @@ const messageSchema = new mongoose.Schema({
     timestamps: true
 });
 
+messageSchema.index({ authorId: 1, clientRequestId: 1 }, { unique: true, partialFilterExpression: { clientRequestId: { $type: 'string' } } });
+messageSchema.index({ topicId: 1, createdAt: -1, _id: -1 });
 const Message = database.model("Message", messageSchema, "message");
 
 Message.watch([], { fullDocument: "updateLookup" })
@@ -34,11 +43,11 @@ Message.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("message:update", change.fullDocument);
+                if (change.fullDocument) deliverMessageChange(io, change.fullDocument).catch(error => console.error('Message delivery failed:', error.message));
                 break;
 
             case "delete":
-                io.emit("message:delete", change.documentKey._id);
+                // Chat actions retain a retracted record and its audit history.
                 break;
         }
     })

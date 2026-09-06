@@ -26,8 +26,9 @@ const collectSharedReferences = (node, references) => {
     if (node.toArray) node.toArray().forEach((child) => collectSharedReferences(child, references));
 };
 
-const isResource = (asset) => asset.purpose === "resource"
-    || (!asset.purpose && (asset.mimeType?.startsWith("image/") || /\.(png|jpe?g|webp|gif|avif|svg|bmp)$/i.test(asset.name || "")));
+const isResource = (asset) => !/\/original\//i.test(asset.storagePath || "")
+    && (asset.purpose === "resource"
+        || (!asset.purpose && (asset.mimeType?.startsWith("image/") || /\.(png|jpe?g|webp|gif|avif|svg|bmp)$/i.test(asset.name || ""))));
 
 const cleanupDocumentResources = async ({ documentId, resourceIds, db, dropbox, liveDocuments = new Map() }) => {
     const checkedAt = new Date();

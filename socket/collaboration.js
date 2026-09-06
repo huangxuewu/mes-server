@@ -67,7 +67,14 @@ const attachCollaboration = (httpServer) => {
         if (pathname !== COLLABORATION_PATH) return;
 
         webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
-            collaboration.handleConnection(webSocket, request);
+            const collaborationRequest = new Request(new URL(request.url, "http://localhost"), { headers: request.headers });
+            const connection = collaboration.handleConnection(webSocket, collaborationRequest);
+            webSocket.on("message", (data) => connection.handleMessage(new Uint8Array(data)));
+            webSocket.on("close", (code, reason) => connection.handleClose({ code, reason: reason.toString() }));
+            webSocket.on("error", (error) => {
+                console.error("[Document collaboration] WebSocket error:", error.message);
+                webSocket.terminate();
+            });
         });
     });
 

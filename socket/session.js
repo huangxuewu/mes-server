@@ -1,4 +1,5 @@
-const JWT_SECRET = process.env.JWT_SECRET || "EMS";
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'EMS');
+const { createHash } = require('node:crypto');
 
 // Room joined by sockets whose user holds office.calendar.event.public.view,
 // so public calendar events can be broadcast without enumerating users.
@@ -17,18 +18,62 @@ const hasPermission = (user, action, resource) => {
     return Array.isArray(perms) && perms.includes(resource);
 };
 
-const bindSocketSession = (socket, user) => {
+const sessionSignature = user => createHash('sha256').update(JSON.stringify({
+    username: user.username || '', password: user.password || '', role: user.role || '', status: user.status || '',
+    permission: Object.fromEntries(['module', 'access', 'create', 'view', 'update', 'modify', 'edit', 'delete', 'approve', 'override', 'export', 'audit']
+        .map(action => [action, [...(user.permission?.[action] || [])].sort()])),
+})).digest('hex');
+
+const bindSocketSession = (socket, user, expiresAt = Date.now() + 10 * 60 * 60 * 1000) => {
     unbindSocketSession(socket);
     socket.data.userId = String(user._id);
+    socket.data.expiresAt = expiresAt;
+    socket.data.sessionSignature = sessionSignature(user);
+    socket.data.expiryTimer = setTimeout(() => {
+        unbindSocketSession(socket);
+        socket.emit('auth:revoked', { reason: 'Session expired' });
+    }, Math.max(0, expiresAt - Date.now()));
+    socket.data.expiryTimer.unref?.();
     socket.join(userRoom(user._id));
     if (hasPermission(user, "view", PUBLIC_EVENT_VIEW_PERM))
         socket.join(PUBLIC_EVENT_ROOM);
 };
 
 const unbindSocketSession = (socket) => {
+    socket.data.sessionGeneration = (socket.data.sessionGeneration || 0) + 1;
+    if (socket.data.expiryTimer) clearTimeout(socket.data.expiryTimer);
     if (socket.data.userId) socket.leave(userRoom(socket.data.userId));
     socket.leave(PUBLIC_EVENT_ROOM);
     socket.data.userId = null;
+    socket.data.expiresAt = null;
+    socket.data.sessionSignature = null;
+    socket.data.expiryTimer = null;
+    socket.data.messageTopics = new Set();
+};
+
+const getActiveSessionUser = async socket => {
+    const id = getSessionUserId(socket);
+    const generation = socket.data.sessionGeneration;
+    if (!id || !socket.data.expiresAt || socket.data.expiresAt <= Date.now()) {
+        unbindSocketSession(socket);
+        throw new Error('Sign in to continue');
+    }
+    const user = await require('../models').user.findById(id).lean();
+    if (getSessionUserId(socket) !== id || socket.data.sessionGeneration !== generation) throw new Error('Session changed');
+    if (!user || user.status !== 'Active' || sessionSignature(user) !== socket.data.sessionSignature) {
+        unbindSocketSession(socket);
+        socket.emit('auth:revoked', { reason: 'Account access changed. Sign in again.' });
+        throw new Error('Session no longer valid');
+    }
+    return user;
+};
+
+const publicUser = user => Object.fromEntries(
+    ['_id', 'username', 'displayName', 'portrait', 'role', 'status'].map(key => [key, user[key]])
+);
+const privateUser = user => {
+    const { password, ...safe } = user.toObject ? user.toObject() : user;
+    return safe;
 };
 
 module.exports = {
@@ -39,4 +84,7 @@ module.exports = {
     hasPermission,
     bindSocketSession,
     unbindSocketSession,
+    getActiveSessionUser,
+    publicUser,
+    privateUser,
 };

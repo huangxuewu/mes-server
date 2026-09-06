@@ -1,8 +1,12 @@
 const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
+const { deliverTopicChange } = require('../socket/messageDelivery');
 
 const topicSchema = new mongoose.Schema({
+    clientRequestId: String,
+    requestHash: String,
+    revision: { type: Number, default: 0 },
     title: {
         type: String,
         required: true
@@ -53,6 +57,8 @@ const topicSchema = new mongoose.Schema({
     timestamps: true
 });
 
+topicSchema.index({ creator: 1, clientRequestId: 1 }, { unique: true, partialFilterExpression: { clientRequestId: { $type: 'string' } } });
+topicSchema.index({ participants: 1, createdAt: -1, _id: -1 });
 const Topic = database.model("topic", topicSchema, "topic");
 
 Topic.watch([], { fullDocument: "updateLookup" })
@@ -61,11 +67,11 @@ Topic.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("topic:update", change.fullDocument);
+                if (change.fullDocument) deliverTopicChange(io, change.fullDocument).catch(error => console.error('Topic delivery failed:', error.message));
                 break;
 
             case "delete":
-                io.emit("topic:delete", change.documentKey._id);
+                // User-facing deletion is soft so recipient membership remains available.
                 break;
         }
     });

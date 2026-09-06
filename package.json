@@ -7,7 +7,8 @@
     "start": "node index.js",
     "audit:stations": "node scripts/audit-station-identities.js",
     "test:station-identity": "node --test test/stationIdentity.test.js",
-    "test:document-center": "node --test test/documentCenter.test.js test/documentCollaboration.test.js"
+    "test:message-center": "node --test test/messageCenter.test.js test/messageSession.test.js test/messageTransport.test.js test/messageModels.test.js",
+    "test:document-center": "node --test test/documentCenter.test.js test/documentCollaboration.test.js test/documentCollaborationTransport.test.js test/documentRevisionExport.test.js test/documentAssetRegistration.test.js test/documentLifecycle.test.js test/documentResources.test.js test/formRevisionExport.test.js test/formPdfEvidence.test.js"
   },
   "engines": {
     "node": ">=22 <25",

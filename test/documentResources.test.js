@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Y = require("yjs");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 const { cleanupDocumentResources, resourceKey } = require("../utils/documentResources");
 
 const asset = {
@@ -47,6 +50,47 @@ test("multiple unused resources are cleaned up together", async () => {
     await result.run();
     assert.deepEqual(result.deleted, [asset.storagePath, second.storagePath]);
     assert.deepEqual(result.removed, [asset._id, second._id]);
+});
+
+test("imported originals are never removed as unused images, including legacy or misclassified metadata", async () => {
+    for (const purpose of [undefined, "attachment", "resource"]) {
+        const original = { ...asset, purpose, storagePath: "/DH MES/document/doc1/draft/original/photo.png" };
+        const result = fixture({ owner: { type: "uploaded-file", attachments: [original] } });
+        await result.run();
+        assert.deepEqual(result.deleted, []);
+        assert.deepEqual(result.removed, []);
+    }
+});
+
+test("file import marks the original as an attachment before publishing its document", async () => {
+    const source = fs.readFileSync(path.join(__dirname, "../socket/event/document.js"), "utf8");
+    const handlerSource = source.match(/socket\.on\("documentFile:create",[\s\S]*?\n    \}\);/)[0];
+    let handler, saved;
+    const events = [];
+    const storagePath = "/DH MES/document/doc1/draft/original/photo.png";
+    vm.runInNewContext(handlerSource, {
+        socket: { on: (_, callback) => { handler = callback; } },
+        safeCallback: callback => callback, requireUser: async () => ({ _id: "operator" }), requireAccess: () => true,
+        getDropbox: () => ({}), Buffer, ArrayBuffer,
+        mongoose: { Types: { ObjectId: function () { return { toString: () => "doc1" }; } } },
+        normalizePathPart: value => value, DOCUMENT_POPULATE: [], serializeDocument: value => value,
+        uploadDocumentFile: async input => {
+            assert.equal(input.category, "original");
+            return { storagePath, url: asset.url };
+        },
+        db: { document: {
+            create: async input => { saved = input; return saved; },
+            findById: () => ({ populate: () => ({ lean: async () => saved }) }),
+        } },
+        io: { emit: (event, payload) => events.push({ event, payload }) },
+    });
+    let response;
+    await handler({ fileName: "photo.png", mimeType: "image/png", content: Buffer.from("image fixture") }, value => { response = value; });
+    assert.equal(response.status, "success");
+    assert.equal(saved.type, "uploaded-file");
+    assert.equal(saved.attachments[0].purpose, "attachment");
+    assert.equal(saved.attachments[0].storagePath, storagePath);
+    assert.equal(events[0].payload.attachments[0].purpose, "attachment");
 });
 
 test("content, links, thumbnails, templates, revisions and explicit attachments protect files", async () => {

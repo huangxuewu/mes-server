@@ -1,6 +1,6 @@
 const db = require("../../models")
 const jwt = require('jsonwebtoken');
-const { JWT_SECRET, bindSocketSession, unbindSocketSession } = require("../session");
+const { JWT_SECRET, bindSocketSession, unbindSocketSession, privateUser } = require("../session");
 
 module.exports = (socket, io) => {
     // events
@@ -8,22 +8,28 @@ module.exports = (socket, io) => {
     socket.on('auth:timecard', AuthTimecard);        // timecard page auth
     socket.on('auth:bind', AuthBind);                // bind an existing token to this socket (reconnect)
     socket.on('auth:unbind', AuthUnbind);            // clear the socket session (logout)
+    socket.on('disconnect', () => unbindSocketSession(socket));
 
     // function
     async function AuthLogin(payload, callback) {
         try {
+            unbindSocketSession(socket);
+            const attempt = socket.data.sessionGeneration;
+            if (!JWT_SECRET) throw new Error('Authentication secret is not configured');
+            if (typeof payload?.username !== 'string' || typeof payload?.password !== 'string') throw new Error('Invalid credentials');
             const { username, password } = payload;
-            const user = await db.user.findOne({ username, password })
+            const user = await db.user.findOne({ username, password }).lean();
+            if (attempt !== socket.data.sessionGeneration) throw new Error('Sign-in superseded');
 
-            if (!user) return callback({ status: "error", message: "User not found" });
+            if (!user || user.status !== 'Active') return callback({ status: "error", message: "Invalid credentials" });
 
             const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '10h' });
-            bindSocketSession(socket, user);
+            bindSocketSession(socket, user, jwt.decode(token).exp * 1000);
 
             callback({
                 status: "success",
                 message: "Login successful",
-                payload: { token, user }
+                payload: { token, user: privateUser(user) }
             });
 
         } catch (err) {
@@ -35,14 +41,19 @@ module.exports = (socket, io) => {
     }
 
     async function AuthBind(payload, callback) {
+        unbindSocketSession(socket);
+        const attempt = socket.data.sessionGeneration;
         try {
+            if (!JWT_SECRET) throw new Error('Authentication secret is not configured');
             const decoded = jwt.verify(payload?.token, JWT_SECRET);
+            if (!Number.isFinite(decoded.exp) || decoded.exp * 1000 <= Date.now()) throw new Error('Expired session token');
             const user = await db.user.findById(decoded.id).lean();
+            if (attempt !== socket.data.sessionGeneration) throw new Error('Sign-in superseded');
 
-            if (!user) return callback?.({ status: "error", message: "User not found" });
+            if (!user || user.status !== 'Active') return callback?.({ status: "error", message: "Account unavailable" });
 
-            bindSocketSession(socket, user);
-            callback?.({ status: "success", message: "Session bound", payload: { userId: String(user._id) } });
+            bindSocketSession(socket, user, decoded.exp * 1000);
+            callback?.({ status: "success", message: "Session bound", payload: { userId: String(user._id), user: privateUser(user) } });
 
         } catch (err) {
             callback?.({ status: "error", message: "Invalid session token" });
@@ -56,6 +67,7 @@ module.exports = (socket, io) => {
 
     async function AuthTimecard(pin, callback) {
         try {
+            if (typeof pin !== 'string' && typeof pin !== 'number') throw new Error('Invalid PIN');
             const isDeleted = false;
             const employee = await db.employee.findOne({ pin, isDeleted }).lean();
 

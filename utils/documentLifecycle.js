@@ -7,7 +7,7 @@ const refreshDocumentLifecycle = async (io) => {
     const active = await db.document.find({
         isTemplate: false,
         status: { $in: ["Published", "Review Overdue", "Expired"] },
-    });
+    }).select("_id status currentRevision expiresAt expiryBehavior reviewDueAt").lean();
 
     for (const document of active) {
         let nextStatus = "Published";
@@ -17,14 +17,22 @@ const refreshDocumentLifecycle = async (io) => {
             nextStatus = "Review Overdue";
 
         if (document.status === nextStatus) continue;
-        document.status = nextStatus;
-        await document.save();
+        const result = await db.document.updateOne({
+            _id: document._id,
+            isTemplate: false,
+            status: document.status,
+            currentRevision: document.currentRevision ?? null,
+            expiresAt: document.expiresAt ?? null,
+            expiryBehavior: document.expiryBehavior ?? null,
+            reviewDueAt: document.reviewDueAt ?? null,
+        }, { $set: { status: nextStatus } }, { runValidators: true });
+        if (!result.modifiedCount) continue;
         const payload = await db.document.findById(document._id)
             .populate("auditReferences", "name code description status sourceLinks")
             .populate("owner", "username displayName firstName lastName")
             .populate("updatedBy", "username displayName firstName lastName")
             .lean();
-        io.emit("document:updated", payload);
+        if (payload) io.emit("document:updated", payload);
     }
 };
 

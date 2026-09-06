@@ -60,6 +60,7 @@ test("DOCX export uses configurable paper size and editor margins", () => {
         margins: { top: -2, right: 9, bottom: "bad", left: 1.125 },
     }), {
         size: "LETTER",
+        companyName: '', companyLogo: '', header: require('../utils/documentPage').cleanPageBand(), footer: require('../utils/documentPage').cleanPageBand(),
         margins: { top: 0, right: 3, bottom: 0.75, left: 1.13 },
     });
 });
@@ -149,4 +150,58 @@ test("form generator creates a printable PDF from a form definition", async () =
     assert.ok(buffer.length > 1000);
     assert.equal(buffer.subarray(0, 4).toString(), "%PDF");
     assert.equal(buffer.toString("latin1").match(/\/Type \/Page\b/g)?.length, 1);
+});
+
+test('DOCX headers and footers keep saved identity, live page fields, watermark and first-page rules', async () => {
+    const {createCanvas}=require('canvas');
+    const logo=createCanvas(100,40);logo.getContext('2d').fillRect(0,0,100,40);
+    const page={companyName:'Original Company',companyLogo:logo.toDataURL(),margins:{top:0,bottom:0,left:.75,right:.75},
+        header:{enabled:true,left:'{companyName}',center:'{documentTitle}',right:'{documentNumber}',height:.5,hideFirstPage:true},
+        footer:{enabled:true,left:'Rev. {revision} / {effectiveDate}',center:'Controlled copy',right:'Page {page} of {pages}',height:.5}};
+    const buffer=await createDocumentDocx({title:'Original title',documentNumber:'DOC-OLD',revision:2,currentRevision:9,effectiveAt:new Date('2026-08-01T00:00:00Z'),page,watermark:'confidential'});
+    const zip=await require('jszip').loadAsync(buffer);
+    const xml=await zip.file('word/document.xml').async('string');
+    const headers=await Promise.all(Object.values(zip.files).filter(file=>/^word\/header\d+\.xml$/.test(file.name)).map(file=>file.async('string')));
+    const footers=await Promise.all(Object.values(zip.files).filter(file=>/^word\/footer\d+\.xml$/.test(file.name)).map(file=>file.async('string')));
+    assert.match(xml, /w:titlePg/);
+    assert.equal(headers.length,2);
+    assert.equal(headers.filter(text=>text.includes('Original Company')).length,1);
+    assert.ok(headers.every(text=>text.includes('CONFIDENTIAL')));
+    assert.match(headers.join(''), /Original title/);
+    assert.match(headers.join(''), /DOC-OLD/);
+    assert.match(headers.join(''), /a:blip/);
+    assert.equal(footers.length,2);
+    assert.ok(footers.every(text=>text.includes('Rev. 2 / 2026-08-01')&&text.includes('NUMPAGES')&&text.includes('>PAGE</w:instrText>')));
+    assert.ok(!footers.join('').includes('{pages}'));
+    assert.equal(documentPageToDocx(page).margins.top,1296);
+    assert.equal(documentPageToDocx(page).margins.bottom,1296);
+});
+
+test('document and revision schemas preserve page settings without a database connection', async t => {
+    const fs=require('node:fs'),vm=require('node:vm'),mongoose=require('mongoose');
+    const connection=mongoose.createConnection();connection.config.autoCreate=false;connection.config.autoIndex=false;
+    t.after(()=>connection.destroy());
+    for(const name of ['document','documentRevision']){
+        const module={exports:{}};
+        vm.runInNewContext(fs.readFileSync(require.resolve('../models/'+name),'utf8'),{module,exports:module.exports,Buffer,require:dependency=>{
+            if(dependency==='mongoose')return mongoose;
+            if(dependency==='../config/database')return connection;
+            if(dependency==='../utils/documentPageBandSchema')return require('../utils/documentPageBandSchema');
+            throw new Error('Unexpected dependency '+dependency);
+        }});
+        const record=new module.exports({page:{companyName:'Original company',companyLogo:'data:image/png;base64,eA==',header:{enabled:true,left:'{companyName}',height:.5},footer:{enabled:true,right:'Page {page} of {pages}',hideFirstPage:true}}});
+        assert.equal(record.page.validateSync(),undefined);
+        const page=record.toObject().page;
+        assert.equal(page.header.left,'{companyName}');assert.equal(page.footer.hideFirstPage,true);
+        assert.equal(page.companyName,'Original company');assert.equal(page.companyLogo,'data:image/png;base64,eA==');
+        record.page.header.height=7;assert.ok(record.page.validateSync());
+    }
+});
+
+test('page settings reject remote logos and excessive embedded image dimensions',()=>{
+    assert.equal(cleanDocumentPage({companyLogo:'https://example.test/logo.png'}).companyLogo,'');
+    const canvas=require('canvas').createCanvas(300,100);
+    assert.equal(cleanDocumentPage({companyLogo:canvas.toDataURL()}).companyLogo,'');
+    const small=require('canvas').createCanvas(100,40).toDataURL();
+    assert.equal(cleanDocumentPage({companyLogo:small}).companyLogo,small);
 });

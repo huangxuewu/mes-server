@@ -18,7 +18,7 @@ const createFormPdf = ({
     const pdf = new PDFDocument({
         size: formSchema?.page?.size || "LETTER",
         layout: formSchema?.page?.orientation || "portrait",
-        margins: { top: 48, right: 48, bottom: 52, left: 48 },
+        margins: { top: 48, right: 48, bottom: 80, left: 48 },
         bufferPages: true,
         info: {
             Title: document.title,
@@ -32,7 +32,7 @@ const createFormPdf = ({
 
     const answers = new Map((submission?.answers || []).map((answer) => [answer.fieldId, answer.value]));
     const contentWidth = pdf.page.width - pdf.page.margins.left - pdf.page.margins.right;
-    const bottom = () => pdf.page.height - pdf.page.margins.bottom - 18;
+    const bottom = () => pdf.page.height - pdf.page.margins.bottom;
     const ensureSpace = (height) => {
         if (pdf.y + height <= bottom()) return;
         pdf.addPage();
@@ -112,12 +112,9 @@ const createFormPdf = ({
                 : field.type === "yesno" ? ["Yes", "No", "N/A"] : field.options || [];
             pdf.font("Helvetica").fontSize(9).fillColor("#30322f").text(choices.map((choice) => `[ ] ${choice}`).join("     "));
         } else if (submission) {
-            pdf.rect(pdf.x, pdf.y, contentWidth, field.type === "textarea" ? 44 : 25).strokeColor("#bfc1bb").stroke();
-            pdf.font("Helvetica").fontSize(9).fillColor("#20211f").text(value || "-", pdf.x + 7, pdf.y + 7, {
-                width: contentWidth - 14,
-                height: field.type === "textarea" ? 32 : 14,
+            pdf.font("Helvetica").fontSize(9).fillColor("#20211f").text(value || "-", pdf.page.margins.left, pdf.y, {
+                width: contentWidth,
             });
-            pdf.y += field.type === "textarea" ? 37 : 18;
         } else {
             const height = field.type === "textarea" ? 48 : 28;
             pdf.rect(pdf.x, pdf.y, contentWidth, height).strokeColor("#bfc1bb").stroke();
@@ -126,15 +123,28 @@ const createFormPdf = ({
         pdf.moveDown(0.8);
     }
 
+    if (submission?.notes) {
+        ensureSpace(58);
+        pdf.font("Helvetica-Bold").fontSize(9).fillColor("#30322f").text("Entry notes");
+        pdf.moveDown(0.35);
+        pdf.font("Helvetica").fontSize(9).fillColor("#20211f").text(submission.notes, pdf.page.margins.left, pdf.y, {
+            width: contentWidth,
+        });
+    }
+
     const range = pdf.bufferedPageRange();
     for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
         pdf.switchToPage(pageIndex);
+        const bodyMargin = pdf.page.margins.bottom;
+        // Footer stamping must not trigger the automatic body page break.
+        pdf.page.margins.bottom = 0;
         pdf.font("Helvetica").fontSize(8).fillColor("#888a84").text(
             `${document.documentNumber || "Controlled form"}   -   Page ${pageIndex + 1} of ${range.count}`,
             pdf.page.margins.left,
-            pdf.page.height - pdf.page.margins.bottom - 11,
+            pdf.page.height - 63,
             { width: contentWidth, align: "center", lineBreak: false },
         );
+        pdf.page.margins.bottom = bodyMargin;
     }
 
     pdf.end();

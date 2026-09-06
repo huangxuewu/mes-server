@@ -9,6 +9,10 @@ const pageMarginSchema = new mongoose.Schema({
 }, { _id: false });
 
 const documentPageSchema = new mongoose.Schema({
+    companyName: { type: String, maxlength: 200, default: '' },
+    companyLogo: { type: String, maxlength: 100000, default: '' },
+    header: { type: require('../utils/documentPageBandSchema'), default: () => ({}) },
+    footer: { type: require('../utils/documentPageBandSchema'), default: () => ({}) },
     size: { type: String, enum: ["LETTER", "A4", "LEGAL"], default: "LETTER" },
     margins: { type: pageMarginSchema, default: () => ({}) },
 }, { _id: false });

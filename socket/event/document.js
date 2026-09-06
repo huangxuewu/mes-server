@@ -395,6 +395,7 @@ module.exports = (socket, io) => {
                 name: fileName,
                 mimeType: input.mimeType,
                 size: contents.length,
+                purpose: "attachment",
                 ...stored,
                 uploadedAt: new Date(),
                 uploadedBy: user._id,
@@ -701,8 +702,9 @@ module.exports = (socket, io) => {
 
             const revisionNumber = source.revision || 0;
             const suffix = revisionNumber ? `rev-${revisionNumber}` : "draft";
-            const fileName = `${normalizePathPart(document.documentNumber || document.title)}-${suffix}.docx`;
-            const buffer = await createDocumentDocx({ ...source, title: document.title });
+            const contentLabel = document.type === "uploaded-file" ? "-notes" : "";
+            const fileName = `${normalizePathPart(source.documentNumber || source.title)}${contentLabel}-${suffix}.docx`;
+            const buffer = await createDocumentDocx(source);
             const artifact = revisionNumber ? await uploadDocumentFile({
                 documentId: document._id,
                 revision: revisionNumber,
@@ -808,18 +810,29 @@ module.exports = (socket, io) => {
                     ...stored,
                     updatedAt: new Date(),
                 };
-            } else document.attachments.push(asset);
-            document.updatedBy = user._id;
-            await document.save();
+                document.updatedBy = user._id;
+                await document.save();
+            } else {
+                await db.document.updateOne(
+                    { _id: document._id, isTemplate: false, status: { $ne: "Archived" }, "attachments.storagePath": { $ne: stored.storagePath } },
+                    { $push: { attachments: asset }, $set: { updatedBy: user._id } },
+                    { runValidators: true },
+                );
+            }
 
             const payload = await db.document.findById(document._id)
                 .populate(DOCUMENT_POPULATE)
                 .lean();
+            if (!payload || payload.status === "Archived" || payload.isTemplate)
+                return callback({ status: "error", message: "Document is no longer available for uploads" });
+            const registeredAsset = input.kind === "thumbnail" ? asset : payload.attachments.find((item) => item.storagePath === stored.storagePath);
+            if (!registeredAsset)
+                return callback({ status: "error", message: "Unable to register the uploaded file" });
             io.emit("document:updated", serializeDocument(payload));
             callback({
                 status: "success",
                 message: "Asset uploaded",
-                payload: { asset, document: serializeDocument(payload) },
+                payload: { asset: registeredAsset, document: serializeDocument(payload) },
             });
         } catch (error) {
             callback({ status: "error", message: error.message });

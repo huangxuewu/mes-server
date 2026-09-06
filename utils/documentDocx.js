@@ -2,6 +2,13 @@ const {
     AlignmentType,
     Document,
     Header,
+    Footer,
+    PageNumber,
+    BorderStyle,
+    TableBorders,
+    TableLayoutType,
+    VerticalAlign,
+    ImageRun,
     HeadingLevel,
     HorizontalPositionAlign,
     HorizontalPositionRelativeFrom,
@@ -19,7 +26,7 @@ const {
     WidthType,
     WpsShapeRun,
 } = require("docx");
-const { documentPageToDocx } = require("./documentPage");
+const { cleanDocumentPage, documentPageToDocx } = require("./documentPage");
 
 const PROFESSIONAL_FONTS = new Set([
     "Roboto",
@@ -136,15 +143,15 @@ const convertNode = (node, listLevel = 0) => {
     return (node.content || []).flatMap((child) => convertNode(child, listLevel));
 };
 
-const createWatermarkHeader = (record) => {
+const createWatermarkParagraph = (record) => {
     const text = String(record.watermarkText
         || (record.watermark === "confidential" ? "CONFIDENTIAL" : ""))
         .trim()
         .slice(0, 120);
     if (!text) return null;
 
-    return new Header({
-        children: [new Paragraph({
+    return new Paragraph({
+            spacing: { before: 0, after: 0, line: 1, lineRule: 'exact' },
             children: [new WpsShapeRun({
                 type: "wps",
                 transformation: {
@@ -180,6 +187,46 @@ const createWatermarkHeader = (record) => {
                     })],
                 })],
             })],
+    });
+};
+
+const createPageBand = (record, band, kind, width, logo) => {
+    const effectiveDate = record.effectiveAt ? new Date(record.effectiveAt).toISOString().slice(0, 10) : '';
+    const values = { companyName: record.page?.companyName || '', documentTitle: record.title || '',
+        documentNumber: record.documentNumber || '', revision: record.revision ?? record.currentRevision ?? '', effectiveDate };
+    const border = { style: BorderStyle.SINGLE, size: 4, color: band.color.slice(1) };
+    const columns = ['left', 'center', 'right'].map(slot => band[slot].replace(/\{(companyName|documentTitle|documentNumber|revision|effectiveDate)\}/g, (_, key) => String(values[key])));
+    // Word flows its own pages. Keep page fields live, and fit long labels into the reserved area.
+    const columnPoints = width / 20 / 3 - 12;
+    const rows = Math.max(1, ...columns.map(text => text.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length * band.fontSize * 0.6 / columnPoints)), 0)));
+    const fontSize = Math.min(band.fontSize, Math.max(2, (band.height * 72 - 6) / (rows * 1.2)));
+    return new Table({
+        width: { size: width, type: WidthType.DXA },
+        columnWidths: [width / 3, width / 3, width / 3].map(Math.round),
+        layout: TableLayoutType.FIXED,
+        borders: { ...TableBorders.NONE, ...(band.separator ? { [kind === 'header' ? 'bottom' : 'top']: border } : {}) },
+        margins: { top: 30, bottom: 30, left: 0, right: 0 },
+        rows: [new TableRow({
+            height: { value: Math.round(band.height * 1440), rule: 'atLeast' },
+            children: columns.map((text, index) => new TableCell({
+                width: { size: Math.round(width / 3), type: WidthType.DXA },
+                verticalAlign: VerticalAlign.CENTER,
+                children: text.split('\n').map((line, lineIndex) => new Paragraph({
+                    alignment: [AlignmentType.LEFT, AlignmentType.CENTER, AlignmentType.RIGHT][index],
+                    spacing: { before: 0, after: 0, line: Math.round(fontSize * 24), lineRule: 'exact' },
+                    children: [
+                        ...(logo && kind === 'header' && index === 0 && lineIndex === 0 ? [new ImageRun({
+                            type: 'png', data: logo.data,
+                            transformation: { width: logo.width, height: logo.height },
+                        }), new TextRun(' ')] : []),
+                        ...line.split(/(\{page\}|\{pages\})/).filter(Boolean).map(part => new TextRun({
+                        font: 'Arial', size: Math.round(fontSize * 2), color: band.color.slice(1),
+                        ...(part === '{page}' || part === '{pages}'
+                            ? { children: [part === '{page}' ? PageNumber.CURRENT : PageNumber.TOTAL_PAGES] } : { text: part }),
+                    })),
+                    ],
+                })),
+            })),
         })],
     });
 };
@@ -199,8 +246,27 @@ const createDocumentDocx = async (record) => {
         new Paragraph(""),
         ...(record.contentJson?.content || []).flatMap((node) => convertNode(node)),
     ];
-    const watermarkHeader = createWatermarkHeader(record);
+    const settings = cleanDocumentPage(record.page);
     const page = documentPageToDocx(record.page);
+    let logo = null;
+    if (settings.header.enabled && settings.companyLogo) {
+        try {
+            const data = Buffer.from(settings.companyLogo.split(',')[1], 'base64');
+            const image = await require('canvas').loadImage(data);
+            const fit = Math.min((page.width - page.margins.left - page.margins.right) / 15 / 3 * 0.4 / image.width,
+                Math.max(1, settings.header.height * 96 - 10) / image.height);
+            logo = { data, width: image.width * fit, height: image.height * fit };
+        } catch { /* A malformed legacy logo must not prevent exporting the document. */ }
+    }
+    const titlePage = (settings.header.enabled && settings.header.hideFirstPage) || (settings.footer.enabled && settings.footer.hideFirstPage);
+    const bandChildren = (kind, first = false) => {
+        const band = settings[kind];
+        const watermark = kind === 'header' ? createWatermarkParagraph(record) : null;
+        return [watermark, band.enabled && !(first && band.hideFirstPage)
+            ? createPageBand(record, band, kind, page.width - page.margins.left - page.margins.right, logo) : null].filter(Boolean);
+    };
+    const headerChildren = bandChildren('header');
+    const footerChildren = bandChildren('footer');
 
     const document = new Document({
         numbering: {
@@ -216,6 +282,7 @@ const createDocumentDocx = async (record) => {
         },
         sections: [{
             properties: {
+                titlePage,
                 page: {
                     size: {
                         width: page.width,
@@ -224,11 +291,16 @@ const createDocumentDocx = async (record) => {
                     },
                     margin: {
                         ...page.margins,
+                        header: Math.round(settings.header.offset * 1440),
+                        footer: Math.round(settings.footer.offset * 1440),
                         gutter: 0,
                     },
                 },
             },
-            headers: watermarkHeader ? { default: watermarkHeader } : undefined,
+            headers: headerChildren.length ? { default: new Header({ children: headerChildren }),
+                ...(titlePage ? { first: new Header({ children: bandChildren('header', true) }) } : {}) } : undefined,
+            footers: footerChildren.length ? { default: new Footer({ children: footerChildren }),
+                ...(titlePage ? { first: new Footer({ children: bandChildren('footer', true) }) } : {}) } : undefined,
             children,
         }],
     });

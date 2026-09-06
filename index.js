@@ -9,6 +9,7 @@ const { io, app, server } = require("./socket/io");
 const socketHandler = require("./socket/index");
 const { attachCollaboration } = require("./socket/collaboration");
 const { startDocumentLifecycle } = require("./utils/documentLifecycle");
+const { startMessageAttachmentCleanup } = require('./utils/messageAttachmentCleanup');
 
 // Import API routes
 const apiRoutes = require('./api');
@@ -48,6 +49,7 @@ app.use('/addon/labelMaker/finishProduct', finishProductLabelRouter);
 io.on("connection", (socket) => socketHandler(socket, io));
 attachCollaboration(server);
 startDocumentLifecycle(io);
+startMessageAttachmentCleanup();
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
