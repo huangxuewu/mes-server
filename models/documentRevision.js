@@ -28,6 +28,7 @@ const documentRevisionSchema = new mongoose.Schema({
     page: { type: documentPageSchema, default: () => ({}) },
     watermark: { type: String, default: "" },
     watermarkText: { type: String, default: "" },
+    watermarkLayout: { type: String, enum: ['single', 'repeat'], default: 'single' },
     formSchema: { type: mongoose.Schema.Types.Mixed },
     relatedDocuments: [{
         document: { type: mongoose.Schema.Types.ObjectId, ref: "Document" },

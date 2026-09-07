@@ -177,6 +177,20 @@ test('DOCX headers and footers keep saved identity, live page fields, watermark 
     assert.equal(documentPageToDocx(page).margins.bottom,1296);
 });
 
+test('repeated DOCX watermarks tile the page while single-line watermarks remain one shape', async () => {
+    for (const size of ['LETTER', 'A4', 'LEGAL']) {
+        const counts = [];
+        for (const layout of ['single', 'repeat']) {
+            const buffer = await createDocumentDocx({ title: 'Watermark check', page: { size }, watermark: 'custom', watermarkText: 'Internal use', watermarkLayout: layout });
+            const zip = await require('jszip').loadAsync(buffer);
+            const header = Object.values(zip.files).find(file => /^word\/header\d+\.xml$/.test(file.name));
+            const xml = await header.async('string');
+            counts.push((xml.match(/INTERNAL USE/g) || []).length);
+        }
+        assert.equal(counts[0], 1); assert.ok(counts[1] >= 15);
+    }
+});
+
 test('document and revision schemas preserve page settings without a database connection', async t => {
     const fs=require('node:fs'),vm=require('node:vm'),mongoose=require('mongoose');
     const connection=mongoose.createConnection();connection.config.autoCreate=false;connection.config.autoIndex=false;

@@ -1,5 +1,16 @@
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'EMS');
 const { createHash } = require('node:crypto');
+const boundSessions = new Map();
+const sessionEndListeners = new Set();
+const onSessionEnded = callback => sessionEndListeners.add(callback);
+const permissionChangeListeners = new Set();
+const onPermissionsChanged = callback => permissionChangeListeners.add(callback);
+const isBoundDocumentSession = (socketId, userId, generation) => {
+    const session = boundSessions.get(socketId);
+    return Boolean(session && session.userId === String(userId) && session.expiresAt > Date.now()
+        && (generation === undefined || generation === session.generation));
+};
+
 
 // Room joined by sockets whose user holds office.calendar.event.public.view,
 // so public calendar events can be broadcast without enumerating users.
@@ -13,7 +24,8 @@ const getSessionUserId = (socket) => socket.data?.userId ?? null;
 
 const hasPermission = (user, action, resource) => {
     if (!user) return false;
-    if (user.role === "System") return true;
+    // Admin is the highest operator role; System is reserved for MES service actions.
+    if (['Admin', 'System'].includes(user.role)) return true;
     const perms = user.permission?.[action];
     return Array.isArray(perms) && perms.includes(resource);
 };
@@ -29,6 +41,7 @@ const bindSocketSession = (socket, user, expiresAt = Date.now() + 10 * 60 * 60 *
     socket.data.userId = String(user._id);
     socket.data.expiresAt = expiresAt;
     socket.data.sessionSignature = sessionSignature(user);
+    boundSessions.set(socket.id, { userId: String(user._id), expiresAt, generation: socket.data.sessionGeneration });
     socket.data.expiryTimer = setTimeout(() => {
         unbindSocketSession(socket);
         socket.emit('auth:revoked', { reason: 'Session expired' });
@@ -40,6 +53,8 @@ const bindSocketSession = (socket, user, expiresAt = Date.now() + 10 * 60 * 60 *
 };
 
 const unbindSocketSession = (socket) => {
+    boundSessions.delete(socket.id);
+    for (const notify of sessionEndListeners) notify(socket.id);
     socket.data.sessionGeneration = (socket.data.sessionGeneration || 0) + 1;
     if (socket.data.expiryTimer) clearTimeout(socket.data.expiryTimer);
     if (socket.data.userId) socket.leave(userRoom(socket.data.userId));
@@ -49,6 +64,8 @@ const unbindSocketSession = (socket) => {
     socket.data.sessionSignature = null;
     socket.data.expiryTimer = null;
     socket.data.messageTopics = new Set();
+    socket.data.documentGrants = {};
+    socket.data.documentSeen = new Set();
 };
 
 const getActiveSessionUser = async socket => {
@@ -85,6 +102,10 @@ module.exports = {
     bindSocketSession,
     unbindSocketSession,
     getActiveSessionUser,
+    sessionSignature,
+    onSessionEnded,
+    onPermissionsChanged,
+    isBoundDocumentSession,
     publicUser,
     privateUser,
 };

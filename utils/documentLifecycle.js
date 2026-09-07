@@ -1,4 +1,5 @@
 const db = require("../models");
+const { protectedDocumentEmitter } = require('./documentAccess');
 
 const LIFECYCLE_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -32,7 +33,7 @@ const refreshDocumentLifecycle = async (io) => {
             .populate("owner", "username displayName firstName lastName")
             .populate("updatedBy", "username displayName firstName lastName")
             .lean();
-        if (payload) io.emit("document:updated", payload);
+        if (payload) await protectedDocumentEmitter(io).emit("document:updated", payload);
     }
 };
 

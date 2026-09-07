@@ -149,24 +149,29 @@ const createWatermarkParagraph = (record) => {
         .trim()
         .slice(0, 120);
     if (!text) return null;
+    const repeat = record.watermarkLayout === 'repeat';
+    const page = documentPageToDocx(record.page);
+    const width = page.width / 15, height = page.height / 15;
+    const positions = repeat ? Array.from({ length: Math.ceil(height / (width / 5)) }, (_, row) =>
+        Array.from({ length: 3 }, (_, col) => ({ x: (col + 0.5) * width / 3, y: (row + 0.5) * width / 5 }))).flat() : [null];
 
     return new Paragraph({
             spacing: { before: 0, after: 0, line: 1, lineRule: 'exact' },
-            children: [new WpsShapeRun({
+            children: positions.map(position => new WpsShapeRun({
                 type: "wps",
                 transformation: {
-                    width: 640,
-                    height: 110,
+                    width: repeat ? width * 0.3 : width * 0.9,
+                    height: repeat ? 45 : 110,
                     rotation: -32,
                 },
                 floating: {
                     horizontalPosition: {
                         relative: HorizontalPositionRelativeFrom.PAGE,
-                        align: HorizontalPositionAlign.CENTER,
+                        ...(position ? { offset: Math.round((position.x - width * 0.15) * 9525) } : { align: HorizontalPositionAlign.CENTER }),
                     },
                     verticalPosition: {
                         relative: VerticalPositionRelativeFrom.PAGE,
-                        align: VerticalPositionAlign.CENTER,
+                        ...(position ? { offset: Math.round((position.y - 22) * 9525) } : { align: VerticalPositionAlign.CENTER }),
                     },
                     behindDocument: true,
                     allowOverlap: true,
@@ -183,10 +188,10 @@ const createWatermarkParagraph = (record) => {
                         text: text.toUpperCase(),
                         bold: true,
                         color: "D7DAD5",
-                        size: text.length > 30 ? 42 : 58,
+                        size: Math.max(6, Math.min(repeat ? 22 : 100, (repeat ? width * 0.3 : width * 0.9) / Math.max(1, text.length) * 2.5)),
                     })],
                 })],
-            })],
+            })),
     });
 };
 

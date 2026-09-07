@@ -18,6 +18,7 @@ const fixture = (status = 'Draft') => {
     vm.runInNewContext(registration, {
         socket: { on: (event, callback) => { handler = callback; } },
         safeCallback: callback => callback,
+        safeDocument: async value => value, rawSocket: {},
         requireUser: async () => ({ _id: 'publisher' }), requireAccess: () => true,
         mongoose: { isValidObjectId: () => true },
         db: {

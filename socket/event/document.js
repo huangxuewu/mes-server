@@ -13,6 +13,8 @@ const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../uti
 const { createDocumentThumbnail } = require("../../utils/documentThumbnail");
 const { cleanupDocumentResources } = require("../../utils/documentResources");
 const { cleanDocumentPage } = require("../../utils/documentPage");
+const { protectDocumentSocket, protectedDocumentEmitter, listDocument, safeDocument } = require('../../utils/documentAccess');
+const { getActiveSessionUser } = require('../session');
 
 const USER_SELECT = "username displayName firstName lastName portrait";
 const DOCUMENT_POPULATE = [
@@ -165,7 +167,9 @@ const hasDocumentPermission = (user, action, resource) => {
 
 const safeCallback = (callback) => typeof callback === "function" ? callback : () => {};
 
-module.exports = (socket, io) => {
+module.exports = (rawSocket, rawIo) => {
+    const socket = protectDocumentSocket(rawSocket);
+    const io = protectedDocumentEmitter(rawIo);
     const requireUser = async (callback) => {
         const userId = getSessionUserId(socket);
         if (!userId) {
@@ -208,11 +212,16 @@ module.exports = (socket, io) => {
                 .sort(query.isTemplate ? { title: 1 } : { updatedAt: -1 })
                 .populate(DOCUMENT_POPULATE)
                 .lean();
+            const currentUser = await getActiveSessionUser(rawSocket);
+            const policies = await db.document.find({ _id: { $in: documents.map(document => document._id) } })
+                .select('_id owner createdBy locked visibility viewerIds hasPassword securityVersion').lean();
+            const policyById = new Map(policies.map(document => [String(document._id), document]));
 
             callback({
                 status: "success",
                 message: "Documents fetched",
-                payload: documents.map(serializeDocument),
+                payload: (await Promise.all(documents.filter(document => policyById.has(String(document._id)))
+                    .map(document => listDocument({ ...serializeDocument(document), ...policyById.get(String(document._id)) }, currentUser, rawSocket)))).filter(Boolean),
             });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -287,6 +296,7 @@ module.exports = (socket, io) => {
                 page: cleanDocumentPage(source?.page || input.page),
                 watermark: source?.watermark || "",
                 watermarkText: source?.watermarkText || "",
+                watermarkLayout: source?.watermarkLayout || "single",
                 formSchema,
                 relatedDocuments,
                 plainText: isForm ? formSchemaText(formSchema) : source?.plainText || asText(input.contentJson),
@@ -318,6 +328,8 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "A valid source document id is required" });
             const source = await db.document.findOne({ _id: input.documentId, isTemplate: false }).lean();
             if (!source) return callback({ status: "error", message: "Source document not found" });
+            if (source.visibility === 'selected' || source.hasPassword)
+                return callback({ status: 'error', message: 'Restricted documents cannot be copied to shared templates' });
 
             const template = await db.document.create({
                 title: String(input.title || `${source.title} template`).trim(),
@@ -332,6 +344,7 @@ module.exports = (socket, io) => {
                 page: cleanDocumentPage(source.page),
                 watermark: source.watermark || "",
                 watermarkText: source.watermarkText || "",
+                watermarkLayout: source.watermarkLayout || "single",
                 formSchema: source.type === "form" ? source.formSchema : undefined,
                 relatedDocuments: source.type === "form" ? source.relatedDocuments : [],
                 plainText: source.plainText,
@@ -445,6 +458,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "System templates cannot be edited directly" });
             if (document.status === "Archived")
                 return callback({ status: "error", message: "Archived documents cannot be edited" });
+            document.$where = { locked: { $ne: true }, securityVersion: document.securityVersion || { $in: [null, 0] } };
 
             if (input.title !== undefined) document.title = String(input.title).trim();
             if (!document.title) return callback({ status: "error", message: "Title is required" });
@@ -463,7 +477,7 @@ module.exports = (socket, io) => {
             }
             if (input.page !== undefined) document.page = cleanDocumentPage(input.page);
             if (input.watermark !== undefined) {
-                document.watermark = ["manufacturer", "confidential"].includes(input.watermark)
+                document.watermark = ["manufacturer", "confidential", "custom"].includes(input.watermark)
                     ? input.watermark
                     : "";
                 document.watermarkText = document.watermark
@@ -535,6 +549,7 @@ module.exports = (socket, io) => {
                 page: cleanDocumentPage(document.page),
                 watermark: document.watermark,
                 watermarkText: document.watermarkText,
+                watermarkLayout: document.watermarkLayout,
                 formSchema: document.formSchema,
                 relatedDocuments: document.relatedDocuments,
                 plainText: document.plainText,
@@ -555,6 +570,7 @@ module.exports = (socket, io) => {
                     page: snapshot.page,
                     watermark: snapshot.watermark,
                     watermarkText: snapshot.watermarkText,
+                    watermarkLayout: snapshot.watermarkLayout,
                 };
             snapshot.contentHash = crypto.createHash("sha256")
                 .update(JSON.stringify(revisionContent))
@@ -704,7 +720,7 @@ module.exports = (socket, io) => {
             const suffix = revisionNumber ? `rev-${revisionNumber}` : "draft";
             const contentLabel = document.type === "uploaded-file" ? "-notes" : "";
             const fileName = `${normalizePathPart(source.documentNumber || source.title)}${contentLabel}-${suffix}.docx`;
-            const buffer = await createDocumentDocx(source);
+            const buffer = await createDocumentDocx(await safeDocument({ ...source, watermark: document.watermark, watermarkText: document.watermarkText, watermarkLayout: document.watermarkLayout }, user, rawSocket));
             const artifact = revisionNumber ? await uploadDocumentFile({
                 documentId: document._id,
                 revision: revisionNumber,

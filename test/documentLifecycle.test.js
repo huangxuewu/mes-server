@@ -45,7 +45,7 @@ const fixture = (records, mutateAfterRead) => {
         }),
     } };
     const module = { exports: {} };
-    vm.runInNewContext(source, { require: name => { assert.equal(name, '../models'); return db; }, module, console, Date });
+    vm.runInNewContext(source, { require: name => { if (name === './documentAccess') return { protectedDocumentEmitter: io => io }; assert.equal(name, '../models'); return db; }, module, console, Date });
     return { calls, emitted, run: () => module.exports.refreshDocumentLifecycle({ emit: (name, payload) => emitted.push({ name, payload }) }) };
 };
 const past = new Date('2000-01-01T00:00:00Z');

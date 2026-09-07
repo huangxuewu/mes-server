@@ -13,14 +13,21 @@ const sync = require("y-protocols/sync");
 const { writeAuthentication } = require("@hocuspocus/common");
 const { MessageType } = require("@hocuspocus/server");
 
-test("the HTTP upgrade integration authenticates binary edits, persists them, and releases closed connections", { timeout: 10000 }, async (t) => {
+test("real WebSocket edits survive a failed settings save and are persisted before a successful lock closes the client", { timeout: 10000 }, async (t) => {
     const documentId = "aaaaaaaaaaaaaaaaaaaaaaaa", userId = "bbbbbbbbbbbbbbbbbbbbbbbb";
-    let stored, storedBy, loads = 0;
+    let stored, storedBy, loads = 0, failSettings = true;
+    const record = { _id: documentId, status: 'Draft' };
     const db = {
-        user: { findById: () => ({ lean: async () => ({ _id: userId, role: "System" }) }) },
+        user: { findById: () => ({ lean: async () => ({ _id: userId, role: "System", status: 'Active' }) }) },
         document: {
-            findOne: () => ({ lean: async () => ({ _id: documentId, status: "Draft" }) }),
-            findById: () => ({ select: async () => { loads++; return { yjsState: stored }; } }),
+            findOne: () => ({ lean: async () => record }),
+            findById: () => ({ lean: async () => record, select: async () => { loads++; return { ...record, yjsState: stored }; } }),
+            findOneAndUpdate: async (filter, update) => {
+                if (failSettings) throw new Error('Temporary database outage');
+                Object.assign(record, update.$set);
+                stored = Buffer.from(update.$set.yjsState);
+                return record;
+            },
             updateOne: async (filter, update) => {
                 stored = Buffer.from(update.$set.yjsState);
                 storedBy = update.$set.updatedBy;
@@ -29,7 +36,7 @@ test("the HTTP upgrade integration authenticates binary edits, persists them, an
     };
     const context = { module: { exports: {} }, Buffer, URL, Request, console, require: (name) => {
         if (name === "../models") return db;
-        if (name === "./session") return { JWT_SECRET: "transport-test-secret", hasPermission: () => false };
+        if (name === "./session") return { JWT_SECRET: "transport-test-secret", hasPermission: () => false, isBoundDocumentSession: () => true, sessionSignature: require('../socket/session').sessionSignature };
         return require(name);
     } };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../socket/collaboration.js"), "utf8"), context);
@@ -76,8 +83,51 @@ test("the HTTP upgrade integration authenticates binary edits, persists them, an
     assert.equal(storedBy, userId);
     assert.equal(loads, 1);
     assert.equal(collaboration.documents.size, 1);
-    const closed = once(client, "close");
-    client.close();
-    await closed;
+    const live = collaboration.documents.get(documentId);
+    source.getText('transport-test').insert(0, 'Latest edits ');
+    frame(MessageType.Sync, encoder => sync.writeUpdate(encoder, Y.encodeStateAsUpdate(source)));
+    await until(() => live.getText('transport-test').toString().startsWith('Latest edits'), 'The latest edit reaches the live document');
+    const handlers = {};
+    const rawSocket = { id: 'settings-socket', data: { userId, sessionGeneration: 1, expiresAt: Date.now() + 60000 }, on: (event, handler) => { handlers[event] = handler; } };
+    const settingsModule = { exports: {} };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../socket/event/documentSettings.js'), 'utf8'), {
+        module: settingsModule, Buffer, console, require: name => {
+            if (name === '../../models') return db;
+            if (name === '../session') return { getActiveSessionUser: async () => ({ _id: userId, role: 'System', status: 'Active' }) };
+            if (name === '../collaboration') return context.module.exports;
+            if (name === '../../utils/documentAccess') return require('../utils/documentAccess');
+            return require(name);
+        },
+    });
+    settingsModule.exports(rawSocket, { fetchSockets: async () => [] });
+    const changeSettings = async () => {
+        let result;
+        await handlers['documentSettings:update']({ documentId, expectedVersion: 0,
+            settings: { locked: true, visibility: 'everyone', viewerIds: [], watermark: '', watermarkLayout: 'single' },
+        }, response => { result = response; });
+        return result;
+    };
+    const failed = await changeSettings();
+    assert.equal(failed.status, 'error');
+    assert.equal(collaboration.documents.get(documentId), live);
+    assert.equal(live.getConnectionsCount(), 1);
+    assert.equal(live.fileSettingsPending, false);
+    collaboration.flushPendingStores();
+    const storedText = () => { const copy = new Y.Doc(); Y.applyUpdate(copy, stored); const text = copy.getText('transport-test').toString(); copy.destroy(); return text; };
+    await until(() => storedText().startsWith('Latest edits'), 'Stores still persist the live edits after a failed settings write');
+    source.getText('transport-test').insert(0, 'Before successful lock ');
+    frame(MessageType.Sync, encoder => sync.writeUpdate(encoder, Y.encodeStateAsUpdate(source)));
+    await until(() => live.getText('transport-test').toString().startsWith('Before successful lock'), 'Editing still works after rollback');
+    failSettings = false;
+    const saved = await changeSettings();
+    assert.equal(saved.status, 'success', saved.message);
+    assert.equal(record.locked, true);
+    assert.equal(storedText(), source.getText('transport-test').toString());
+    const authorizedState = Buffer.from(stored);
+    source.getText('transport-test').insert(0, 'Blocked edit ');
+    frame(MessageType.Sync, encoder => sync.writeUpdate(encoder, Y.encodeStateAsUpdate(source)));
+    await until(() => collaboration.documents.size === 0, 'Revoked client must release its document connection');
+    assert.deepEqual(stored, authorizedState);
+    if (client.readyState !== WebSocket.CLOSED) { const closed = once(client, 'close'); client.close(); await closed; }
     await until(() => collaboration.documents.size === 0, "Closing the socket must release its Hocuspocus document");
 });

@@ -3,6 +3,7 @@ const db = require("../../models");
 const { getSessionUserId, hasPermission } = require("../session");
 const { createFormPdf } = require("../../utils/formPdf");
 const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
+const { protectDocumentSocket, protectedDocumentEmitter, safeDocument } = require('../../utils/documentAccess');
 
 const USER_SELECT = "username displayName firstName lastName portrait";
 
@@ -54,7 +55,9 @@ const asDate = (value, fallback = new Date()) => {
     return date;
 };
 
-module.exports = (socket, io) => {
+module.exports = (rawSocket, rawIo) => {
+    const socket = protectDocumentSocket(rawSocket);
+    const io = protectedDocumentEmitter(rawIo);
     const requireUser = async (callback, action, resource) => {
         const userId = getSessionUserId(socket);
         if (!userId) {
@@ -101,6 +104,7 @@ module.exports = (socket, io) => {
     };
 
     const storeSubmissionPdf = async (document, revision, submission) => {
+        revision = await safeDocument(revision, await require('../session').getActiveSessionUser(rawSocket), rawSocket);
         if (!getDropbox()) throw new Error("Dropbox storage is required to submit a form entry");
         const buffer = await createFormPdf({
             document: revision,
@@ -141,10 +145,11 @@ module.exports = (socket, io) => {
             const revision = hasRequestedRevision
                 ? parsedRevision
                 : (document.status === "Draft" || document.status === "In Review" ? 0 : document.currentRevision || 0);
-            const snapshot = revision
+            let snapshot = revision
                 ? await db.documentRevision.findOne({ document: document._id, revision }).lean()
                 : document;
             if (!snapshot?.formSchema) return callback({ status: "error", message: "Form definition not found" });
+            snapshot = await safeDocument(snapshot, user, rawSocket);
             if (!snapshot.documentNumber)
                 return callback({ status: "error", message: "A document number is required to generate the form" });
 

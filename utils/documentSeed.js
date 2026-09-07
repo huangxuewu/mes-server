@@ -311,12 +311,12 @@ const ensureAuditReferenceSeed = () => {
 
 const ensureDocumentTemplateSeed = () => {
     if (templateSeedPromise) return templateSeedPromise;
-    templateSeedPromise = Promise.all([
+    templateSeedPromise = db.document.bulkWrite([
         ...templates.map(([templateKey, title, purpose, responsibilities, requirements, records]) => {
             const contentJson = policyContent(title, purpose, responsibilities, requirements, records);
-            return db.document.updateOne(
-                { templateKey },
-                {
+            return { updateOne: {
+                filter: { templateKey },
+                update: {
                     $set: { documentCategory: inferDocumentCategory(title) },
                     $setOnInsert: {
                         title,
@@ -333,10 +333,10 @@ const ensureDocumentTemplateSeed = () => {
                         publishedAt: new Date(),
                     },
                 },
-                { upsert: true },
-            );
+                upsert: true,
+            } };
         }),
-        db.document.bulkWrite(requiredTemplates.map(({ category, title, templateKey }) => {
+        ...requiredTemplates.map(({ category, title, templateKey }) => {
             const contentJson = requiredDocumentContent(title, category);
             return {
                 updateOne: {
@@ -362,8 +362,8 @@ const ensureDocumentTemplateSeed = () => {
                     upsert: true,
                 },
             };
-        }), { ordered: false }),
-    ]).catch((error) => {
+        }),
+    ], { ordered: false }).catch((error) => {
         templateSeedPromise = null;
         throw error;
     });
