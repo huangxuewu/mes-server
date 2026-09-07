@@ -41,6 +41,18 @@ const stationSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    computer: {
+        hostname: String,
+        platform: String,
+        release: String,
+        arch: String,
+        cpu: String,
+        cpuCount: Number,
+        memoryBytes: Number,
+        appVersion: String,
+        ipAddresses: [String],
+        remoteAddress: String,
+    },
     config: {
         boardType: {
             type: String,

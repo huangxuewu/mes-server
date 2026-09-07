@@ -1,5 +1,6 @@
 const db = require("../../models");
 const mongoose = require("mongoose");
+const { getActiveSessionUser, hasPermission } = require('../session');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAC_PATTERN = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
@@ -148,8 +149,37 @@ module.exports = (socket, io) => {
 
     socket.on("station:update", async (payload, callback) => {
         try {
-            const { _id, stationId, lastSeenAt, ...data } = payload;
+            const { _id } = payload;
+            const keys = ['name', 'description', 'location', 'application', 'status', 'allowedModules', 'config'];
+            const data = Object.fromEntries(keys.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]));
+            const presence = socket.data?.stationPresence;
+            const selfConfig = String(_id) === presence?._id && Object.keys(data).length === 1 && data.config;
+            const ownsStation = selfConfig && await db.station.exists({ _id, stationId: presence.stationId });
+            if (!ownsStation) {
+                const user = await getActiveSessionUser(socket);
+                if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            }
+            for (const key of ['name', 'location']) {
+                if (data[key] === undefined) continue;
+                if (typeof data[key] !== 'string' || !data[key].trim()) throw new Error('Station name and location are required');
+                data[key] = data[key].trim();
+            }
+            if (data.allowedModules && (!Array.isArray(data.allowedModules)
+                || data.allowedModules.some(module => !['OFFICE', 'PRODUCTION', 'PORTAL', 'DOCUMENT', 'CONFIGURATION'].includes(module))))
+                throw new Error('Invalid station modules');
+            if (data.config?.boardType === 'bulletin') {
+                const bulletin = data.config.bulletin;
+                if (!data.config.departmentId || !Array.isArray(bulletin?.pages) || !bulletin.pages.length
+                    || bulletin.pages.some(page => !['schedule', 'performance', 'hours'].includes(page))
+                    || !Number.isInteger(bulletin.rotateSeconds) || bulletin.rotateSeconds < 5 || bulletin.rotateSeconds > 3600)
+                    throw new Error('Invalid bulletin settings');
+            }
             const station = await db.station.findByIdAndUpdate(_id, { $set: data }, { new: true, runValidators: true });
+            if (!station) throw new Error('Station not found');
+            for (const client of io.sockets.sockets.values()) {
+                if (client.data.stationPresence?._id === String(station._id)
+                    && client.data.stationPresence.stationId === station.stationId) client.emit('station:update', station);
+            }
             callback({ status: "success", message: "Station updated successfully", payload: station });
         } catch (error) {
             callback({ status: "error", message: error.message });
