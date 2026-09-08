@@ -96,6 +96,23 @@ test("document files share the id folder regardless of document number", async (
     ]);
 });
 
+test("document thumbnail module loads without the native canvas binding", () => {
+    const fs = require("node:fs");
+    const vm = require("node:vm");
+    const missingBinding = new Error("Cannot find module '../build/Release/canvas.node'");
+    const context = {
+        module: { exports: {} },
+        require: (name) => {
+            assert.equal(name, "canvas");
+            throw missingBinding;
+        },
+    };
+
+    vm.runInNewContext(fs.readFileSync(require.resolve("../utils/documentThumbnail"), "utf8"), context);
+    assert.equal(typeof context.module.exports.createDocumentThumbnail, "function");
+    assert.throws(() => context.module.exports.createDocumentThumbnail({ title: "Test" }), error => error === missingBinding);
+});
+
 test("document thumbnail generator returns a PNG cover", () => {
     const buffer = createDocumentThumbnail({
         title: "Document and Record Control",

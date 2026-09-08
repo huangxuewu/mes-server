@@ -1,5 +1,3 @@
-const { createCanvas } = require("canvas");
-
 const wrapLines = (context, text, maxWidth, maxLines) => {
     const words = String(text || "").split(/\s+/);
     const lines = [];
@@ -19,6 +17,7 @@ const wrapLines = (context, text, maxWidth, maxLines) => {
 };
 
 const createDocumentThumbnail = ({ title, documentNumber, revision }) => {
+    const { createCanvas } = require("canvas");
     const canvas = createCanvas(680, 880);
     const context = canvas.getContext("2d");
 
