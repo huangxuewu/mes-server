@@ -19,6 +19,20 @@ require.cache[modelsPath] = {
 
 const gmail = require("./gmail");
 
+test("Gmail-only SDK preserves OAuth and mail resources without loading the entire Google API catalog", async () => {
+    const url = new URL(await gmail.getGmailAuthUrl({
+        clientId: 'test-client', clientSecret: 'test-secret', redirectUri: 'https://example.com/callback',
+    }));
+    assert.equal(url.searchParams.get('client_id'), 'test-client');
+    assert.equal(url.searchParams.get('redirect_uri'), 'https://example.com/callback');
+    assert.equal(url.searchParams.get('access_type'), 'offline');
+    assert.ok(url.searchParams.get('scope').includes('https://www.googleapis.com/auth/gmail.send'));
+    const api = require('googleapis/build/src/apis/gmail').gmail({ version: 'v1' });
+    assert.equal(typeof api.users.messages.send, 'function');
+    assert.equal(typeof api.users.threads.get, 'function');
+    assert.equal(require.cache[require.resolve('googleapis')], undefined);
+});
+
 test("resolveGmailConfig trims persisted values and applies overrides", () => {
     const docs = [
         { key: "integration.gmail.clientId", value: " client-id " },

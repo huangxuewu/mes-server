@@ -162,8 +162,8 @@ const gmailFixture = connection => {
             if (name === '../models') return { config };
             if (name === './gmailQuota') return { GmailDeferred, createGmailQuota: () => ({ run: async (_context, _method, execute) =>
                 execute({ retry: false, retryConfig: { retry: 0 }, timeout: 20000 }) }) };
-            if (name !== 'googleapis') return localRequire(name);
-            return { google: { auth: { OAuth2: class {
+            if (name !== 'googleapis/build/src/apis/gmail') return localRequire(name);
+            return { auth: { OAuth2: class {
                 setCredentials() {}
                 async getAccessToken() { return { token: 'test-token' }; }
             } }, gmail: options => {
@@ -184,7 +184,7 @@ const gmailFixture = connection => {
                         }),
                     },
                 } };
-            } } };
+            } };
         },
     }, { filename });
     return { gmail: module.exports, sends: () => sends, calls,

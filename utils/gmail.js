@@ -1,4 +1,4 @@
-const { google } = require("googleapis");
+const google = require("googleapis/build/src/apis/gmail");
 const db = require("../models");
 const { createHash, randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
