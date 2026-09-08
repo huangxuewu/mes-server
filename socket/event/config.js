@@ -1,6 +1,8 @@
 const db = require("../../models");
 const mongoose = require("mongoose");
 const { getActiveSessionUser, hasPermission } = require('../session');
+const { getStationScreenshots } = require('../../utils/stationScreenshots');
+const { getStationLive } = require('../../utils/stationLive');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAC_PATTERN = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
@@ -38,7 +40,6 @@ const conflict = (reason, stations = []) => ({
     reason,
     stations: conflictStations(stations),
 });
-const resolved = (station, migrated = false) => ({ outcome: 'resolved', station, migrated });
 const getRecoveryStations = () => db.station
     .find({})
     .select(STATION_CONFLICT_FIELDS)
@@ -76,7 +77,16 @@ const normalizeStation = value => {
 };
 
 module.exports = (socket, io) => {
-
+    const screenshots = getStationScreenshots(io);
+    const live = getStationLive(io);
+    const resolved = (station, migrated = false) => {
+        if (socket.data.stationPresence?._id !== String(station._id) || socket.data.stationPresence?.stationId !== station.stationId) {
+            delete socket.data.stationPresence;
+            delete socket.data.stationDeployment;
+        }
+        socket.data.stationConnection = { _id: String(station._id), stationId: station.stationId };
+        return { outcome: 'resolved', station, migrated };
+    };
 
     socket.on("config:create", async (data, callback) => {
         try {
@@ -127,10 +137,15 @@ module.exports = (socket, io) => {
 
     socket.on("station:get", async (query, callback) => {
         try {
+            delete socket.data.stationConnection;
+            delete socket.data.stationPresence;
+            delete socket.data.stationDeployment;
             const macAddress = normalizeMac(query?.macAddress);
             const station = MAC_PATTERN.test(macAddress)
                 ? await db.station.findOne({ macAddress: getMacRegex(macAddress) })
                 : null;
+            if (station && !station.stationId)
+                socket.data.stationConnection = { _id: String(station._id), stationId: null };
             callback({ status: "success", message: "Station fetched successfully", payload: station });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -139,7 +154,7 @@ module.exports = (socket, io) => {
 
     socket.on("station:create", async (data, callback) => {
         try {
-            const { stationId, lastSeenAt, ...legacyStation } = data;
+            const { stationId, lastSeenAt, screenshot, screenshotGeneration, screenshotSupported, screenshotCleanup, screenshotsEnabled, ...legacyStation } = data;
             const station = await db.station.create(legacyStation);
             callback({ status: "success", message: "Station created successfully", payload: station });
         } catch (error) {
@@ -150,7 +165,7 @@ module.exports = (socket, io) => {
     socket.on("station:update", async (payload, callback) => {
         try {
             const { _id } = payload;
-            const keys = ['name', 'description', 'location', 'application', 'status', 'allowedModules', 'config'];
+            const keys = ['name', 'description', 'location', 'application', 'status', 'allowedModules', 'config', 'screenshotsEnabled'];
             const data = Object.fromEntries(keys.filter(key => payload[key] !== undefined).map(key => [key, payload[key]]));
             const presence = socket.data?.stationPresence;
             const selfConfig = String(_id) === presence?._id && Object.keys(data).length === 1 && data.config;
@@ -174,13 +189,43 @@ module.exports = (socket, io) => {
                     || !Number.isInteger(bulletin.rotateSeconds) || bulletin.rotateSeconds < 5 || bulletin.rotateSeconds > 3600)
                     throw new Error('Invalid bulletin settings');
             }
-            const station = await db.station.findByIdAndUpdate(_id, { $set: data }, { new: true, runValidators: true });
+            if (data.screenshotsEnabled !== undefined && typeof data.screenshotsEnabled !== 'boolean') throw new Error('Invalid screenshot setting');
+            const station = await db.station.findByIdAndUpdate(_id, { $set: data,
+                ...(data.screenshotsEnabled !== undefined ? { $inc: { screenshotGeneration: 1 } } : {}),
+            }, { new: true, runValidators: true });
             if (!station) throw new Error('Station not found');
             for (const client of io.sockets.sockets.values()) {
                 if (client.data.stationPresence?._id === String(station._id)
                     && client.data.stationPresence.stationId === station.stationId) client.emit('station:update', station);
             }
             callback({ status: "success", message: "Station updated successfully", payload: station });
+            void live.changed(_id).catch(() => {});
+            if (data.screenshotsEnabled !== undefined)
+                void screenshots.changed(_id).catch(error => console.error('[Station screenshots]', error.message));
+        } catch (error) {
+            callback({ status: "error", message: error.message });
+        }
+    });
+
+    socket.on("station:delete", async (payload, callback) => {
+        try {
+            const user = await getActiveSessionUser(socket);
+            if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            const id = payload?._id;
+            if (typeof id !== 'string' || !/^[0-9a-f]{24}$/i.test(id)) throw new Error('Invalid station _id');
+            const station = await db.station.findByIdAndDelete(id);
+            if (!station) throw new Error('Station not found');
+            const deleted = { _id: String(station._id) };
+            for (const client of io.sockets.sockets.values()) {
+                if (client.data.stationPresence?._id === deleted._id || client.data.stationConnection?._id === deleted._id) {
+                    delete client.data.stationPresence;
+                    delete client.data.stationConnection;
+                    delete client.data.stationDeployment;
+                }
+                client.emit('station:delete', deleted);
+            }
+            callback({ status: "success", message: "Station deleted successfully", payload: deleted });
+            void live.changed(deleted._id).catch(() => {});
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -188,6 +233,9 @@ module.exports = (socket, io) => {
 
     socket.on("station:resolve", async (payload, callback) => {
         try {
+            delete socket.data.stationConnection;
+            delete socket.data.stationPresence;
+            delete socket.data.stationDeployment;
             const stationId = validateStationId(payload?.stationId);
             const station = await db.station.findOneAndUpdate(
                 { stationId },
@@ -272,11 +320,16 @@ module.exports = (socket, io) => {
 
             const claimed = await db.station.findOneAndUpdate(
                 { _id: station._id, ...(station.stationId ? { stationId: station.stationId } : { stationId: { $exists: false } }) },
-                { $set: { stationId, lastSeenAt: new Date() } },
+                { $set: { stationId, lastSeenAt: new Date() }, $unset: { screenshot: 1 }, $inc: { screenshotGeneration: 1 },
+                    ...(station.stationId ? { $addToSet: { screenshotCleanup: station.stationId } } : {}),
+                },
                 { new: true, runValidators: true }
             );
-            if (claimed)
+            if (claimed) {
+                void live.changed(claimed._id).catch(() => {});
+                void screenshots.changed(claimed._id).catch(error => console.error('[Station screenshots]', error.message));
                 return callback({ status: "success", message: "Station claimed successfully", payload: resolved(claimed) });
+            }
 
             const current = await db.station.findById(station._id).select(`${STATION_CONFLICT_FIELDS} stationId`);
             callback({ status: "success", message: "Station identity conflict", payload: conflict('race', current ? [current] : []) });
@@ -297,10 +350,14 @@ module.exports = (socket, io) => {
 
             const station = await db.station.findOneAndUpdate(
                 { _id: payload._id, stationId },
-                { $unset: { stationId: 1 } },
+                { $unset: { stationId: 1, screenshot: 1 }, $inc: { screenshotGeneration: 1 }, $addToSet: { screenshotCleanup: stationId } },
                 { new: true }
             );
             callback({ status: "success", message: "Station released successfully", payload: { released: !!station } });
+            if (station) {
+                void live.changed(station._id).catch(() => {});
+                void screenshots.changed(station._id).catch(error => console.error('[Station screenshots]', error.message));
+            }
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

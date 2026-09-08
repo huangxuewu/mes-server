@@ -31,7 +31,7 @@ const fixture = () => {
         }},
     });
     const input={documentId:record._id,kind:'attachment',fileName:'evidence.pdf',mimeType:'application/pdf',size:128,
-        storagePath:`/DH MES/document/${record._id}/assets/unique-evidence.pdf`,url:'https://www.dropbox.com/evidence.pdf'};
+        storagePath:`/DocumentCenter/${record._id}/assets/unique-evidence.pdf`,url:'https://www.dropbox.com/evidence.pdf'};
     return {record,calls,controls,input,run:async(overrides={})=>{let result;await handler({...input,...overrides},value=>result=value);return result;}};
 };
 

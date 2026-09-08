@@ -792,7 +792,7 @@ module.exports = (rawSocket, rawIo) => {
             if (input.url) {
                 const url = new URL(input.url);
                 const category = input.kind === "thumbnail" ? "thumbnail" : "assets";
-                const prefix = `/DH MES/document/${document._id}/${category}/`;
+                const prefix = `/DocumentCenter/${document._id}/${category}/`;
                 const storagePath = String(input.storagePath || "");
                 if (url.protocol !== "https:" || !["dropbox.com", "www.dropbox.com", "dl.dropboxusercontent.com"].includes(url.hostname)
                     || url.username || url.password || url.port

@@ -1,13 +1,13 @@
 const db = require("../../models");
-const { fetchThreads, sendEmail, getProfileEmail, getGmailAuthUrl } = require("../../utils/gmail");
+const { getClient, sendEmail, getProfileEmail, getGmailAuthUrl } = require("../../utils/gmail");
 const { analyzeEmail } = require("../../utils/deepseek");
 const { fetchAppointmentAiConfig } = require("../../utils/appointmentAi");
 const { normalize, matchCandidate, resolveThreadLoads, mergeLoadAssociations, hydrateThread } = require("../../utils/appointmentFilter");
 const { createAppointmentRefreshCoordinator } = require("../../utils/appointmentRefresh");
 const { buildSignatureSuffixBySender } = require("../../utils/emailSignature");
 const { weighEmail } = require("../../utils/emailWeight");
-
-const appointmentRefresh = createAppointmentRefreshCoordinator();
+const { createGmailSyncStep } = require('../../utils/gmailSync');
+const { io: serverIo } = require('../io');
 
 const getCandidates = async () => {
     const groups = await db.outbound.getActiveLoads();
@@ -50,9 +50,10 @@ const associationSignature = associations => JSON.stringify(
     }))
 );
 
-const refreshAppointments = async () => {
-    const candidates = await getCandidates();
-    const storedThreads = await db.emailThread.find({}).lean();
+const prepareThreads = async (fetched, myEmail, candidates, mailbox) => {
+    const storedThreads = await db.emailThread.find({ mailbox,
+        ...(fetched.length ? { threadId: { $in: fetched.map(thread => thread.threadId) } } : {}),
+    }).lean();
     const existing = storedThreads.map(thread => hydrateThread(thread, candidates));
     const knownIds = new Set(existing.flatMap(t => t.messages.map(m => m.messageId)));
     const associationUpdates = existing
@@ -63,13 +64,9 @@ const refreshAppointments = async () => {
                 update: { $set: { loadAssociations: thread.loadAssociations } },
             }
         }));
-    if (associationUpdates.length) await db.emailThread.bulkWrite(associationUpdates);
-
-    const [fetched, myEmail, aiConfig] = await Promise.all([
-        fetchThreads(knownIds, {}, candidates.map(candidate => candidate.loadNumber)),
-        getProfileEmail(),
-        fetchAppointmentAiConfig(),
-    ]);
+    const aiConfig = fetched.length ? await fetchAppointmentAiConfig() : { useAi: false };
+    const writes = [];
+    if (associationUpdates.length) writes.push(session => db.emailThread.bulkWrite(associationUpdates, { session }));
 
     // Stage 1 filter-only when AI off; AI analysis when enabled + API key set
     const { apiKey, provider, useAi } = aiConfig;
@@ -77,6 +74,7 @@ const refreshAppointments = async () => {
     let newMessages = 0;
 
     for (const thread of fetched) {
+        thread.newMessages = thread.messages.filter(message => !knownIds.has(message.messageId));
         const existingThread = existing.find(t => t.threadId === thread.threadId);
         let loadAssociations = mergeLoadAssociations(existingThread, resolveThreadLoads(thread, candidates));
         if (!loadAssociations.length) continue;
@@ -153,7 +151,6 @@ const refreshAppointments = async () => {
         newMessages += messages.length;
 
         const update = {
-            $push: { messages: { $each: messages } },
             $set: {
                 loadNumber,
                 loadAssociations,
@@ -163,19 +160,31 @@ const refreshAppointments = async () => {
         };
         if (proNumber) update.$set.proNumber = proNumber;
         if (scac) update.$set.scac = scac;
-        await db.emailThread.updateOne({ threadId: thread.threadId }, update, { upsert: true });
+        writes.push(async session => {
+            await db.emailThread.updateOne({ mailbox, threadId: thread.threadId }, update, { upsert: true, session });
+            for (const message of messages) {
+                await db.emailThread.updateOne({ mailbox, threadId: thread.threadId, 'messages.messageId': { $ne: message.messageId } },
+                    { $push: { messages: message } }, { session });
+            }
+        });
     }
 
-    const threads = (await db.emailThread.find({}).sort({ updatedAt: -1 }).lean())
-        .map(thread => hydrateThread(thread, candidates));
-    return { newMessages, threads };
+    return { newMessages, apply: async session => { for (const write of writes) await write(session); } };
 };
+
+const appointmentRefresh = createAppointmentRefreshCoordinator({ connection: db.config.db,
+    executeStep: createGmailSyncStep({ connection: db.config.db, getClient, getCandidates, prepareThreads }),
+    notify: payload => serverIo.emit('appointments:sync-status', payload),
+});
+appointmentRefresh.start();
 
 module.exports = (socket, io) => {
     socket.on("appointments:query", async (payload, callback) => {
         try {
+            const { context } = await getClient();
             const [storedThreads, candidates] = await Promise.all([
-                db.emailThread.find({}).sort({ updatedAt: -1 }).lean(),
+                db.emailThread.find(context.mailbox ? { $or: [{ mailbox: context.mailbox }, { mailbox: { $exists: false } }] }
+                    : { mailbox: { $exists: false } }).sort({ updatedAt: -1 }).lean(),
                 getCandidates(),
             ]);
             const threads = storedThreads.map(thread => hydrateThread(thread, candidates));
@@ -187,14 +196,17 @@ module.exports = (socket, io) => {
 
     socket.on("appointments:refresh", async (payload, callback) => {
         try {
-            const result = await appointmentRefresh.run({
-                force: payload?.force === true,
-                execute: refreshAppointments,
-            });
-            callback({ status: "success", message: "Mailbox refreshed", payload: result });
+            const result = await appointmentRefresh.request({ force: payload?.force === true });
+            callback({ status: "success", message: "Mailbox sync status", payload: result });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
+    });
+
+    socket.on('appointments:sync-status', async (_payload, callback) => {
+        try {
+            callback({ status: 'success', payload: await appointmentRefresh.status() });
+        } catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
     socket.on("appointment:reply", async (payload, callback) => {
@@ -202,11 +214,13 @@ module.exports = (socket, io) => {
             const { threadId, loadNumber, proNumber, scac, to, subject, body, proposedTime } = payload;
             if (!to) return callback({ status: "error", message: "Missing recipient email" });
 
-            const thread = threadId ? await db.emailThread.findOne({ threadId }) : null;
+            const { context } = await getClient();
+            const thread = threadId ? await db.emailThread.findOne({ threadId, mailbox: context.mailbox }) : null;
             const lastMessage = thread?.messages.at(-1);
 
             const [sent, candidates] = await Promise.all([
                 sendEmail({
+                    operationId: payload.operationId,
                     threadId: thread?.threadId,
                     to,
                     subject: thread ? `Re: ${thread.subject.replace(/^Re:\s*/i, "")}` : subject,
@@ -253,7 +267,6 @@ module.exports = (socket, io) => {
             const canonicalAssociation = loadAssociations.find(item => item.loadNumber === canonicalLoadNumber);
 
             const update = {
-                $push: { messages: message },
                 $set: {
                     loadNumber: canonicalLoadNumber,
                     loadAssociations,
@@ -268,10 +281,13 @@ module.exports = (socket, io) => {
                 },
             };
 
-            await db.emailThread.updateOne({ threadId: sent.threadId }, update, { upsert: true });
+            await db.emailThread.updateOne({ mailbox: sent.mailbox, threadId: sent.threadId }, update, { upsert: true });
+            await db.emailThread.updateOne({ mailbox: sent.mailbox, threadId: sent.threadId, 'messages.messageId': { $ne: sent.messageId } },
+                { $push: { messages: message } });
             callback({ status: "success", message: "Email sent successfully" });
         } catch (error) {
-            callback({ status: "error", message: error.message });
+            callback({ status: "error", message: error.message,
+                payload: { code: error.code || 'GMAIL_SEND_FAILED', nextRetryAt: error.nextRetryAt || null } });
         }
     });
 

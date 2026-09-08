@@ -40,7 +40,8 @@ const loadAssociationSchema = new mongoose.Schema({
 });
 
 const emailThreadSchema = new mongoose.Schema({
-    threadId: { type: String, required: true, unique: true, description: "Gmail thread id" },
+    threadId: { type: String, required: true, description: "Gmail thread id" },
+    mailbox: { type: String, index: true, description: "Hashed Gmail mailbox identity" },
     loadNumber: { type: String, default: "", description: "Canonical id — resolved from either load number OR pro number in the email" },
     proNumber: { type: String, default: "", description: "Kept for matching/search; never the display value" },
     scac: { type: String, default: "" },
@@ -53,6 +54,7 @@ const emailThreadSchema = new mongoose.Schema({
     timestamps: true
 });
 
+emailThreadSchema.index({ mailbox: 1, threadId: 1 }, { unique: true, name: 'mailbox_thread_unique' });
 const EmailThread = database.model("emailThread", emailThreadSchema, "emailThread");
 
 EmailThread.createIndexes({

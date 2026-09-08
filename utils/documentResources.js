@@ -62,7 +62,7 @@ const cleanupDocumentResources = async ({ documentId, resourceIds, db, dropbox, 
             for (const shared of liveDocuments.values()) collectSharedReferences(shared.getXmlFragment("default"), references);
             if (references.has(resourceKey(asset.url)) || references.has(asset.storagePath)) continue;
             // Only individual files owned by this document may be deleted.
-            const prefixes = [`/DH MES/document/${documentId}/`, `/MES/DocumentCenter/${documentId}/`];
+            const prefixes = [`/DocumentCenter/${documentId}/`, `/DH MES/document/${documentId}/`, `/MES/DocumentCenter/${documentId}/`];
             const prefix = prefixes.find((path) => asset.storagePath?.startsWith(path));
             const parts = prefix ? asset.storagePath.slice(prefix.length).split("/") : [];
             if (!parts.length || parts.some((part) => !part || part === "." || part === "..")) continue;

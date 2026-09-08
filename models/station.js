@@ -37,6 +37,19 @@ const stationSchema = new mongoose.Schema({
         default: 'Active'
     },
     allowedModules: [String],
+    screenshotsEnabled: { type: Boolean, default: true },
+    screenshotGeneration: { type: Number, default: 0 },
+    screenshotSupported: { type: Boolean, default: false },
+    screenshotCleanup: { type: [String], default: [] },
+    screenshot: {
+        mime: { type: String, enum: ['image/jpeg', 'image/webp'] },
+        stationId: String,
+        revision: String,
+        capturedAt: Date,
+        width: Number,
+        height: Number,
+        size: Number,
+    },
     lastSeenAt: {
         type: Date,
         default: null
@@ -52,6 +65,12 @@ const stationSchema = new mongoose.Schema({
         appVersion: String,
         ipAddresses: [String],
         remoteAddress: String,
+        disks: { type: [{ _id: false, name: String, label: String, totalBytes: Number, availableBytes: Number }], default: null },
+        devices: {
+            cameras: { type: [String], default: null },
+            speakers: { type: [String], default: null },
+            microphones: { type: [String], default: null },
+        },
     },
     config: {
         boardType: {

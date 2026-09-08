@@ -51,6 +51,7 @@ io.on("connection", (socket) => socketHandler(socket, io));
 attachCollaboration(server);
 startDocumentLifecycle(io);
 startMessageAttachmentCleanup();
+require('./utils/stationScreenshots').getStationScreenshots(io).start();
 dataSync.start();
 
 // Serve static files

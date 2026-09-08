@@ -5,12 +5,25 @@ const normalizePathPart = (value) => String(value || "")
     .replace(/^-+|-+$/g, "")
     .slice(0, 100) || "file";
 
-const getDropbox = () => {
-    const clientId = process.env.DROPBOX_CLIENT_ID;
-    const clientSecret = process.env.DROPBOX_CLIENT_SECRET;
-    const refreshToken = process.env.DROPBOX_REFRESH_TOKEN;
+const getDropbox = ({ signal, config = {} } = {}) => {
+    const clientId = String(config['integration.dropbox.clientId'] || '').trim() || process.env.DROPBOX_CLIENT_ID;
+    const clientSecret = String(config['integration.dropbox.clientSecret'] || '').trim() || process.env.DROPBOX_CLIENT_SECRET;
+    const refreshToken = String(config['integration.dropbox.refreshToken'] || '').trim() || process.env.DROPBOX_REFRESH_TOKEN;
     if (!clientId || !clientSecret || !refreshToken) return null;
-    return new Dropbox({ clientId, clientSecret, refreshToken, fetch });
+    return new Dropbox({ clientId, clientSecret, refreshToken,
+        fetch: signal ? (url, options) => fetch(url, { ...options, signal }) : fetch });
+};
+
+const getConfiguredDropbox = async ({ signal, db = require('../models') } = {}) => {
+    const at = new Date();
+    const records = await db.config.find({
+        key: { $in: ['integration.dropbox.clientId', 'integration.dropbox.clientSecret', 'integration.dropbox.refreshToken'] },
+        status: 'Active',
+        'effective.from': { $lte: at },
+        $or: [{ 'effective.to': null }, { 'effective.to': { $gte: at } }],
+    }, { key: 1, value: 1 }).maxTimeMS(5000).lean();
+    signal?.throwIfAborted();
+    return getDropbox({ signal, config: Object.fromEntries(records.map(({ key, value }) => [key, value])) });
 };
 
 const sharedUrl = async (dropbox, path) => {
@@ -30,7 +43,7 @@ const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileNa
 
     const safeName = normalizePathPart(fileName);
     const revisionFolder = revision ? `revision-${revision}` : "draft";
-    const path = `/DH MES/document/${normalizePathPart(documentId)}/${revisionFolder}/${category}/${safeName}`;
+    const path = `/DocumentCenter/${normalizePathPart(documentId)}/${revisionFolder}/${category}/${safeName}`;
     await dropbox.filesUpload({
         path,
         contents,
@@ -47,6 +60,7 @@ const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileNa
 
 module.exports = {
     getDropbox,
+    getConfiguredDropbox,
     normalizePathPart,
     uploadDocumentFile,
 };

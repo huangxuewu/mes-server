@@ -1,5 +1,13 @@
 const { google } = require("googleapis");
 const db = require("../models");
+const { createHash, randomUUID } = require('node:crypto');
+const { performance } = require('node:perf_hooks');
+const { createGmailQuota, GmailDeferred } = require('./gmailQuota');
+const { prepareGmailMailbox } = require('./gmailMailbox');
+
+let quota;
+const authClients = new Map();
+const hash = value => createHash('sha256').update(value).digest('hex');
 
 const SEARCH_QUERY = "newer_than:14d -category:{promotions social}";
 const PRIORITY_REFERENCE_BATCH_SIZE = 30;
@@ -167,9 +175,50 @@ const saveGmailRefreshToken = async (refreshToken) => {
 const getClient = async (overrides = {}) => {
     const docs = await fetchGmailConfigDocs();
     const config = resolveGmailConfig(docs, overrides);
-    const auth = createOAuth2Client(config);
-    auth.setCredentials({ refresh_token: config.refreshToken });
-    return google.gmail({ version: "v1", auth });
+    const authKey = hash(JSON.stringify(config));
+    let auth = authClients.get(authKey);
+    if (!auth) {
+        auth = createOAuth2Client(config);
+        auth.setCredentials({ refresh_token: config.refreshToken });
+        if (authClients.size >= 8) authClients.clear();
+        authClients.set(authKey, auth);
+    }
+    const connection = db.config.db;
+    quota ||= createGmailQuota({ connection });
+    const project = process.env.GMAIL_QUOTA_PROJECT || config.clientId.match(/^(\d+)-/)?.[1];
+    if (!project) throw new Error('Set GMAIL_QUOTA_PROJECT to the Gmail Cloud project number');
+    const identityKey = hash(`${config.clientId}:${config.refreshToken}`);
+    const identities = connection.db.collection('gmailIdentity');
+    const identity = await identities.findOne({ _id: identityKey });
+    const context = { project, mailbox: identity?.mailbox || null };
+    // Fetch auth separately: OAuth2Client.request may retry a Gmail 403 outside our quota gate.
+    const gmail = google.gmail({ version: 'v1' });
+    const request = async (method, params = {}, options = {}) => {
+        const { token } = await auth.getAccessToken();
+        if (!token) throw new Error('Gmail authorization returned no access token');
+        const path = method.split('.');
+        const resource = path.slice(0, -1).reduce((value, key) => value[key], gmail.users);
+        return quota.run(context, method, async transport => {
+            const dispatchStarted = performance.now();
+            if (options.beforeDispatch) await options.beforeDispatch();
+            if (performance.now() - dispatchStarted > 500) throw new GmailDeferred(Date.now() + 1000, 'lateDispatch');
+            return resource[path.at(-1)]({ userId: 'me', ...params }, {
+                ...transport, headers: { Authorization: `Bearer ${token}` },
+            });
+        }, options);
+    };
+    const profile = async (fresh = false, options = {}) => {
+        if (!fresh && identity?.emailAddress) {
+            return identity;
+        }
+        const { data } = await request('getProfile', {}, options);
+        context.mailbox = hash(data.emailAddress.toLowerCase());
+        await identities.updateOne({ _id: identityKey }, { $set: {
+            mailbox: context.mailbox, emailAddress: data.emailAddress,
+        } }, { upsert: true });
+        return data;
+    };
+    return { request, profile, context, connection, identityKey };
 };
 
 const getHeader = (message, name) =>
@@ -178,6 +227,7 @@ const getHeader = (message, name) =>
 const decodeBody = data => Buffer.from(data, "base64url").toString("utf8");
 
 const findPart = (payload, mimeType) => {
+    if (!payload) return null;
     if (payload.mimeType === mimeType && payload.body?.data) return payload.body.data;
     for (const part of payload.parts ?? []) {
         const found = findPart(part, mimeType);
@@ -221,61 +271,69 @@ const toMessage = message => ({
     body: extractBody(message),
 });
 
-// Active load references are searched across every Gmail category before the normal inbox scan.
-// The appointment matcher still verifies the load number in the parsed subject/body.
-const fetchThreads = async (knownMessageIds = new Set(), overrides = {}, priorityReferences = []) => {
-    const gmail = await getClient(overrides);
-    const priorityQueries = buildPrioritySearchQueries(priorityReferences);
-    const results = await Promise.all([
-        ...priorityQueries.map(q => gmail.users.threads.list({ userId: "me", q, maxResults: 500 })),
-        gmail.users.threads.list({ userId: "me", q: SEARCH_QUERY, maxResults: 50 }),
-    ]);
-    const threadRefs = [...new Map(
-        results.flatMap(({ data }) => data.threads ?? []).map(thread => [thread.id, thread])
-    ).values()];
-    if (!threadRefs.length) return [];
-
-    const threads = await Promise.all(threadRefs.map(async ({ id }) => {
-        const { data: thread } = await gmail.users.threads.get({ userId: "me", id, format: "full" });
-        const messages = (thread.messages ?? []).map(toMessage);
-        return {
-            threadId: thread.id,
-            subject: messages[0]?.subject ?? "",
-            messages,
-            newMessages: messages.filter(m => !knownMessageIds.has(m.messageId)),
-        };
-    }));
-
-    return threads.filter(t => t.newMessages.length);
-};
-
 const getProfileEmail = async (overrides = {}) => {
-    const gmail = await getClient(overrides);
-    const { data } = await gmail.users.getProfile({ userId: "me" });
-    return data.emailAddress;
+    const client = await getClient(overrides);
+    return (await client.profile(true, { urgent: true })).emailAddress;
 };
 
 // Sends an email; pass threadId + inReplyTo to reply in-thread, omit both for a fresh email
-const sendEmail = async ({ threadId, to, subject, body, inReplyTo }, overrides = {}) => {
-    const gmail = await getClient(overrides);
-    const from = await getProfileEmail(overrides);
+const sendEmail = async ({ operationId, threadId, to, subject, body, inReplyTo }, overrides = {}) => {
+    if (!/^[a-zA-Z0-9-]{16,80}$/.test(operationId || '')) throw new Error('A valid email operation ID is required');
+    const client = await getClient(overrides);
+    const from = (await client.profile(false, { urgent: true })).emailAddress;
+    await prepareGmailMailbox(client.connection, client.context.mailbox);
+    const sends = client.connection.db.collection('gmailSend');
+    const id = `${client.context.project}:${client.context.mailbox}:${operationId}`;
+    // Reply headers may advance while an uncertain send is reconciled; bind the operator's content.
+    const fingerprint = hash(JSON.stringify({ to, subject: subject.replace(/^Re:\s*/i, ''), body }));
+    const messageId = `<${operationId}@mes.local>`;
+    try {
+        await sends.updateOne({ _id: id }, { $setOnInsert: { fingerprint, status: 'pending', messageId } }, { upsert: true });
+    } catch (error) { if (error.code !== 11000) throw error; }
+    const operation = await sends.findOne({ _id: id });
+    if (operation.fingerprint !== fingerprint) throw new Error('Email operation ID was reused with different content');
+    if (operation.status === 'sent') return operation.result;
+    if (operation.status !== 'pending') {
+        const { data } = await client.request('messages.list', { q: `in:sent rfc822msgid:${operationId}@mes.local`, maxResults: 2 }, { urgent: true });
+        if (!data.messages?.length) throw Object.assign(new Error('Email delivery is unconfirmed; check Sent mail before trying a new send'),
+            { code: 'GMAIL_SEND_UNCERTAIN' });
+        const { data: sent } = await client.request('messages.get', { id: data.messages[0].id, format: 'full' }, { urgent: true });
+        const result = { ...toMessage(sent), mailbox: client.context.mailbox };
+        await sends.updateOne({ _id: id }, { $set: { status: 'sent', result } });
+        return result;
+    }
 
     const headers = [
         `From: ${from}`,
         `To: ${to}`,
         `Subject: ${subject}`,
+        `Message-ID: ${messageId}`,
         "Content-Type: text/plain; charset=utf-8",
     ];
     if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`);
 
     const raw = Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`).toString("base64url");
-    const { data } = await gmail.users.messages.send({
-        userId: "me",
-        requestBody: { raw, ...(threadId ? { threadId } : {}) },
-    });
-
-    const { data: sent } = await gmail.users.messages.get({ userId: "me", id: data.id, format: "full" });
-    return toMessage(sent);
+    const owner = randomUUID();
+    try {
+        const { data } = await client.request('messages.send', {
+            requestBody: { raw, ...(threadId ? { threadId } : {}) },
+        }, { urgent: true, beforeDispatch: async () => {
+            const claimed = await sends.updateOne({ _id: id, status: 'pending' },
+                { $set: { status: 'sending', owner, startedAt: new Date() } }, { writeConcern: { w: 'majority' } });
+            if (!claimed.modifiedCount) throw new Error('Email send is already in progress; check its status before retrying');
+        } });
+        const result = { messageId: data.id, threadId: data.threadId, mailbox: client.context.mailbox, from, to, subject,
+            body, date: new Date(), rfcMessageId: messageId };
+        await sends.updateOne({ _id: id, owner }, { $set: { status: 'sent', result } }, { writeConcern: { w: 'majority' } });
+        return result;
+    } catch (error) {
+        // Even a crash between dispatch and saving success must never permit a second send.
+        const notDispatched = error instanceof GmailDeferred && error.reason === 'lateDispatch';
+        const uncertain = await sends.updateOne({ _id: id, owner, status: 'sending' },
+            { $set: { status: notDispatched ? 'pending' : 'uncertain' } });
+        if (uncertain.modifiedCount && !notDispatched) error.code = 'GMAIL_SEND_UNCERTAIN';
+        throw error;
+    }
 };
 
 module.exports = {
@@ -286,7 +344,9 @@ module.exports = {
     getGmailAuthUrl,
     exchangeGmailAuthCode,
     saveGmailRefreshToken,
-    fetchThreads,
+    getClient,
+    toMessage,
+    SEARCH_QUERY,
     sendEmail,
     getProfileEmail
 };

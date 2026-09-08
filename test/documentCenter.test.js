@@ -91,8 +91,8 @@ test("document files share the id folder regardless of document number", async (
     await upload({ documentId: "abc123", documentNumber: "SOP-001", revision: 1, fileName: "cover.png", contents: Buffer.from("image"), category: "thumbnail" });
     await upload({ documentId: "abc123", documentNumber: "SOP-999", revision: 2, fileName: "record.pdf", contents: Buffer.from("pdf") });
     assert.deepEqual(uploads, [
-        "/DH MES/document/abc123/revision-1/thumbnail/cover.png",
-        "/DH MES/document/abc123/revision-2/attachments/record.pdf",
+        "/DocumentCenter/abc123/revision-1/thumbnail/cover.png",
+        "/DocumentCenter/abc123/revision-2/attachments/record.pdf",
     ]);
 });
 

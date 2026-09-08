@@ -38,10 +38,13 @@ const fixture = ({ owner = {}, others = [], revisions = [], failure, missing = f
 };
 
 test("unused resources are deleted from Dropbox before their metadata is removed", async () => {
-    const result = fixture();
-    await result.run();
-    assert.deepEqual(result.deleted, [asset.storagePath]);
-    assert.deepEqual(result.removed, [asset._id]);
+    for (const root of ["/DocumentCenter", "/DH MES/document", "/MES/DocumentCenter"]) {
+        const storagePath = `${root}/doc1/assets/photo.png`;
+        const result = fixture({ owner: { attachments: [{ ...asset, storagePath }] } });
+        await result.run();
+        assert.deepEqual(result.deleted, [storagePath]);
+        assert.deepEqual(result.removed, [asset._id]);
+    }
 });
 
 test("multiple unused resources are cleaned up together", async () => {

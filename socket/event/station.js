@@ -1,8 +1,24 @@
 const db = require('../../models');
 const { isIP } = require('node:net');
 const { getActiveSessionUser, hasPermission } = require('../session');
+const { getLatestRelease, getStationUpdate } = require('../../utils/stationRelease');
+const { getStationScreenshots } = require('../../utils/stationScreenshots');
 
 module.exports = (socket, io) => {
+    const screenshots = getStationScreenshots(io);
+    for (const action of ['get', 'capture']) socket.on(`station:screenshot:${action}`, async (payload, callback) => {
+        try {
+            const user = await getActiveSessionUser(socket);
+            if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            if (typeof payload?._id !== 'string' || !/^[a-f\d]{24}$/i.test(payload._id)) throw new Error('Invalid station');
+            if (action === 'get') return callback({ status: 'success', payload: await screenshots.read(payload._id, socket) });
+            await screenshots.capture(payload._id);
+            const currentUser = await getActiveSessionUser(socket);
+            if (!hasPermission(currentUser, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            callback({ status: 'success' });
+        } catch (error) { callback?.({ status: 'error', message: error.message }); }
+    });
+
     socket.on('station:heartbeat', async (payload, callback) => {
         try {
             if (typeof payload?.stationId !== 'string' || !payload?._id) throw new Error('Invalid station identity');
@@ -13,26 +29,41 @@ module.exports = (socket, io) => {
             for (const key of ['cpuCount', 'memoryBytes'])
                 computer[key] = Number.isFinite(source[key]) && source[key] >= 0 ? source[key] : 0;
             computer.ipAddresses = [...new Set((Array.isArray(source.ipAddresses) ? source.ipAddresses : [])
-                .filter(address => typeof address === 'string' && isIP(address)))].slice(0, 20);
+                .filter(address => typeof address === 'string' && isIP(address) === 4))].slice(0, 20);
+            computer.disks = Array.isArray(source.disks) ? source.disks.filter(disk => disk && typeof disk.name === 'string'
+                && Number.isSafeInteger(disk.totalBytes) && disk.totalBytes >= 0
+                && Number.isSafeInteger(disk.availableBytes) && disk.availableBytes >= 0 && disk.availableBytes <= disk.totalBytes)
+                .slice(0, 32).map(disk => ({ name: disk.name.slice(0, 256), label: typeof disk.label === 'string' ? disk.label.slice(0, 256) : '',
+                    totalBytes: disk.totalBytes, availableBytes: disk.availableBytes })) : null;
+            computer.devices = {};
+            for (const kind of ['cameras', 'speakers', 'microphones'])
+                computer.devices[kind] = Array.isArray(source.devices?.[kind]) ? [...new Set(source.devices[kind]
+                    .filter(name => typeof name === 'string' && name.trim()).map(name => name.trim().slice(0, 256)))].slice(0, 32) : null;
             computer.remoteAddress = String(socket.handshake.address || '').slice(0, 128);
             const lastSeenAt = new Date();
             const station = await db.station.findOneAndUpdate(
                 { _id: payload._id, stationId: payload.stationId },
-                { $set: { computer, lastSeenAt } },
+                { $set: { ...(payload.computer ? { computer } : {}), lastSeenAt, screenshotSupported: payload.screenshotSupported === true } },
                 { new: true, runValidators: true }
             );
             if (!station) {
                 delete socket.data.stationPresence;
+                delete socket.data.stationConnection;
                 throw new Error('Station identity is no longer linked');
             }
             if (!socket.connected) return;
             socket.data.stationPresence = { _id: String(station._id), stationId: station.stationId, at: lastSeenAt.getTime() };
+            socket.data.stationConnection = { _id: String(station._id), stationId: station.stationId };
+            const screenshotBecameAvailable = payload.screenshotSupported === true && socket.data.screenshotSupported !== true;
+            socket.data.screenshotSupported = payload.screenshotSupported === true;
+            socket.data.liveSupported = payload.liveSupported === true;
             const deployment = payload.deployment;
             socket.data.stationDeployment = ['idle', 'checking', 'downloading', 'installing', 'upToDate', 'failed'].includes(deployment?.status)
                 ? { status: deployment.status, version: typeof deployment.version === 'string' ? deployment.version.slice(0, 100) : '',
                     error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '' }
                 : null;
             callback({ status: 'success', payload: station });
+            if (screenshotBecameAvailable) void screenshots.schedule().catch(error => console.error('[Station screenshots]', error.message));
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
@@ -40,15 +71,19 @@ module.exports = (socket, io) => {
         try {
             const user = await getActiveSessionUser(socket);
             if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            socket.data.screenshotViewer = socket.data.sessionGeneration;
             const stations = await db.station.find({}).sort({ name: 1, _id: 1 }).lean();
-            const now = Date.now();
+            const release = await getLatestRelease();
             const connections = [...io.sockets.sockets.values()]
-                .filter(client => client.connected && client.data.stationPresence?.at > now - 90000)
-                .sort((a, b) => b.data.stationPresence.at - a.data.stationPresence.at);
+                .filter(client => client.connected)
+                .sort((a, b) => (b.data.stationPresence?.at || 0) - (a.data.stationPresence?.at || 0));
             callback({ status: 'success', payload: stations.map(station => {
-                const connection = connections.find(client => client.data.stationPresence._id === String(station._id)
-                    && client.data.stationPresence.stationId === station.stationId);
-                return { ...station, online: !!connection, deployment: connection?.data.stationDeployment || null };
+                const connection = connections.find(client => {
+                    const identity = client.data.stationConnection || client.data.stationPresence;
+                    return identity?._id === String(station._id) && (identity.stationId || null) === (station.stationId || null);
+                });
+                return { ...station, ...screenshots.project(station), liveSupported: connection?.data.liveSupported === true, online: !!connection, deployment: connection?.data.stationDeployment || null,
+                    update: getStationUpdate(station.computer?.appVersion, release) };
             }) });
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });
@@ -60,10 +95,13 @@ module.exports = (socket, io) => {
             if (typeof payload?._id !== 'string' || !/^[a-f\d]{24}$/i.test(payload._id)) throw new Error('Invalid station');
             const station = await db.station.findById(payload._id).lean();
             if (!station?.stationId) throw new Error('Station is not linked');
+            const update = getStationUpdate(station.computer?.appVersion, await getLatestRelease());
+            if (update.remoteDeploySupported !== true) throw new Error('Remote deployment requires MES 26.3317.1990 or later');
+            if (update.error) throw new Error('Unable to check the latest MES release. Try again later.');
+            if (!update.available) throw new Error('Station is already up to date');
             const target = [...io.sockets.sockets.values()]
                 .filter(client => client.connected && client.data.stationPresence?._id === String(station._id)
-                    && client.data.stationPresence.stationId === station.stationId
-                    && client.data.stationPresence.at > Date.now() - 90000)
+                    && client.data.stationPresence.stationId === station.stationId)
                 .sort((a, b) => b.data.stationPresence.at - a.data.stationPresence.at)[0];
             if (!target) throw new Error('Station is offline');
             if (!target.data.stationDeployment) throw new Error('Update this station once to enable remote deployment');

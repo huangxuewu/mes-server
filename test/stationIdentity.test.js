@@ -10,7 +10,7 @@ const loadHandlers = station => {
     delete require.cache[handlerPath];
     const register = require(handlerPath);
     const handlers = {};
-    register({ on: (event, handler) => { handlers[event] = handler; } }, {});
+    register({ data: {}, on: (event, handler) => { handlers[event] = handler; } }, { sockets: { sockets: new Map() } });
 
     previousModels ? require.cache[modelsPath] = previousModels : delete require.cache[modelsPath];
     delete require.cache[handlerPath];
@@ -86,7 +86,7 @@ test("station claim returns the explicit resolved contract", async () => {
         application: "SOFTWARE",
     };
     const station = {
-        findById: async () => record,
+        findById: () => ({ then: resolve => Promise.resolve(record).then(resolve), lean: async () => record }),
         findOneAndUpdate: async () => ({ ...record, stationId: "123e4567-e89b-42d3-a456-426614174000" }),
     };
     const handlers = loadHandlers(station);
