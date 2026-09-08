@@ -45,8 +45,10 @@ const validateImage = async (contents, { allowWebp = false } = {}) => {
         offset += length;
     }
     if (!width || !height || Math.max(width, height) > 1920) throw new Error('Invalid screenshot dimensions');
-    const image = await require('canvas').loadImage(contents);
-    if (image.width !== width || image.height !== height) throw new Error('Invalid screenshot image');
+    const image = require('sharp')(contents, { limitInputPixels: 1920 * 1920, failOn: 'warning' });
+    const metadata = await image.metadata();
+    if (metadata.format !== 'jpeg' || metadata.width !== width || metadata.height !== height) throw new Error('Invalid screenshot image');
+    await image.timeout({ seconds: 5 }).raw().toBuffer();
     return { width, height };
 };
 

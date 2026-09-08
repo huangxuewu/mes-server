@@ -77,6 +77,22 @@ test('JPEG validation rejects malformed, oversized and excessive-resolution imag
         await assert.rejects(validateImage(bytes));
 });
 
+test('JPEG validation works when the optional canvas native binary is unavailable on the server', () => {
+    const result = require('node:child_process').spawnSync(process.execPath, ['-e', `
+        const assert = require('node:assert/strict');
+        const Module = require('node:module');
+        const originalLoad = Module._load;
+        Module._load = function (id, ...args) {
+            if (id === 'canvas') throw new Error("Cannot find module '../build/Release/canvas.node'");
+            return originalLoad.call(this, id, ...args);
+        };
+        require('./utils/stationScreenshots').validateImage(Buffer.from(process.argv[1], 'base64'))
+            .then(dimensions => assert.deepEqual(dimensions, { width: 640, height: 360 }))
+            .catch(error => { console.error(error); process.exitCode = 1; });
+    `, jpeg.toString('base64')], { cwd: path.join(__dirname, '..'), encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
+
 test('saved WebP validation checks bytes, resolution, complete decoding and rejects animation; Live remains JPEG-only', async () => {
     const sharp = require('sharp');
     const webp = await sharp(jpeg).webp().toBuffer();
