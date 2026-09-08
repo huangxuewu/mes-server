@@ -108,7 +108,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
         await fs.mkdir(cacheDir, { recursive: true });
         await fs.writeFile(cachePath(station, revision), contents, { mode: 0o600 });
     };
-    const capture = async id => {
+    const capture = async (id, expected) => {
         const state = stateFor(id);
         if (state.busy) throw new Error('A screenshot capture is already in progress');
         state.busy = true;
@@ -118,12 +118,16 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             const station = await db.station.findById(id).lean();
             if (!station?.stationId) throw new Error('Station is not linked');
             if (station.screenshotsEnabled === false) throw new Error('Station screenshots are disabled');
+            if (expected && (station.stationId !== expected.stationId || generation(station) !== expected.generation
+                || station.status === 'Disabled')) throw new Error('Screenshot settings changed');
+            if (require('./stationLive').isStationLive(io, id)) throw new Error('Live assistance is active');
             const target = targetFor(station);
             if (!target) throw new Error('Station is offline');
             if (!target.data.screenshotSupported) throw new Error('Client update required');
             const signal = AbortSignal.timeout(45000);
             const dropbox = await storage(signal);
             await assertCurrent(station, target);
+            if (require('./stationLive').isStationLive(io, id)) throw new Error('Live assistance is active');
             state.connectionId = target.id;
             void notify(id).catch(() => {});
             const response = await new Promise((resolve, reject) => {
@@ -166,6 +170,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
         } finally {
             state.busy = false;
             void notify(id).catch(() => {});
+            if (state.afterLive) void schedule().catch(() => {});
         }
     };
     const read = async (id, socket) => {
@@ -207,13 +212,22 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             const state = stateFor(id);
             if (state.busy) continue;
             const station = await db.station.findById(id).lean();
+            if (state.afterLive && (!station || station.stationId !== state.afterLive.stationId
+                || generation(station) !== state.afterLive.generation || station.screenshotsEnabled === false
+                || station.status === 'Disabled')) { state.afterLive = null; continue; }
             if (!station || station.screenshotsEnabled === false) continue;
             const target = targetFor(station);
             if (!target?.data.screenshotSupported) continue;
-            if (state.connectionId === target.id && now() - state.lastAttempt < INTERVAL) continue;
+            if (!state.afterLive && state.connectionId === target.id && now() - state.lastAttempt < INTERVAL) continue;
+            const expected = state.afterLive;
+            state.afterLive = null;
             state.connectionId = target.id;
-            void capture(id).catch(() => {});
+            void capture(id, expected).catch(() => {});
         }
+    };
+    const refreshAfterLive = async request => {
+        stateFor(request._id).afterLive = { stationId: request.stationId, generation: request.generation };
+        await schedule();
     };
     const changed = async id => {
         stateFor(id).lastAttempt = 0;
@@ -271,7 +285,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
         }, 60000);
         cleanupTimer.unref?.();
     };
-    return { capture, read, project, notify, changed, schedule, cleanup, start, stop: () => {
+    return { capture, read, project, notify, changed, schedule, cleanup, start, refreshAfterLive, stop: () => {
         clearInterval(timer); clearInterval(cleanupTimer); timer = null; cleanupTimer = null;
     } };
 };

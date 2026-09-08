@@ -2,7 +2,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const services = new WeakMap();
 const STATION_FIELDS = '_id stationId screenshotsEnabled status screenshotGeneration';
 
-const createStationLive = ({ io, db, authorize, validateImage, now = Date.now }) => {
+const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot = async () => {}, now = Date.now }) => {
     const sessions = new Map();
     const isSelf = (viewer, station, target) => viewer === target || viewer.id === target?.id
         || [viewer.data.stationConnection, viewer.data.stationPresence].some(binding => binding
@@ -27,6 +27,9 @@ const createStationLive = ({ io, db, authorize, validateImage, now = Date.now })
         if (!session || !sessions.delete(session.id)) return;
         session.viewer.emit('station:live:ended', { sessionId: session.id, reason });
         session.target.emit('station:live:ended', { sessionId: session.id, reason });
+        if (session.started) void Promise.resolve().then(() => refreshScreenshot({
+            _id: session.stationId, stationId: session.identity, generation: session.generation,
+        })).catch(error => console.error('[Station Live screenshot]', error.message));
     };
     const valid = async session => {
         if (!sessions.has(session.id)) throw new Error('ended');
@@ -63,14 +66,17 @@ const createStationLive = ({ io, db, authorize, validateImage, now = Date.now })
         const session = { id: randomUUID(), stationId: String(id), identity: station.stationId,
             generation: station.screenshotGeneration || 0, viewer, viewerGeneration, target,
             touched: now(), busy: false, frameAt: -Infinity, nextFrameAt: -Infinity, optimized: options.frameProtocol === 2,
-            idleFrames: 0, commands: [], points: 0, chat: false, messages: 0 };
+            idleFrames: 0, commands: [], points: 0, chat: false, messages: 0, imageBytes: 0, images: 0 };
         sessions.set(session.id, session);
         try {
             await valid(session);
             const response = await command(session, 'start', { operator: String(operator?.displayName || operator?.username || '').slice(0, 100) });
             session.nativeOptimized = response.frameProtocol === 2;
+            session.chatImages = response.chatImages === true;
+            session.fileTransfer = response.fileTransfer === true;
+            session.started = true;
             await valid(session);
-            return { sessionId: session.id, frameProtocol: 2 };
+            return { sessionId: session.id, frameProtocol: 2, chatImages: session.chatImages, fileTransfer: session.fileTransfer };
         } catch (error) { end(session, error.message); throw error; }
     };
     const frame = async (viewer, id) => {
@@ -131,17 +137,31 @@ const createStationLive = ({ io, db, authorize, validateImage, now = Date.now })
             } else if (input.type === 'chat') {
                 if (typeof input.enabled !== 'boolean') throw new Error('invalidAction');
                 session.chat = input.enabled;
+                if (!input.enabled) session.transfer = null;
                 data.enabled = input.enabled;
             } else if (input.type === 'message') {
                 if (!session.chat) throw new Error('chatEnded');
-                if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000 || session.messages >= 200)
+                if (typeof input.text !== 'string' || (!input.text.trim() && !input.image) || input.text.length > 2000 || session.messages >= 200)
                     throw new Error('invalidMessage');
+                if (input.image) {
+                    if (!session.chatImages) throw new Error('updateRequired');
+                    const contents = Buffer.isBuffer(input.image.contents) ? input.image.contents
+                        : input.image.contents instanceof Uint8Array ? Buffer.from(input.image.contents) : null;
+                    if (!contents?.length || contents.length > 1024 * 1024 || input.image.mime !== 'image/jpeg') throw new Error('invalidImage');
+                    if (session.images >= 10 || session.imageBytes + contents.length > 8 * 1024 * 1024) throw new Error('imageLimit');
+                    let dimensions;
+                    try { dimensions = await validateImage(contents); } catch { throw new Error('invalidImage'); }
+                    await valid(session);
+                    if (!session.chat) throw new Error('chatEnded');
+                    data.image = { contents, mime: 'image/jpeg', ...dimensions };
+                }
                 session.messages++;
                 data.text = input.text.trim();
             } else if (input.type === 'clear') session.points = 0;
             else throw new Error('invalidAction');
             await command(session, input.type, data);
             await valid(session);
+            if (data.image) { session.images++; session.imageBytes += data.image.contents.length; }
             return {};
         } finally { session.actionBusy = false; }
     };
@@ -157,6 +177,63 @@ const createStationLive = ({ io, db, authorize, validateImage, now = Date.now })
         session.viewer.emit('station:live:message', { sessionId: session.id, text: input.text.trim() });
         return {};
     };
+    const transfer = async (viewer, input) => {
+        const session = owned(viewer, input.sessionId);
+        if (!['offer', 'status', 'chunk', 'finish', 'cancel'].includes(input.operation)) throw new Error('invalidTransfer');
+        if (input.operation === 'chunk' && (!input.contents?.byteLength || input.contents.byteLength > 256 * 1024)) throw new Error('invalidTransfer');
+        await valid(session);
+        if (!session.chat) throw new Error('chatEnded');
+        if (!session.fileTransfer) throw new Error('updateRequired');
+        session.touched = now();
+        if (input.operation === 'offer') {
+            if (session.transfer) throw new Error('busy');
+            const manifest = require('./stationTransferManifest').validateTransferManifest(input.manifest);
+            if (typeof input.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(input.id)) throw new Error('invalidTransfer');
+            session.transfer = { id: input.id, manifest, bytes: 0, index: 0, offset: 0, status: 'transferWaiting' };
+        }
+        const state = session.transfer;
+        if (!state || state.id !== input.id) throw new Error('transferCancelled');
+        if (input.operation === 'cancel') {
+            session.transfer = null;
+            await command(session, 'transfer', { operation: 'cancel', id: state.id }).catch(() => {});
+            return { id: state.id, status: 'transferCancelled', bytes: state.bytes };
+        }
+        if (state.busy) throw new Error('busy');
+        state.busy = true;
+        try {
+            const data = { operation: input.operation, id: state.id };
+            if (input.operation === 'offer') data.manifest = state.manifest;
+            if (input.operation === 'chunk' || input.operation === 'finish') {
+                if (state.status !== 'transferSending') throw new Error('transferNotAccepted');
+                const files = state.manifest.entries.filter(entry => entry.type === 'file');
+                while (state.index < files.length && state.offset === files[state.index].size) { state.index++; state.offset = 0; }
+                if (input.operation === 'finish') {
+                    if (state.bytes !== state.manifest.total || state.index !== files.length) throw new Error('invalidTransfer');
+                } else {
+                    const contents = Buffer.isBuffer(input.contents) ? input.contents : input.contents instanceof Uint8Array ? Buffer.from(input.contents) : null;
+                    const file = files[state.index];
+                    if (!file || input.index !== state.index || input.offset !== state.offset || !contents?.length || contents.length > 256 * 1024
+                        || contents.length > file.size - state.offset) throw new Error('invalidTransfer');
+                    Object.assign(data, { contents, index: state.index, offset: state.offset });
+                }
+            }
+            const response = await command(session, 'transfer', data);
+            await valid(session);
+            if (!session.chat || session.transfer !== state) throw new Error('transferCancelled');
+            if (!['transferWaiting', 'transferChoosing', 'transferSending', 'transferComplete', 'transferDeclined', 'transferFailed', 'transferCancelled'].includes(response.status)) throw new Error('invalidTransfer');
+            if (data.contents) { state.bytes += data.contents.length; state.offset += data.contents.length; }
+            state.status = response.status;
+            if (response.bytes !== state.bytes || (response.status === 'transferComplete' && (input.operation !== 'finish' || state.bytes !== state.manifest.total))) throw new Error('invalidTransfer');
+            if (['transferComplete', 'transferDeclined', 'transferFailed', 'transferCancelled'].includes(state.status)) session.transfer = null;
+            return { id: state.id, status: state.status, bytes: state.bytes, total: state.manifest.total };
+        } catch (error) {
+            if (session.transfer === state) {
+                session.transfer = null;
+                void command(session, 'transfer', { operation: 'cancel', id: state.id }).catch(() => {});
+            }
+            throw error;
+        } finally { state.busy = false; }
+    };
     const stop = (viewer, id) => { end(owned(viewer, id)); return {}; };
     const stopForSocket = socketId => {
         for (const session of sessions.values())
@@ -169,13 +246,14 @@ const createStationLive = ({ io, db, authorize, validateImage, now = Date.now })
         await Promise.allSettled([...sessions.values()].map(session => now() - session.touched > 30000
             ? end(session, 'connectionLost') : now() - session.validatedAt >= 1000 ? valid(session) : undefined));
     };
-    return { start, frame, action, remoteMessage, stop, stopForSocket, changed, sweep, sessions };
+    return { start, frame, action, remoteMessage, transfer, stop, stopForSocket, changed, sweep, sessions };
 };
 
 const getStationLive = io => {
     if (services.has(io)) return services.get(io);
     const { getActiveSessionUser, hasPermission, onSessionEnded, onPermissionsChanged } = require('../socket/session');
     const service = createStationLive({ io, db: require('../models'), validateImage: require('./stationScreenshots').validateImage,
+        refreshScreenshot: request => require('./stationScreenshots').getStationScreenshots(io).refreshAfterLive(request),
         authorize: async socket => {
             const user = await getActiveSessionUser(socket);
             if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('accessDenied');

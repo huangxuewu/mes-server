@@ -2,7 +2,7 @@ const { getStationLive } = require('../../utils/stationLive');
 
 module.exports = (socket, io) => {
     const live = getStationLive(io);
-    for (const action of ['start', 'frame', 'action', 'stop', 'remoteMessage']) socket.on(`station:live:${action}`, async (input, callback) => {
+    for (const action of ['start', 'frame', 'action', 'stop', 'remoteMessage', 'transfer']) socket.on(`station:live:${action}`, async (input, callback) => {
         if (typeof callback !== 'function') return;
         try {
             if (!input || typeof input !== 'object') throw new Error('invalidAction');

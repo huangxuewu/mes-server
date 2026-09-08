@@ -211,6 +211,60 @@ test('disabled stations retain the image while blocking capture, scheduling and 
     assert.equal(env.counts().captures, 2);
 });
 
+test('ending Live refreshes the saved image immediately without waiting for the five-minute interval', async t => {
+    const env = await fixture(t);
+    await env.service.capture(env.station._id);
+    env.advance(1000);
+    await env.service.refreshAfterLive({ _id: env.station._id, stationId: env.station.stationId, generation: 0 });
+    while (env.service.project(env.station).screenshotCapturing) await flush();
+    assert.equal(env.counts().captures, 2);
+    assert.equal(env.station.screenshot.revision, 'rev-2');
+    assert.equal(+env.station.screenshot.capturedAt, 1001000);
+    assert.ok((await env.service.read(env.station._id, env.viewer)).contents.equals(jpeg));
+    await env.service.schedule();
+    assert.equal(env.counts().captures, 2);
+});
+
+test('Live refresh coalesces during an existing upload and captures afterward', async t => {
+    const upload = deferred();
+    const env = await fixture(t, { upload: () => upload.promise });
+    const pending = env.service.capture(env.station._id);
+    while (!env.counts().uploads) await flush();
+    const request = { _id: env.station._id, stationId: env.station.stationId, generation: 0 };
+    await env.service.refreshAfterLive(request);
+    await env.service.refreshAfterLive(request);
+    assert.equal(env.counts().captures, 1);
+    upload.resolve();
+    await pending;
+    await flush();
+    while (env.service.project(env.station).screenshotCapturing) await flush();
+    assert.equal(env.counts().captures, 2);
+    assert.equal(env.station.screenshot.revision, 'rev-2');
+});
+
+test('Live refresh respects privacy and identity, and waits for an offline station to reconnect', async t => {
+    for (const change of [env => { env.station.screenshotsEnabled = false; }, env => { env.station.screenshotGeneration += 2; },
+        env => { env.station.stationId = 'replacement'; }, env => { env.station.status = 'Disabled'; },
+        env => { env.target.data.screenshotSupported = false; }]) {
+        const env = await fixture(t);
+        await env.service.capture(env.station._id);
+        const request = { _id: env.station._id, stationId: env.station.stationId, generation: 0 };
+        change(env);
+        await env.service.refreshAfterLive(request);
+        assert.equal(env.counts().captures, 1);
+        assert.equal(env.station.screenshot.revision, 'rev-1');
+    }
+    const env = await fixture(t);
+    await env.service.capture(env.station._id);
+    env.target.connected = false;
+    await env.service.refreshAfterLive({ _id: env.station._id, stationId: env.station.stationId, generation: 0 });
+    assert.equal(env.counts().captures, 1);
+    env.target.connected = true;
+    await env.service.schedule();
+    while (env.service.project(env.station).screenshotCapturing) await flush();
+    assert.equal(env.station.screenshot.revision, 'rev-2');
+});
+
 test('concurrent captures do not duplicate dispatch; disabling during capture discards bytes', async t => {
     let respond;
     const env = await fixture(t, { capture: callback => { respond = callback; } });

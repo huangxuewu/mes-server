@@ -9,20 +9,21 @@ const fixture = (options = {}) => {
     let allowed = true;
     const counts = { reads: 0, authorizations: 0, decodes: 0 };
     const station = { _id: '507f1f77bcf86cd799439011', stationId: 'identity', screenshotsEnabled: true, screenshotGeneration: 0, status: 'Active' };
-    const events = [], commands = [];
+    const events = [], commands = [], refreshes = [];
     const viewer = { id: 'viewer', connected: true, data: { sessionGeneration: 1 }, emit: (event, data) => events.push({ recipient: 'viewer', event, data }) };
     const target = { id: 'target', connected: true, data: { liveSupported: true, stationPresence: { _id: station._id, stationId: station.stationId, at: 1 } },
         emit: (event, data) => events.push({ recipient: 'target', event, data }),
         timeout: () => ({ emit: async (_event, input, callback) => {
             commands.push(input);
             if (options.command) return options.command(input, callback);
-            callback(null, input.type === 'frame' ? { success: true, contents: jpeg } : { success: true });
+            callback(null, input.type === 'frame' ? { success: true, contents: jpeg } : { success: true, chatImages: true });
         } }) };
     const io = { sockets: { sockets: new Map([['viewer', viewer], ['target', target]]) } };
     const service = createStationLive({ io, db: { station: { findById: () => ({ lean: async () => { counts.reads++; return structuredClone(station); } }) } },
-        now: () => clock, validateImage: async bytes => { counts.decodes++; return validateImage(bytes); },
+        now: () => clock, validateImage: async bytes => { counts.decodes++; if (options.validateImage) await options.validateImage(); return validateImage(bytes); },
+        refreshScreenshot: async request => { refreshes.push(request); },
         authorize: async () => { counts.authorizations++; if (!allowed) throw new Error('accessDenied'); return { displayName: 'Operator' }; } });
-    return { service, station, viewer, target, io, events, commands, counts, advance: milliseconds => { clock += milliseconds; }, deny: () => { allowed = false; },
+    return { service, station, viewer, target, io, events, commands, refreshes, counts, advance: milliseconds => { clock += milliseconds; }, deny: () => { allowed = false; },
         start: options => service.start(viewer, station._id, options) };
 };
 
@@ -44,6 +45,129 @@ test('live sessions stream validated desktop frames and route annotations and tw
     env.service.stop(env.viewer, sessionId);
     assert.equal(env.service.sessions.size, 0);
     assert.ok(env.events.some(event => event.recipient === 'target' && event.event === 'station:live:ended'));
+});
+
+test('ending established Live requests one fresh screenshot even when either participant disconnects', async () => {
+    for (const participant of ['stop', 'viewer', 'target']) {
+        const env = fixture();
+        const { sessionId } = await env.start();
+        if (participant === 'stop') env.service.stop(env.viewer, sessionId);
+        else { env[participant].connected = false; env.service.stopForSocket(env[participant].id); }
+        env.service.stopForSocket(env.viewer.id);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(env.refreshes, [{ _id: env.station._id, stationId: env.station.stationId, generation: 0 }]);
+        assert.equal(env.service.sessions.size, 0);
+        assert.ok(env.events.some(event => event.recipient === 'target' && event.event === 'station:live:ended'));
+    }
+    const failed = fixture({ command: (_input, callback) => callback(null, { success: false, error: 'busy' }) });
+    await assert.rejects(failed.start(), /busy/);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(failed.refreshes.length, 0);
+});
+
+test('cropped chat images are validated, bounded and sent only to the active linked station', async () => {
+    const env = fixture();
+    const { sessionId, chatImages } = await env.start();
+    assert.equal(chatImages, true);
+    const message = { sessionId, type: 'message', text: '', image: { mime: 'image/jpeg', contents: jpeg } };
+    await assert.rejects(env.service.action(env.viewer, message), /chatEnded/);
+    await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+    for (const image of [{ mime: 'image/svg+xml', contents: jpeg }, { mime: 'image/jpeg', contents: Buffer.from('bad') },
+        { mime: 'image/jpeg', contents: Buffer.alloc(1024 * 1024 + 1) }])
+        await assert.rejects(env.service.action(env.viewer, { ...message, image }), /invalidImage/);
+    assert.equal(env.commands.filter(command => command.type === 'message').length, 0);
+    await env.service.action(env.viewer, message);
+    const delivered = env.commands.at(-1).image;
+    assert.equal(delivered.width, 640); assert.equal(delivered.height, 360);
+    assert.ok(delivered.contents.equals(jpeg));
+    for (let index = 1; index < 10; index++) { env.advance(1000); await env.service.action(env.viewer, message); }
+    env.advance(1000);
+    await assert.rejects(env.service.action(env.viewer, message), /imageLimit/);
+    env.station.screenshotsEnabled = false;
+    await assert.rejects(env.service.action(env.viewer, message), /privacyChanged/);
+});
+
+test('older station clients reject chat attachments without losing text chat', async () => {
+    const env = fixture({ command: (_input, callback) => callback(null, { success: true }) });
+    const { sessionId, chatImages } = await env.start();
+    assert.equal(chatImages, false);
+    await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+    await assert.rejects(env.service.action(env.viewer, { sessionId, type: 'message', text: '', image: { mime: 'image/jpeg', contents: jpeg } }), /updateRequired/);
+    await env.service.action(env.viewer, { sessionId, type: 'message', text: 'Still supported' });
+});
+
+test('privacy changes during chat image validation prevent delivery', async () => {
+    const validating = deferred(), resume = deferred();
+    const env = fixture({ validateImage: async () => { validating.resolve(); await resume.promise; } });
+    const { sessionId } = await env.start();
+    await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+    const pending = env.service.action(env.viewer, { sessionId, type: 'message', text: '', image: { mime: 'image/jpeg', contents: jpeg } });
+    await validating.promise;
+    env.station.screenshotGeneration++;
+    resume.resolve();
+    await assert.rejects(pending, /privacyChanged/);
+    assert.equal(env.commands.filter(command => command.type === 'message').length, 0);
+});
+
+const transferFixture = () => {
+    let accepted = false, bytes = 0, holdChunk;
+    const env = fixture({ command: (input, callback) => {
+        if (input.type !== 'transfer') return callback(null, { success: true, fileTransfer: true });
+        const status = input.operation === 'finish' ? 'transferComplete' : input.operation === 'cancel' ? 'transferCancelled' : accepted ? 'transferSending' : 'transferWaiting';
+        if (input.operation === 'chunk') bytes += input.contents.length;
+        const respond = () => callback(null, { success: true, id: input.id, status, bytes });
+        if (input.operation === 'chunk' && holdChunk) holdChunk(respond); else respond();
+    } });
+    return { ...env, accept: () => { accepted = true; }, hold: fn => { holdChunk = fn; } };
+};
+const transferOffer = sessionId => ({ sessionId, operation: 'offer', id: require('node:crypto').randomUUID(),
+    manifest: { kind: 'file', name: 'file.bin', entries: [{ path: 'file.bin', type: 'file', size: 3 }] } });
+
+test('file relay waits for receiver acceptance, enforces sequential bounded chunks and reports committed progress', async () => {
+    const env = transferFixture(), { sessionId, fileTransfer } = await env.start();
+    assert.equal(fileTransfer, true);
+    await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+    const offer = transferOffer(sessionId);
+    assert.equal((await env.service.transfer(env.viewer, offer)).status, 'transferWaiting');
+    assert.equal(env.commands.at(-1).manifest.total, 3);
+    assert.equal(env.commands.at(-1).manifest.files, 1);
+    env.accept(); await env.service.transfer(env.viewer, { ...offer, operation: 'status' });
+    const sent = await env.service.transfer(env.viewer, { ...offer, operation: 'chunk', index: 0, offset: 0, contents: Buffer.from('abc') });
+    assert.equal(sent.bytes, 3);
+    assert.equal((await env.service.transfer(env.viewer, { ...offer, operation: 'finish' })).status, 'transferComplete');
+    assert.equal(env.service.sessions.get(sessionId).transfer, null);
+});
+
+test('transfer rejects unaccepted bytes, path traversal, oversized chunks and replaced identities', async () => {
+    for (const scenario of ['unaccepted', 'path', 'oversized', 'offset', 'privacy']) {
+        const env = transferFixture(), { sessionId } = await env.start();
+        await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+        const offer = transferOffer(sessionId);
+        if (scenario === 'path') {
+            offer.manifest.entries[0].path = '../private';
+            await assert.rejects(env.service.transfer(env.viewer, offer), /invalidTransfer/); continue;
+        }
+        await env.service.transfer(env.viewer, offer);
+        if (scenario !== 'unaccepted') { env.accept(); await env.service.transfer(env.viewer, { ...offer, operation: 'status' }); }
+        if (scenario === 'privacy') env.station.stationId = 'replaced';
+        await assert.rejects(env.service.transfer(env.viewer, { ...offer, operation: 'chunk', index: 0,
+            offset: scenario === 'offset' ? 1 : 0, contents: scenario === 'oversized' ? Buffer.alloc(256 * 1024 + 1) : Buffer.from('abc') }), /transferNotAccepted|invalidTransfer|privacyChanged/);
+        assert.equal(env.commands.filter(input => input.type === 'transfer' && input.operation === 'chunk').length, 0);
+    }
+});
+
+test('cancelled in-flight transfers ignore late write acknowledgements', async () => {
+    const env = transferFixture(), { sessionId } = await env.start();
+    await env.service.action(env.viewer, { sessionId, type: 'chat', enabled: true });
+    const offer = transferOffer(sessionId); await env.service.transfer(env.viewer, offer);
+    env.accept(); await env.service.transfer(env.viewer, { ...offer, operation: 'status' });
+    const pending = deferred(); env.hold(pending.resolve);
+    const sending = env.service.transfer(env.viewer, { ...offer, operation: 'chunk', index: 0, offset: 0, contents: Buffer.from('abc') });
+    const acknowledge = await pending.promise;
+    assert.equal((await env.service.transfer(env.viewer, { ...offer, operation: 'cancel' })).status, 'transferCancelled');
+    acknowledge();
+    await assert.rejects(sending, /transferCancelled/);
+    assert.equal(env.service.sessions.get(sessionId).transfer, null);
 });
 
 test('live start enforces permissions, privacy, capability, offline state, and one operator per station', async () => {
