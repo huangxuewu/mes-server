@@ -610,7 +610,7 @@ module.exports = (socket, io) => {
 
     socket.on("bill-of-lading:link", async (payload, callback) => {
         try {
-            const { shipmentIdArray, poNumber, loadNumber, link } = payload;
+            const { shipmentIdArray, loadNumber, link } = payload;
 
             await db.outbound.updateMany(
                 { 'loads.shipmentId': { $in: shipmentIdArray } },

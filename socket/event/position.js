@@ -10,7 +10,7 @@ module.exports = (socket, io) => {
             callback({ status: "success", message: "Position created successfully", payload: populatedPosition });
 
             // Broadcast to all connected clients
-            io.emit("position:created", populatedPosition);
+            io.except('data-sync-v1').emit("position:created", populatedPosition);
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -26,7 +26,7 @@ module.exports = (socket, io) => {
             callback({ status: "success", message: "Position updated successfully", payload: position });
 
             // Broadcast to all connected clients
-            io.emit("position:updated", position);
+            io.except('data-sync-v1').emit("position:updated", position);
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -42,7 +42,7 @@ module.exports = (socket, io) => {
             callback({ status: "success", message: "Position deleted successfully" });
 
             // Broadcast to all connected clients
-            io.emit("position:deleted", { _id });
+            io.except('data-sync-v1').emit("position:deleted", { _id });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

@@ -76,7 +76,6 @@ const RESCHEDULE_HINTS = /\b(reschedul|re-?schedul|postpone|push\s+back|move\s+(
 const QUESTION_HINTS = /\?|\b(can you|could you|would you|please confirm|what time|when can|when will|any update|let me know|do you have)\b/i;
 const OUTGOING_REST_WEIGHT = 0.2;
 
-const SIGNATURE_TAIL_ROLES = new Set(['title', 'company', 'contact', 'address', 'slogan', 'link', 'gibberish']);
 
 const extractEmail = from =>
     String(from ?? '').match(/<([^>]+)>/)?.[1]?.toLowerCase()

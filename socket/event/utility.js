@@ -1,4 +1,3 @@
-const path = require("path");
 const axios = require('axios');
 const db = require("../../models");
 // const { createCanvas } = require("canvas");

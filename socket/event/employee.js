@@ -171,42 +171,19 @@ module.exports = (socket, io) => {
     });
 
     // Timecard
-    socket.on('timecard:clockIn', async (payload, callback) => {
-        try {
-            const timecard = await db.timecard.clockIn(payload);
-            callback({ status: "success", message: "Timecard created successfully", payload: timecard });
-
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
-
-    socket.on('timecard:clockOut', async (payload, callback) => {
-        try {
-            const timecard = await db.timecard.clockOut(payload);
-            callback({ status: "success", message: "Timecard clocked out successfully", payload: timecard });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
-
-    socket.on('timecard:breakStart', async (payload, callback) => {
-        try {
-            const timecard = await db.timecard.breakStart(payload);
-            callback({ status: "success", message: "Timecard break started successfully", payload: timecard });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
-
-    socket.on('timecard:breakEnd', async (payload, callback) => {
-        try {
-            const timecard = await db.timecard.breakEnd(payload);
-            callback({ status: "success", message: "Timecard break ended successfully", payload: timecard });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
+    for (const action of ['clockIn', 'clockOut', 'breakStart', 'breakEnd']) {
+        socket.on(`timecard:${action}`, async (payload, callback) => {
+            if (typeof callback !== 'function') return;
+            try {
+                const receipt = await db.timecard[action](payload);
+                const result = socket.rooms.has('data-sync-v1') ? receipt : await db.timecard.findById(receipt._id) || receipt;
+                callback({ status: 'success', payload: result });
+            } catch (error) {
+                callback({ status: 'error', message: error.message,
+                    payload: { code: error.code || 'UNAVAILABLE', retryable: error.retryable !== false } });
+            }
+        });
+    }
 
     socket.on('timecard:fetch', async (payload, callback) => {
         try {

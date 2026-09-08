@@ -1,4 +1,4 @@
-const db = require("../../models");
+require("../../models");
 
 
 module.exports = (socket, io) => {

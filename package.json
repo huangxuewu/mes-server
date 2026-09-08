@@ -3,9 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "test:data-sync": "node --test test/dataSync.test.js",
     "dev": "node index.js",
     "start": "node index.js",
+    "test:production-run": "node --test test/productionRun.test.js",
+    "test:production": "node --test test/productionRun.test.js test/productionPallet.test.js test/productionMetrics.test.js test/rw403b.test.js test/productionMobile.test.js test/mobileSession.test.js",
     "audit:stations": "node scripts/audit-station-identities.js",
+    "audit:production": "node scripts/audit-production-readiness.js",
     "test:station-identity": "node --test test/stationIdentity.test.js",
     "test:message-center": "node --test test/messageCenter.test.js test/messageSession.test.js test/messageTransport.test.js test/messageModels.test.js",
     "test:document-center": "node --test test/documentCenter.test.js test/documentCollaboration.test.js test/documentCollaborationTransport.test.js test/documentRevisionExport.test.js test/documentAssetRegistration.test.js test/documentLifecycle.test.js test/documentResources.test.js test/formRevisionExport.test.js test/formPdfEvidence.test.js"

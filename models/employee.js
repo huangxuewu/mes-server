@@ -90,7 +90,7 @@ const documentLinksSchema = new Schema({
     "State ID Card": { type: String },
     "Military ID": { type: String },
     "Military Dependent ID": { type: String },
-    "Native American Tribal Document": { type: String },
+
     "Canadian Driver License": { type: String },
     "School ID with Photo": { type: String },
 
@@ -178,11 +178,11 @@ Employee.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("employee:update", change.fullDocument);
+                io.except('data-sync-v1').emit("employee:update", change.fullDocument);
                 break;
 
             case "delete":
-                io.emit("employee:delete", change.documentKey._id);
+                io.except('data-sync-v1').emit("employee:delete", change.documentKey._id);
                 break;
         }
     });

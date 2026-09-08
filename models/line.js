@@ -2,20 +2,7 @@ const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
 
-const staffSchema = new mongoose.Schema({
-    index: Number,
-    position: String,
-    // number of staffs required for this position
-    // if manning is 0, it means the position is not required
-    // if manning is 4 but only 2 staffs coming today, means only has 50% of the output capacity
-    manning: Number,
-    isSupportRole: Boolean,
-    description: String,
-    staffs: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'employee'
-    }]
-});
+
 
 const stepsSchema = new mongoose.Schema({
     sequence: Number,
@@ -38,6 +25,9 @@ const stepsSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'employee'
     }],
+    // Missing mainWorkers means this step still uses the legacy roster.
+    mainWorkers: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'employee' }], default: undefined },
+    backupWorkers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'employee' }],
 });
 
 // config for production line
@@ -71,6 +61,7 @@ const lineSchema = new mongoose.Schema({
         code: Number,
         updatedAt: Date
     },
+    productionRevision: { type: Number, default: 0 },
 })
 
 const Line = database.model("line", lineSchema, "line");
@@ -81,10 +72,10 @@ Line.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("line:update", change.fullDocument);
+                io.except('data-sync:lines').emit("line:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("line:delete", change.documentKey._id);
+                io.except('data-sync:lines').emit("line:delete", change.documentKey._id);
                 break;
         }
     })

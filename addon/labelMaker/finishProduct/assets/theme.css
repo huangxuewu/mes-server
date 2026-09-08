@@ -1,0 +1,19 @@
+﻿:root {
+    color-scheme: light;
+    --ink: #152224;
+    --muted: #6a7779;
+    --line: #d5dbd9;
+    --surface: #ffffff;
+    --canvas: #f3f5f4;
+    --panel: #0f1c1e;
+    --accent: #e06718;
+    --accent-pressed: #c45510;
+    --ok: #2f9d62;
+    --warn: #e39a46;
+    --radius: 3px;
+    --shadow: 0 1px 0 rgb(15 28 30 / 4%), 0 8px 24px rgb(15 28 30 / 6%);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--canvas);
+    -webkit-tap-highlight-color: transparent;
+}

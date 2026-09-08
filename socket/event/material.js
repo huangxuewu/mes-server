@@ -1,5 +1,5 @@
 const db = require("../../models");
-const { normalizeStorage, validateStorage } = require("../../utils/materialPackaging");
+const { validateStorage } = require("../../utils/materialPackaging");
 
 const applyStorage = (payload = {}) => {
     if (!payload.storage) return payload;

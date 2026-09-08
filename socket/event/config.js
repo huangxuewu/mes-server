@@ -100,7 +100,7 @@ module.exports = (socket, io) => {
 
     socket.on("config:delete", async (data, callback) => {
         try {
-            const config = await db.config.findByIdAndDelete(data._id);
+            await db.config.findByIdAndDelete(data._id);
             callback({ status: "success", message: "Config deleted successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });

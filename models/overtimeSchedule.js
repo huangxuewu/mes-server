@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const { io } = require("../socket/io");
-const database = require("../config/database");
+require("../socket/io");
+require("../config/database");
 
 const auditLogSchema = new mongoose.Schema({
     action: { type: String, enum: ["Created", "Updated", "Deleted", "Approved", "Rejected", "Requested"], required: true },

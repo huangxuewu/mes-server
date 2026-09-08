@@ -201,10 +201,10 @@ Tools.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("tools:update", change.fullDocument);
+                io.except('data-sync:tools').emit("tools:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("tools:delete", change.documentKey._id);
+                io.except('data-sync:tools').emit("tools:delete", change.documentKey._id);
                 break;
         }
     });

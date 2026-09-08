@@ -8,11 +8,7 @@ const positionSchema = new mongoose.Schema({
         required: true
     },
     description: String,
-    index: {
-        type: Number,
-        default: 0,
-        description: "Index for sorting"
-    },
+
     department: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'department',
@@ -78,10 +74,10 @@ Position.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("position:update", change.fullDocument);
+                io.except('data-sync-v1').emit("position:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("position:delete", change.documentKey._id);
+                io.except('data-sync-v1').emit("position:delete", change.documentKey._id);
                 break;
         }
     });

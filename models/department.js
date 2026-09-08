@@ -48,10 +48,10 @@ Department.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("department:update", change.fullDocument);
+                io.except('data-sync-v1').emit("department:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("department:delete", change.documentKey._id);
+                io.except('data-sync-v1').emit("department:delete", change.documentKey._id);
                 break;
         }
     });

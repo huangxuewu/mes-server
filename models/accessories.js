@@ -234,10 +234,10 @@ Accessories.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("accessories:update", change.fullDocument);
+                io.except('data-sync:accessories').emit("accessories:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("accessories:delete", change.documentKey._id);
+                io.except('data-sync:accessories').emit("accessories:delete", change.documentKey._id);
                 break;
         }
     });

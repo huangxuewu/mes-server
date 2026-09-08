@@ -167,10 +167,10 @@ Contact.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("contact:update", change.fullDocument);
+                io.except('data-sync:contacts').emit("contact:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("contact:delete", change.documentKey._id);
+                io.except('data-sync:contacts').emit("contact:delete", change.documentKey._id);
                 break;
         }
     });

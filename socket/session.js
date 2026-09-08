@@ -11,7 +11,6 @@ const isBoundDocumentSession = (socketId, userId, generation) => {
         && (generation === undefined || generation === session.generation));
 };
 
-
 // Room joined by sockets whose user holds office.calendar.event.public.view,
 // so public calendar events can be broadcast without enumerating users.
 const PUBLIC_EVENT_ROOM = "calendar:publicEvent";
@@ -36,11 +35,16 @@ const sessionSignature = user => createHash('sha256').update(JSON.stringify({
         .map(action => [action, [...(user.permission?.[action] || [])].sort()])),
 })).digest('hex');
 
+const authenticationSignature = user => createHash('sha256').update(JSON.stringify({
+    username: user.username || '', password: user.password || '', role: user.role || '', status: user.status || '',
+})).digest('hex');
+
 const bindSocketSession = (socket, user, expiresAt = Date.now() + 10 * 60 * 60 * 1000) => {
     unbindSocketSession(socket);
     socket.data.userId = String(user._id);
     socket.data.expiresAt = expiresAt;
     socket.data.sessionSignature = sessionSignature(user);
+    socket.data.authenticationSignature = authenticationSignature(user);
     boundSessions.set(socket.id, { userId: String(user._id), expiresAt, generation: socket.data.sessionGeneration });
     socket.data.expiryTimer = setTimeout(() => {
         unbindSocketSession(socket);
@@ -62,11 +66,16 @@ const unbindSocketSession = (socket) => {
     socket.data.userId = null;
     socket.data.expiresAt = null;
     socket.data.sessionSignature = null;
+    socket.data.authenticationSignature = null;
     socket.data.expiryTimer = null;
     socket.data.messageTopics = new Set();
     socket.data.documentGrants = {};
     socket.data.documentSeen = new Set();
 };
+
+const canAdministerAccounts = user => user?.role === 'Admin';
+const canManageAccount = (actor, target) => Boolean(target &&
+    actor?.role === 'Admin' && target.role !== 'System');
 
 const getActiveSessionUser = async socket => {
     const id = getSessionUserId(socket);
@@ -77,10 +86,17 @@ const getActiveSessionUser = async socket => {
     }
     const user = await require('../models').user.findById(id).lean();
     if (getSessionUserId(socket) !== id || socket.data.sessionGeneration !== generation) throw new Error('Session changed');
-    if (!user || user.status !== 'Active' || sessionSignature(user) !== socket.data.sessionSignature) {
+    if (!user || user.status !== 'Active' || authenticationSignature(user) !== socket.data.authenticationSignature) {
         unbindSocketSession(socket);
         socket.emit('auth:revoked', { reason: 'Account access changed. Sign in again.' });
         throw new Error('Session no longer valid');
+    }
+    const signature = sessionSignature(user);
+    if (signature !== socket.data.sessionSignature) {
+        socket.data.sessionSignature = signature;
+        hasPermission(user, 'view', PUBLIC_EVENT_VIEW_PERM) ? socket.join(PUBLIC_EVENT_ROOM) : socket.leave(PUBLIC_EVENT_ROOM);
+        for (const notify of permissionChangeListeners) notify(socket.id);
+        socket.emit('auth:permissions', privateUser(user));
     }
     return user;
 };
@@ -99,6 +115,8 @@ module.exports = {
     userRoom,
     getSessionUserId,
     hasPermission,
+    canAdministerAccounts,
+    canManageAccount,
     bindSocketSession,
     unbindSocketSession,
     getActiveSessionUser,

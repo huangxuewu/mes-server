@@ -34,11 +34,11 @@ Hauler.watch([], { fullDocument: "updateLookup" })
         switch (change.operationType) {
             case "update":
             case "replace":
-                io.emit("hauler:update", change.fullDocument);
+                io.except('data-sync:haulers').emit("hauler:update", change.fullDocument);
                 break;
 
             case "delete":
-                io.emit("hauler:delete", change.documentKey._id);
+                io.except('data-sync:haulers').emit("hauler:delete", change.documentKey._id);
                 break;
         }
     })

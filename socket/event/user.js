@@ -1,6 +1,6 @@
 const md5 = require("md5");
 const db = require("../../models");
-const { getActiveSessionUser, publicUser, privateUser } = require('../session');
+const { getActiveSessionUser, publicUser, privateUser, canAdministerAccounts, canManageAccount } = require('../session');
 
 // Password hashing salt (must match frontend)
 const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
@@ -24,6 +24,8 @@ const validatePayload = (data, fields) => {
     }
     if (data._id && !ID_PATTERN.test(data._id)) throw new Error('Invalid account ID');
     if (data.status && !['Active', 'Inactive', 'Disabled', 'Deleted'].includes(data.status)) throw new Error('Invalid account status');
+    if (data.role === 'System') throw new Error('System is reserved for MES records and cannot be assigned to an operator');
+    if (data.role && !['Admin', 'Manager', 'User'].includes(data.role)) throw new Error('Invalid account role');
 };
 
 const normalizeUserPayload = (payload = {}) => {
@@ -48,7 +50,7 @@ module.exports = (socket, io) => {
     on("user:create", async (data, callback) => {
         try {
             const actor = await getActiveSessionUser(socket);
-            if (actor.role !== 'System') throw new Error('Account administration requires System access');
+            if (!canAdministerAccounts(actor)) throw new Error('Account administration requires Admin access');
             validatePayload(data, ACCOUNT_FIELDS);
             if (!data.username?.trim() || !data.password) throw new Error('Username and password are required');
             await db.user.create(normalizeUserPayload(data));
@@ -62,11 +64,16 @@ module.exports = (socket, io) => {
         try {
             const actor = await getActiveSessionUser(socket);
             const isSelf = String(actor._id) === payload?._id;
-            if (actor.role !== 'System' && !isSelf) throw new Error('Account administration requires System access');
-            validatePayload(payload, ['_id', ...(actor.role === 'System' ? ACCOUNT_FIELDS : PROFILE_FIELDS)]);
+            if (!canAdministerAccounts(actor) && !isSelf) throw new Error('Account administration requires Admin access');
+            validatePayload(payload, ['_id', ...(canAdministerAccounts(actor) ? ACCOUNT_FIELDS : PROFILE_FIELDS)]);
             if (!ID_PATTERN.test(payload._id || '')) throw new Error('Invalid account ID');
+            const target = await db.user.findById(payload._id).lean();
+            if (!target) throw new Error('Account not found');
+            if (target.role === 'System') throw new Error('System records are managed by MES');
             const { _id, ...update } = payload;
-            await db.user.updateOne({ _id }, { $set: normalizeUserPayload(update) }, { runValidators: true });
+            const filter = { _id, role: { $ne: 'System' } };
+            const result = await db.user.updateOne(filter, { $set: normalizeUserPayload(update) }, { runValidators: true });
+            if (!result.matchedCount) throw new Error('Account changed. Refresh and try again.');
             callback({ status: "success", message: "User updated successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -76,10 +83,12 @@ module.exports = (socket, io) => {
     on("user:delete", async (data, callback) => {
         try {
             const actor = await getActiveSessionUser(socket);
-            if (actor.role !== 'System') throw new Error('Account administration requires System access');
+            if (!canAdministerAccounts(actor)) throw new Error('Account administration requires Admin access');
             validatePayload(data, ['_id']);
             if (!ID_PATTERN.test(data._id || '')) throw new Error('Invalid account ID');
-            await db.user.deleteOne({ _id: data._id });
+            const target = await db.user.findById(data._id).lean();
+            if (!canManageAccount(actor, target)) throw new Error('System records are managed by MES');
+            await db.user.deleteOne({ _id: data._id, role: { $ne: 'System' } });
             callback({ status: "success", message: "User deleted successfully" });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -92,7 +101,7 @@ module.exports = (socket, io) => {
             validatePayload(data, ['_id']);
             if (!ID_PATTERN.test(data._id || '')) throw new Error('Invalid account ID');
             const user = await db.user.findOne({ _id: data._id }).lean();
-            const safe = user && (actor.role === 'System' || String(actor._id) === data._id ? privateUser(user) : publicUser(user));
+            const safe = user && (canManageAccount(actor, user) || String(actor._id) === data._id ? privateUser(user) : publicUser(user));
             callback({ status: "success", message: "User fetched successfully", payload: safe });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -104,7 +113,7 @@ module.exports = (socket, io) => {
             const actor = await getActiveSessionUser(socket);
             validatePayload(data || {}, ['status', 'role', 'group']);
             const users = await db.user.find(data || {}).lean();
-            const safe = users.map(user => actor.role === 'System' || String(actor._id) === String(user._id) ? privateUser(user) : publicUser(user));
+            const safe = users.map(user => canManageAccount(actor, user) || String(actor._id) === String(user._id) ? privateUser(user) : publicUser(user));
             callback({ status: "success", message: "Users fetched successfully", payload: safe });
         } catch (error) {
             callback({ status: "error", message: error.message });

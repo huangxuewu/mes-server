@@ -13,6 +13,12 @@ router.get('/assets/config.js', (_req, res) => {
     res.type('application/javascript').send(`window.LABEL_MAKER_CONFIG = ${JSON.stringify(config)};`);
 });
 
+router.use('/mobile/api', require('./productionMobile'));
+router.get('/mobile', (_req, res) => {
+    res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.sendFile(path.join(pageRoot, 'mobile.html'));
+});
+
 router.use('/assets', express.static(path.join(pageRoot, 'assets')));
 
 router.get('/', (_req, res) => {

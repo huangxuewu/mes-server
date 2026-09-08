@@ -11,7 +11,7 @@ module.exports = (socket, io) => {
             await cleanupOrphanedTeamSchedules(department);
             callback({ status: "success", message: "Department created successfully", payload: department });
 
-            io.emit("department:created", department);
+            io.except('data-sync-v1').emit("department:created", department);
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -28,7 +28,7 @@ module.exports = (socket, io) => {
             await cleanupOrphanedTeamSchedules(department);
             callback({ status: "success", message: "Department updated successfully", payload: department });
 
-            io.emit("department:updated", department);
+            io.except('data-sync-v1').emit("department:updated", department);
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -45,7 +45,7 @@ module.exports = (socket, io) => {
                 return callback({ status: "error", message: "Department not found" });
 
             callback({ status: "success", message: "Department deleted successfully" });
-            io.emit("department:deleted", { _id });
+            io.except('data-sync-v1').emit("department:deleted", { _id });
         } catch (error) {
             callback({ status: "error", message: error.message });
         }

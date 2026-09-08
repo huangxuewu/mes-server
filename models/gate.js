@@ -31,11 +31,11 @@ Gate.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("gate:update", change.fullDocument);
+                io.except('data-sync:gates').emit("gate:update", change.fullDocument);
                 break;
 
             case "delete":
-                io.emit("gate:delete", change.documentKey._id);
+                io.except('data-sync:gates').emit("gate:delete", change.documentKey._id);
                 break;
         }
     })

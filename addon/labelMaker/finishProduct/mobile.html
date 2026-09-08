@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f1c1e">
+    <title>MES · Mobile labels</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/addon/labelMaker/finishProduct/assets/theme.css">
+    <link rel="stylesheet" href="/addon/labelMaker/finishProduct/assets/mobile.css">
+    <script defer src="/addon/labelMaker/finishProduct/assets/heatshrink.js"></script>
+    <script defer src="/addon/labelMaker/finishProduct/assets/JsBarcode.all.min.js"></script>
+    <script defer src="/addon/labelMaker/finishProduct/assets/rw403b.js"></script>
+    <script defer src="/addon/labelMaker/finishProduct/assets/mobile.js"></script>
+</head>
+<body>
+    <main class="mobile-tool">
+        <header>
+            <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><small id="line-name">MES · Mobile labels</small><h1 id="product-name">Sign in to your line</h1></div></div>
+            <button id="printer-selector" type="button"><span class="printer-indicator" aria-hidden="true"></span><span id="printer-name">Connect printer</span></button>
+        </header>
+        <section class="stage">
+            <form id="login-form">
+                <h2>Employee access</h2>
+                <p>Enter your employee PIN. No station setup is needed.</p>
+                <label>Employee PIN<input id="employee-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="20" required></label>
+                <button type="submit" id="login-button">Open tool</button>
+            </form>
+            <div id="production-controls" hidden>
+                <p id="employee-name"></p>
+                <button id="print-button" type="button" disabled><span id="output-count">0</span><span class="count-caption">Products registered this run</span><strong id="print-action">Register &amp; print pallet</strong></button>
+                <p id="saved-pallet"></p>
+                <button id="next-pallet" type="button" hidden>Next pallet</button>
+                <div class="secondary"><button id="refresh" type="button">Refresh</button><button id="sign-out" type="button">Sign out</button></div>
+            </div>
+            <p id="message" role="status" aria-live="polite"></p>
+            <p id="bluetooth-support" hidden>Bluetooth printing needs a supported browser such as Android Chrome over HTTPS. This printer connection targets the RW403B.</p>
+        </section>
+        <footer>
+            <div><small>LOT NUMBER</small><strong id="lot-number">—</strong></div>
+            <button id="cases-button" type="button" disabled><small>CASES / PALLET</small><strong id="cases-value">—</strong><span>Edit</span></button>
+        </footer>
+    </main>
+    <dialog id="cases-dialog">
+        <form method="dialog" id="cases-form"><h2>Cases on this pallet</h2><label>Case quantity<input id="cases-input" type="number" inputmode="numeric" min="1" step="1" required></label><p id="cases-limit"></p><div><button id="cases-cancel" type="button">Cancel</button><button type="submit">Apply</button></div></form>
+    </dialog>
+</body>
+</html>

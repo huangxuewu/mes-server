@@ -153,86 +153,87 @@ const timecardSchema = new mongoose.Schema({
 
 timecardSchema.index({ date: 1, employeeId: 1 });
 timecardSchema.index({ employeeId: 1, date: 1 });
+timecardSchema.index({ processedEventIds: 1 });
 
-timecardSchema.statics.clockIn = async function (payload) {
+// Commands and employee locks live outside business documents; receipts survive date scope changes.
+timecardSchema.statics.recordPunch = async function (type, payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+        throw Object.assign(new Error('Invalid punch command'), { code: 'INVALID_COMMAND', retryable: false });
     const { _id, image, station, location, method, ip, note } = payload;
-    const eventId = payload?.eventId || payload?.idempotencyKey || null;
-    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
-    const date = await dayjs.businessDate();
-
-    const existingTimecard = await this.findOne({ employeeId: _id, date: date });
-
-    if (existingTimecard) {
-        if (eventId && existingTimecard.processedEventIds?.includes(eventId)) {
-            return existingTimecard;
-        }
-
-        existingTimecard.punches.push({ type: "Clock In", time: punchTime, image, station, location, method, ip, note, eventId });
-        if (eventId) existingTimecard.processedEventIds.push(eventId);
-        const updatedTimecard = await existingTimecard.save();
-        return updatedTimecard;
+    const eventId = payload.eventId || payload.idempotencyKey || crypto.randomUUID();
+    const punchTime = payload.capturedAt == null ? new Date() : new Date(payload.capturedAt);
+    if (!mongoose.isValidObjectId(_id) || typeof eventId !== 'string' || eventId.length > 200 || !Number.isFinite(punchTime.getTime()))
+        throw Object.assign(new Error('Invalid punch command'), { code: 'INVALID_COMMAND', retryable: false });
+    const targetId = new mongoose.Types.ObjectId(_id).toHexString();
+    const date = dayjs(punchTime).tz(await dayjs.getFactoryTimeZone()).format('YYYY-MM-DD');
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
+        type, target: targetId, capturedAt: payload.capturedAt == null ? null : punchTime.toISOString(),
+        station: station ?? null, location: location ?? null, method: method ?? 'Station', note: note ?? '',
+    })).digest('hex');
+    const commands = this.db.collection('timecardCommand');
+    const receiptId = `command:${eventId}`;
+    const previousReceipt = await commands.findOne({ _id: receiptId }, { readConcern: { level: 'majority' } });
+    if (previousReceipt && previousReceipt.fingerprint !== fingerprint)
+        throw Object.assign(new Error('Punch command ID was reused with different data'), { code: 'CONFLICT', retryable: false });
+    // A committed receipt remains valid even if the timecard was subsequently deleted.
+    if (previousReceipt) return previousReceipt.receipt;
+    const target = type === 'Clock In' ? null : await this.findById(_id).select('employeeId').lean();
+    if (type !== 'Clock In' && !target)
+        throw Object.assign(new Error('Timecard no longer exists'), { code: 'NOT_FOUND', retryable: false });
+    const employeeId = type === 'Clock In' ? targetId : target.employeeId;
+    const lockId = `employee:${employeeId}`;
+    try {
+        await commands.updateOne({ _id: lockId }, { $setOnInsert: { revision: 0 } }, { upsert: true, writeConcern: { w: 'majority' } });
+    } catch (error) {
+        if (error.code !== 11000) throw error;
     }
+    const session = await this.db.startSession();
+    let result;
+    try {
+        await session.withTransaction(async () => {
+            await commands.updateOne({ _id: lockId }, { $inc: { revision: 1 } }, { session });
+            const previous = await commands.findOne({ _id: receiptId }, { session });
+            if (previous) {
+                if (previous.fingerprint !== fingerprint)
+                    throw Object.assign(new Error('Punch command ID was reused with different data'), { code: 'CONFLICT', retryable: false });
+                result = previous.receipt;
+                return;
+            }
+            // Recover receipts for commands accepted before the command journal was deployed.
+            let timecard = await this.findOne({ processedEventIds: eventId }).session(session);
+            if (timecard) {
+                const punch = timecard.punches.find(item => item.eventId === eventId);
+                if (String(timecard.employeeId) !== String(employeeId) || (type !== 'Clock In' && String(timecard._id) !== targetId)
+                    || !punch || punch.type !== type || (payload.capturedAt != null && punch.time.getTime() !== punchTime.getTime()))
+                    throw Object.assign(new Error('Punch command ID was reused with different data'), { code: 'CONFLICT', retryable: false });
+            } else {
+                timecard = type === 'Clock In'
+                    ? await this.findOne({ employeeId, date, isDeleted: { $ne: true } }).session(session)
+                    : await this.findOne({ _id, isDeleted: { $ne: true } }).session(session);
+                if (!timecard && type !== 'Clock In')
+                    throw Object.assign(new Error('Timecard no longer exists'), { code: 'NOT_FOUND', retryable: false });
+                if (timecard && String(timecard.employeeId) !== String(employeeId))
+                    throw Object.assign(new Error('Timecard employee changed; retry the command'), { code: 'UNAVAILABLE' });
+                if (!timecard) timecard = new this({ date, employeeId });
+                timecard.punches.push({ type, time: punchTime, image, station, location, method, ip, note, eventId });
+                timecard.processedEventIds.push(eventId);
+                await timecard.save({ session });
+            }
+            result = { _id: String(timecard._id), commandId: eventId, committed: true, date: timecard.date };
+            await commands.insertOne({ _id: receiptId, fingerprint, receipt: result, committedAt: new Date() }, { session });
+        }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
+        return result;
+    } catch (error) {
+        if (error.name === 'ValidationError')
+            throw Object.assign(error, { code: 'INVALID_COMMAND', retryable: false });
+        if (error.code === 11000)
+            throw Object.assign(new Error('Punch command ID was reused with different data'), { code: 'CONFLICT', retryable: false });
+        throw error;
+    } finally { await session.endSession(); }
+};
 
-    const timecard = await this.create({
-        date: date,
-        employeeId: _id,
-        auditLog: [],
-        processedEventIds: eventId ? [eventId] : [],
-        punches: [{ type: "Clock In", time: punchTime, image, station, location, method, ip, note, eventId }],
-    });
-
-    return timecard;
-}
-
-timecardSchema.statics.breakStart = async function (payload) {
-    const { _id, image, station, location, method, ip, note } = payload;
-    const eventId = payload?.eventId || payload?.idempotencyKey || null;
-    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
-    const timecard = await this.findById(_id);
-    if (timecard) {
-        if (eventId && timecard.processedEventIds?.includes(eventId)) {
-            return timecard;
-        }
-
-        timecard.punches.push({ type: "Break Start", time: punchTime, image, station, location, method, ip, note, eventId });
-        if (eventId) timecard.processedEventIds.push(eventId);
-        return await timecard.save();
-    }
-    return timecard;
-}
-
-timecardSchema.statics.breakEnd = async function (payload) {
-    const { _id, image, station, location, method, ip, note } = payload;
-    const eventId = payload?.eventId || payload?.idempotencyKey || null;
-    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
-    const timecard = await this.findById(_id);
-    if (timecard) {
-        if (eventId && timecard.processedEventIds?.includes(eventId)) {
-            return timecard;
-        }
-
-        timecard.punches.push({ type: "Break End", time: punchTime, image, station, location, method, ip, note, eventId });
-        if (eventId) timecard.processedEventIds.push(eventId);
-        return await timecard.save();
-    }
-    return timecard;
-}
-
-timecardSchema.statics.clockOut = async function (payload) {
-    const { _id, image, station, location, method, ip, note } = payload;
-    const eventId = payload?.eventId || payload?.idempotencyKey || null;
-    const punchTime = payload?.capturedAt ? new Date(payload.capturedAt) : new Date();
-    const timecard = await this.findById(_id);
-    if (timecard) {
-        if (eventId && timecard.processedEventIds?.includes(eventId)) {
-            return timecard;
-        }
-
-        timecard.punches.push({ type: "Clock Out", time: punchTime, image, station, location, method, ip, note, eventId });
-        if (eventId) timecard.processedEventIds.push(eventId);
-        return await timecard.save();
-    }
-    return timecard;
+for (const [action, type] of Object.entries({ clockIn: 'Clock In', clockOut: 'Clock Out', breakStart: 'Break Start', breakEnd: 'Break End' })) {
+    timecardSchema.statics[action] = function (payload) { return this.recordPunch(type, payload); };
 }
 
 timecardSchema.statics.supplement = async function (payload) {
@@ -501,6 +502,7 @@ timecardSchema.pre('save', async function (next) {
                     _id: { $ne: this._id }
                 })
                 .sort({ date: -1, createdAt: -1 })
+                .session(this.$session())
                 .exec();
 
             // Set previousHash from the most recent timecard's currentHash
@@ -642,10 +644,10 @@ Timecard.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("timecard:update", change.fullDocument);
+                io.except('data-sync-v1').emit("timecard:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("timecard:delete", change.documentKey._id);
+                io.except('data-sync-v1').emit("timecard:delete", change.documentKey._id);
                 break;
         }
     });

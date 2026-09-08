@@ -126,11 +126,11 @@ Inbound
             case "insert":
             case "update":
             case "replace":
-                io.emit("inbound:update", change.fullDocument);
+                io.except('data-sync:inbound').emit("inbound:update", change.fullDocument);
 
                 break;
             case "delete":
-                io.emit("inbound:delete", change.documentKey._id);
+                io.except('data-sync:inbound').emit("inbound:delete", change.documentKey._id);
                 break;
         }
     });

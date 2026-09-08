@@ -173,10 +173,10 @@ Order.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("order:update", change.fullDocument);
+                io.except('data-sync:orders').emit("order:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("order:delete", change.documentKey._id);
+                io.except('data-sync:orders').emit("order:delete", change.documentKey._id);
                 break;
         }
     })

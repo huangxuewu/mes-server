@@ -165,10 +165,10 @@ RawMaterials.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("rawMaterials:update", change.fullDocument);
+                io.except('data-sync:rawMaterials').emit("rawMaterials:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("rawMaterials:delete", change.documentKey._id);
+                io.except('data-sync:rawMaterials').emit("rawMaterials:delete", change.documentKey._id);
                 break;
         }
     });

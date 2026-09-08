@@ -77,7 +77,98 @@ test('configuration requires an authorized operator', async () => {
         const env = fixture({}, options);
         assert.equal((await env.call('stations:get')).status, 'error');
         assert.equal((await env.call('station:update', { _id: record._id, name: 'Renamed' })).status, 'error');
+        assert.equal((await env.call('station:deploy', { _id: record._id })).status, 'error');
     }
+});
+
+const deploymentTarget = (env, acknowledge = (_event, _payload, callback) => callback(null, { success: true })) => {
+    const target = { connected: true, data: {
+        stationPresence: { _id: record._id, stationId: identity, at: Date.now() }, stationDeployment: { status: 'idle' },
+    }, timeout: milliseconds => {
+        assert.equal(milliseconds, 5000);
+        return { emit: acknowledge };
+    } };
+    env.io.sockets.sockets.set('target', target);
+    return target;
+};
+
+test('deployment targets only the currently linked station and records acceptance', async () => {
+    const env = fixture({ findById: id => { assert.equal(id, record._id); return { lean: async () => record }; } });
+    const target = deploymentTarget(env, (event, payload, callback) => {
+        assert.equal(event, 'station:deploy');
+        assert.deepEqual(payload, { _id: record._id, stationId: identity });
+        callback(null, { success: true });
+    });
+    const result = await env.call('station:deploy', { _id: record._id, url: 'https://untrusted.invalid/installer.exe' });
+    assert.equal(result.status, 'success');
+    assert.equal(result.payload.deployment.status, 'checking');
+    assert.equal(target.data.deploying, false);
+    assert.equal(env.emitted.length, 0);
+});
+
+test('deployment rejects offline, stale, replaced, unsupported, and busy stations', async () => {
+    for (const modify of [
+        target => { target.connected = false; },
+        target => { target.data.stationPresence.at = Date.now() - 91000; },
+        target => { target.data.stationPresence.stationId = 'replaced'; },
+        target => { target.data.stationDeployment = null; },
+        target => { target.data.stationDeployment.status = 'downloading'; },
+    ]) {
+        const env = fixture({ findById: () => ({ lean: async () => record }) });
+        const target = deploymentTarget(env, () => assert.fail('Must not dispatch'));
+        modify(target);
+        assert.equal((await env.call('station:deploy', { _id: record._id })).status, 'error');
+    }
+});
+
+test('failed or missing client acknowledgments are not reported as successful deployments', async () => {
+    for (const [error, response] of [[new Error('timeout')], [null, { success: false, error: 'Updater busy' }]]) {
+        const env = fixture({ findById: () => ({ lean: async () => record }) });
+        const target = deploymentTarget(env, (_event, _payload, callback) => callback(error, response));
+        assert.equal((await env.call('station:deploy', { _id: record._id })).status, 'error');
+        assert.equal(target.data.deploying, false);
+    }
+});
+
+test('retry acceptance clears old failure status without overwriting newer client reports', async () => {
+    for (const reportsProgress of [false, true]) {
+        const env = fixture({ findById: () => ({ lean: async () => record }) });
+        const target = deploymentTarget(env, (_event, _payload, callback) => {
+            if (reportsProgress) target.data.stationDeployment = { status: 'downloading', version: '2.0.0' };
+            callback(null, { success: true });
+        });
+        target.data.stationDeployment = { status: 'failed', error: 'Previous error' };
+        const result = await env.call('station:deploy', { _id: record._id });
+        assert.equal(result.payload.deployment.status, reportsProgress ? 'downloading' : 'checking');
+        assert.equal(result.payload.deployment.error, undefined);
+    }
+});
+
+test('concurrent requests cannot dispatch the same deployment twice', async () => {
+    let finish;
+    const env = fixture({ findById: () => ({ lean: async () => record }) });
+    deploymentTarget(env, (_event, _payload, callback) => { finish = callback; });
+    const first = env.call('station:deploy', { _id: record._id });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await env.call('station:deploy', { _id: record._id })).status, 'error');
+    finish(null, { success: true });
+    assert.equal((await first).status, 'success');
+});
+
+test('heartbeat reports bounded deployment status without adding it to the database record', async () => {
+    const chain = { sort: () => chain, lean: async () => [record] };
+    const env = fixture({ find: () => chain, findOneAndUpdate: async (_filter, update) => {
+        assert.equal(update.$set.deployment, undefined);
+        return record;
+    } });
+    await env.call('station:heartbeat', { _id: record._id, stationId: identity,
+        deployment: { status: 'failed', error: 'x'.repeat(900), version: '2.0.0', command: 'ignored' } });
+    const result = (await env.call('stations:get')).payload[0];
+    assert.equal(result.deployment.status, 'failed');
+    assert.equal(result.deployment.error.length, 500);
+    assert.equal(result.deployment.command, undefined);
+    env.socket.connected = false;
+    assert.equal((await env.call('stations:get')).payload[0].deployment, null);
 });
 
 test('station update protects identity and telemetry and delivers settings to the linked station', async () => {

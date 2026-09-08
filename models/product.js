@@ -12,20 +12,7 @@ const revisionHistorySchema = new mongoose.Schema({
     changes: String
 }, { _id: false });
 
-/**
- * Specification field schema
- */
-const specFieldSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    value: { type: String, required: true },
-    unit: String,
-    type: {
-        type: String,
-        required: true,
-        default: "text",
-        enum: ["text", "number", "date", "boolean", "image"]
-    }
-}, { _id: false });
+
 
 const bomSchema = new mongoose.Schema({
     materialId: { type: mongoose.Schema.Types.ObjectId, ref: "rawMaterials" },
@@ -127,6 +114,7 @@ const productSchema = new mongoose.Schema({
     production: productionSchema,
     casePack: casePackSchema,
     specification: {},
+    stockRevision: { type: Number, default: 0 },
     bom: [bomSchema],
     packaging: {
         pillowsPerBag: Number,
@@ -301,10 +289,10 @@ Product.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("product:update", change.fullDocument);
+                io.except('data-sync:products').emit("product:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("product:delete", change.documentKey._id);
+                io.except('data-sync:products').emit("product:delete", change.documentKey._id);
                 break;
         }
     });

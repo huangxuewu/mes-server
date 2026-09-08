@@ -145,10 +145,10 @@ FinishedGoods.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("finishedGoods:update", change.fullDocument);
+                io.except('data-sync:finishedGoods').emit("finishedGoods:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("finishedGoods:delete", change.documentKey._id);
+                io.except('data-sync:finishedGoods').emit("finishedGoods:delete", change.documentKey._id);
                 break;
         }
     });

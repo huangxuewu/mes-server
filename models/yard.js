@@ -42,11 +42,11 @@ Yard.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("yard:update", change.fullDocument);
+                io.except('data-sync:yard').emit("yard:update", change.fullDocument);
                 break;
 
             case "delete":
-                io.emit("yard:delete", change.documentKey._id);
+                io.except('data-sync:yard').emit("yard:delete", change.documentKey._id);
                 break;
         }
     })

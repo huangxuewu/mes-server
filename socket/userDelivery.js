@@ -1,4 +1,4 @@
-const { getActiveSessionUser, getSessionUserId, unbindSocketSession, publicUser, privateUser } = require('./session');
+const { getActiveSessionUser, getSessionUserId, unbindSocketSession, publicUser, privateUser, canManageAccount } = require('./session');
 
 const deliverUserChange = async (io, event, record) => {
     const id = String(record?._id || record);
@@ -12,7 +12,7 @@ const deliverUserChange = async (io, event, record) => {
         try {
             const actor = await getActiveSessionUser(socket);
             if (event === 'user:delete') return socket.emit(event, id);
-            const safe = actor.role === 'System' || String(actor._id) === id ? privateUser(record) : publicUser(record);
+            const safe = canManageAccount(actor, record) || String(actor._id) === id ? privateUser(record) : publicUser(record);
             socket.emit(event, safe);
         } catch {
             // Invalid sessions receive no roster or account data.

@@ -1,106 +1,75 @@
-const db = require("../../models");
+const db = require('../../models');
+const database = require('../../config/database');
+const { getActiveSessionUser, hasPermission } = require('../session');
 
-const palletUnits = p => (p.boxesPerPallet || 0) * (p.bagsPerBox || 0) * (p.pillowsPerBag || 0);
+const units = pallet => pallet.quantity ?? pallet.boxesPerPallet * pallet.bagsPerBox * pallet.pillowsPerBag;
+const fail = key => { throw new Error('productionPallet.errors.' + key); };
+const formatLocation = location => [location?.zone, location?.aisle, location?.rack, location?.level, location?.position]
+    .filter(value => value !== undefined && value !== null && value !== '').join(' / ');
 
-const formatLocation = l => [l?.zone, l?.aisle, l?.rack, l?.level, l?.position]
-    .filter(v => v !== undefined && v !== null && v !== '')
-    .join(' / ');
-
-module.exports = (socket, io) => {
-
-    socket.on("storages:get", async (query = {}, callback) => {
-        try {
-            const storages = await db.storage.find(query).sort({ createdAt: -1 });
-            callback({ status: "success", message: "Storage records fetched successfully", payload: storages });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
+module.exports = socket => {
+    socket.on('storages:get', async (query = {}, callback) => {
+        try { callback({ status: 'success', payload: await db.storage.find(query).sort({ createdAt: -1 }) }); }
+        catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
-    // Phase 1 — place the pallet into a location. No inventory impact.
-    socket.on("pallet:store", async (payload, callback) => {
-        try {
-            const { palletId, location, by } = payload;
-            if (!palletId || !location?.zone) return callback({ status: "error", message: "Missing palletId or location" });
-
-            const pallet = await db.pallet.findById(palletId);
-            if (!pallet) return callback({ status: "error", message: "Pallet not found" });
-            if (pallet.status === 'Putaway') return callback({ status: "error", message: "Pallet already putaway" });
-
-            // batchNumber holds the pallet barcode so putaway can find this record
-            const existing = await db.storage.findOne({ batchNumber: pallet._id });
-            existing
-                ? await db.storage.updateOne({ _id: existing._id }, { $set: { location, "lastMoved.date": new Date(), "lastMoved.by": by } })
-                : await db.storage.create({
-                    type: 'Pallet',
-                    location,
-                    contents: [{ inventoryId: pallet.productId, inventoryType: 'finishedGoods', sku: pallet.styleCode, quantity: palletUnits(pallet) }],
-                    lotNumber: pallet.lotNumber,
-                    batchNumber: pallet._id,
-                    receive: { date: new Date(), by }
+    for (const action of ['store', 'putaway']) {
+        socket.on('pallet:' + action, async (payload = {}, callback) => {
+            try {
+                const user = await getActiveSessionUser(socket);
+                if (!hasPermission(user, 'update', 'inventory.putaway')) fail('permission');
+                if (typeof payload.palletId !== 'string') fail('request');
+                const result = await database.connection.transaction(async session => {
+                    const pallet = await db.pallet.findOneAndUpdate({ _id: payload.palletId }, { $inc: { revision: 1 } }, { new: true, session });
+                    if (!pallet || pallet.status === 'Voided') fail('pallet');
+                    // A retried putaway acknowledges the original receipt; it never increments stock again.
+                    if (pallet.status === 'Putaway') {
+                        if (action === 'store') fail('putaway');
+                        return pallet;
+                    }
+                    if (!['Pending', 'Stored'].includes(pallet.status)) fail('pallet');
+                    const quantity = units(pallet);
+                    if (!Number.isSafeInteger(quantity) || quantity <= 0) fail('quantity');
+                    const existing = await db.storage.find({ batchNumber: pallet._id }).limit(2).session(session);
+                    if (existing.length > 1) fail('duplicateStorage');
+                    let storage = existing[0];
+                    const location = payload.location || storage?.location;
+                    if (!location?.zone) fail('location');
+                    if (action === 'store' && !payload.location?.zone) fail('location');
+                    const now = new Date();
+                    let inventoryId = pallet.productId;
+                    if (action === 'putaway') {
+                        // Different pallets of the same product share a lock while resolving/incrementing stock.
+                        const product = await db.product.findOneAndUpdate({ _id: pallet.productId }, { $inc: { stockRevision: 1 } }, { new: true, session });
+                        if (!product) fail('product');
+                        const matches = await db.finishedGoods.find({ productId: pallet.productId }).limit(2).session(session);
+                        if (matches.length > 1) fail('duplicateStock');
+                        const goods = matches[0] || (await db.finishedGoods.create([{
+                            productId: pallet.productId, styleCode: pallet.styleCode,
+                            styleName: pallet.productName || pallet.styleCode || 'Unknown', category: 'Final Product',
+                            totalQuantity: 0, availableQuantity: 0,
+                        }], { session }))[0];
+                        inventoryId = goods._id;
+                        await db.finishedGoods.updateOne({ _id: goods._id }, { $inc: { totalQuantity: quantity, availableQuantity: quantity } }, { session, runValidators: true });
+                    }
+                    const contents = [{ inventoryId, inventoryType: 'finishedGoods', sku: pallet.styleCode, quantity }];
+                    if (!storage) {
+                        [storage] = await db.storage.create([{
+                            type: 'Pallet', location, contents, lotNumber: pallet.lotNumber, batchNumber: pallet._id,
+                            receive: { date: now, by: user._id },
+                        }], { session });
+                    } else {
+                        storage.location = location; storage.contents = contents;
+                        storage.lastMoved = { date: now, by: user._id };
+                        await storage.save({ session });
+                    }
+                    pallet.status = action === 'putaway' ? 'Putaway' : 'Stored';
+                    pallet.trace.push({ date: now, by: user._id, action: action === 'putaway' ? 'Putaway confirmed (' + quantity + ' units)' : 'Stored at ' + formatLocation(location) });
+                    await pallet.save({ session });
+                    return pallet;
                 });
-
-            pallet.status = 'Stored';
-            pallet.trace.push({ date: new Date(), by, action: `Stored at ${formatLocation(location)}` });
-            await pallet.save();
-
-            callback({ status: "success", message: "Pallet stored successfully", payload: pallet });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
-
-    // Phase 2 — final confirmation: count the pallet into finishedGoods inventory.
-    socket.on("pallet:putaway", async (payload, callback) => {
-        try {
-            const { palletId, location, by } = payload;
-            if (!palletId) return callback({ status: "error", message: "Missing palletId" });
-
-            const pallet = await db.pallet.findById(palletId);
-            if (!pallet) return callback({ status: "error", message: "Pallet not found" });
-            if (pallet.status === 'Putaway') return callback({ status: "error", message: "Pallet already putaway" });
-
-            let storage = await db.storage.findOne({ batchNumber: pallet._id });
-            if (!storage && !location?.zone) return callback({ status: "error", message: "Pallet has no storage location — store it first or provide a location" });
-
-            const quantity = palletUnits(pallet);
-
-            let finishedGoods = await db.finishedGoods.findOne({ productId: pallet.productId });
-            if (!finishedGoods) finishedGoods = await db.finishedGoods.create({
-                productId: pallet.productId,
-                styleCode: pallet.styleCode,
-                styleName: pallet.productName || pallet.styleCode || 'Unknown',
-                category: 'Final Product'
-            });
-
-            await finishedGoods.updateStock(quantity, 'add');
-
-            // One-step putaway for a still-Pending pallet: create the storage record now
-            if (!storage) {
-                storage = await db.storage.create({
-                    type: 'Pallet',
-                    location,
-                    contents: [{ inventoryId: finishedGoods._id, inventoryType: 'finishedGoods', sku: pallet.styleCode, quantity }],
-                    lotNumber: pallet.lotNumber,
-                    batchNumber: pallet._id,
-                    receive: { date: new Date(), by }
-                });
-            } else {
-                // Point contents at the resolved finishedGoods doc (was productId placeholder)
-                await db.storage.updateOne(
-                    { _id: storage._id },
-                    { $set: { "contents.0.inventoryId": finishedGoods._id, "contents.0.quantity": quantity } }
-                );
-            }
-
-            pallet.status = 'Putaway';
-            pallet.trace.push({ date: new Date(), by, action: `Putaway confirmed (${quantity} units)` });
-            await pallet.save();
-
-            callback({ status: "success", message: "Putaway confirmed successfully", payload: pallet });
-        } catch (error) {
-            callback({ status: "error", message: error.message });
-        }
-    });
-
+                callback({ status: 'success', payload: result });
+            } catch (error) { callback({ status: 'error', message: error.message }); }
+        });
+    }
 };

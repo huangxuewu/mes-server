@@ -5,6 +5,9 @@ const http = require("http");
 const TEN_MB = 1e7;
 
 const app = express();
+// Heroku appends the client address immediately before its router hop. Local servers ignore forwarded headers.
+// https://devcenter.heroku.com/articles/http-routing#heroku-headers
+if (process.env.DYNO) app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, { path: '/socket', cors: { origin: '*' }, maxHttpBufferSize: TEN_MB });
 

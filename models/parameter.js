@@ -27,10 +27,10 @@ Parameter.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("parameter:update", change.fullDocument);   
+                io.except('data-sync:parameters').emit("parameter:update", change.fullDocument);
                 break;
             case "delete":
-                io.emit("parameter:delete", change.documentKey._id);
+                io.except('data-sync:parameters').emit("parameter:delete", change.documentKey._id);
                 break;
         }
     })
