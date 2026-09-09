@@ -60,3 +60,34 @@ test('discovery tokens rotate without breaking recently observed neighbors', asy
     env.service.observe(b, { tokens: [old.token] });
     env.service.remove('a'); assert.equal(env.service.snapshot().length, 1);
 });
+
+test('unchanged heartbeats and discovery do not broadcast duplicate presence', async () => {
+    const env = fixture(), a = env.socket('a'), b = env.socket('b');
+    const pa = await env.service.register(a), pb = await env.service.register(b);
+    env.service.observe(a, { tokens: [pb.token] });
+    env.service.observe(b, { tokens: [pa.token] });
+    const count = env.messages.length;
+    env.advance(5000);
+    await env.service.register(a);
+    env.service.observe(a, { tokens: [pb.token] });
+    env.service.observe(b, { tokens: [pa.token] });
+    assert.equal(env.messages.length, count);
+    env.service.observe(a, { tokens: [] });
+    assert.equal(env.messages.length, count + 2, 'a real network change still reaches both peers');
+    env.service.remove('b');
+    assert.equal(env.messages.at(-1).data.length, 1);
+});
+
+test('mutual discovery preserves transitive groups and splits after observations expire', async () => {
+    const env = fixture(), sockets = ['a', 'b', 'c', 'd'].map(id => env.socket(id));
+    const peers = [];
+    for (const socket of sockets) peers.push(await env.service.register(socket));
+    env.service.observe(sockets[0], { tokens: [peers[1].token] });
+    env.service.observe(sockets[1], { tokens: [peers[0].token, peers[2].token] });
+    env.service.observe(sockets[2], { tokens: [peers[1].token] });
+    const list = env.service.snapshot();
+    assert.equal(new Set(list.slice(0, 3).map(peer => peer.network)).size, 1);
+    assert.notEqual(list[2].network, list[3].network);
+    env.advance(21000);
+    assert.equal(new Set(env.service.snapshot().map(peer => peer.network)).size, 4);
+});

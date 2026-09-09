@@ -29,6 +29,7 @@ const locate = async socket => {
 
 const createSharing = ({ io, authorize = getActiveSessionUser, locatePeer = locate, now = Date.now }) => {
     const peers = new Map();
+    let published = '';
     const active = peer => peer && peer.socket.connected && peer.generation === peer.socket.data.sessionGeneration
         && peer.socket.data.expiresAt > now() && now() - peer.seen < 45000;
     const snapshot = () => {
@@ -38,6 +39,7 @@ const createSharing = ({ io, authorize = getActiveSessionUser, locatePeer = loca
             if (now() - (peer.observedAt || 0) > 20000 || now() - (other.observedAt || 0) > 20000) continue;
             if (!peer.nearby.has(other.socket.id) || !other.nearby.has(peer.socket.id)) continue;
             const from = groups.get(other.socket.id), to = groups.get(peer.socket.id);
+            if (from === to) continue;
             for (const [id, group] of groups) if (group === from) groups.set(id, to);
         }
         return current.map(peer => ({ id: peer.socket.id, userId: String(peer.user._id),
@@ -46,6 +48,9 @@ const createSharing = ({ io, authorize = getActiveSessionUser, locatePeer = loca
     };
     const publish = () => {
         const payload = snapshot();
+        const signature = JSON.stringify(payload);
+        if (signature === published) return;
+        published = signature;
         for (const peer of peers.values()) if (active(peer)) peer.socket.emit('sharing:peers', payload);
     };
     const remove = id => { if (peers.delete(id)) publish(); };
