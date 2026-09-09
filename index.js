@@ -43,6 +43,7 @@ app.use(session({
 
 // Mount API routes
 app.use('/api', apiRoutes);
+app.use('/station-updates', require('./routes/stationUpdates'));
 app.use(oauthRouter);
 app.use('/addon/labelMaker/finishProduct', finishProductLabelRouter);
 

@@ -70,7 +70,9 @@ module.exports = (socket, io) => {
             const deployment = payload.deployment;
             socket.data.stationDeployment = ['idle', 'checking', 'downloading', 'installing', 'upToDate', 'failed'].includes(deployment?.status)
                 ? { status: deployment.status, version: typeof deployment.version === 'string' ? deployment.version.slice(0, 100) : '',
-                    error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '' }
+                    error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '',
+                    ...(Number.isFinite(deployment.percent) ? { percent: Math.max(0, Math.min(100, Math.floor(deployment.percent))) } : {}),
+                    ...(['github', 'server'].includes(deployment.source) ? { source: deployment.source } : {}) }
                 : null;
             callback({ status: 'success', payload: station });
             void roster.publish();
@@ -100,12 +102,17 @@ module.exports = (socket, io) => {
             const user = await getActiveSessionUser(socket);
             if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
             if (typeof payload?._id !== 'string' || !/^[a-f\d]{24}$/i.test(payload._id)) throw new Error('Invalid station');
+            const release = await getLatestRelease({ force: true });
+            const currentUser = await getActiveSessionUser(socket);
+            if (!hasPermission(currentUser, 'access', 'configuration.page.access')) throw new Error('Access denied');
             const station = await db.station.findById(payload._id).lean();
             if (!station?.stationId) throw new Error('Station is not linked');
-            const update = getStationUpdate(station.computer?.appVersion, await getLatestRelease());
+            const update = getStationUpdate(station.computer?.appVersion, release);
+            void roster.publish();
             if (update.remoteDeploySupported !== true) throw new Error('Remote deployment requires MES 26.3317.1990 or later');
             if (update.error) throw new Error('Unable to check the latest MES release. Try again later.');
             if (!update.available) throw new Error('Station is already up to date');
+            if (payload.version && payload.version !== release.version) throw new Error('The latest release changed. Review the updated version and try again.');
             const target = [...io.sockets.sockets.values()]
                 .filter(client => client.connected && client.data.stationPresence?._id === String(station._id)
                     && client.data.stationPresence.stationId === station.stationId)
@@ -118,7 +125,7 @@ module.exports = (socket, io) => {
             const previousDeployment = target.data.stationDeployment;
             try {
                 const response = await new Promise((resolve, reject) => {
-                    target.timeout(5000).emit('station:deploy', { _id: String(station._id), stationId: station.stationId }, (error, result) => {
+                    target.timeout(5000).emit('station:deploy', { _id: String(station._id), stationId: station.stationId, version: release.version }, (error, result) => {
                         if (error) return reject(new Error('Station did not acknowledge deployment. Refresh its status before retrying.'));
                         resolve(result);
                     });

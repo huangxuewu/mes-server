@@ -16,7 +16,10 @@ const fixture = (station, options = {}) => {
     delete require.cache[paths[2]];
     delete require.cache[paths[3]];
     require.cache[paths[4]] = { id: paths[4], filename: paths[4], loaded: true, exports: {
-        getStationUpdate, getLatestRelease: async () => options.release || { version: '26.3318.1', error: '' },
+        getStationUpdate, getLatestRelease: async request => {
+            options.releaseRequests?.push(request);
+            return options.release || { version: '26.3318.1', error: '' };
+        },
     } };
     const handlers = {};
     const emitted = [];
@@ -313,7 +316,7 @@ test('deployment targets only the currently linked station and records acceptanc
     const env = fixture({ findById: id => { assert.equal(id, record._id); return { lean: async () => record }; } });
     const target = deploymentTarget(env, (event, payload, callback) => {
         assert.equal(event, 'station:deploy');
-        assert.deepEqual(payload, { _id: record._id, stationId: identity });
+        assert.deepEqual(payload, { _id: record._id, stationId: identity, version: '26.3318.1' });
         callback(null, { success: true });
     });
     const result = await env.call('station:deploy', { _id: record._id, url: 'https://untrusted.invalid/installer.exe' });
@@ -335,6 +338,16 @@ test('deployment rejects offline, replaced, unsupported, and busy stations', asy
         modify(target);
         assert.equal((await env.call('station:deploy', { _id: record._id })).status, 'error');
     }
+});
+
+test('deployment refreshes release discovery and rejects a version different from the operator selection', async () => {
+    const releaseRequests = [];
+    const env = fixture({ findById: () => ({ lean: async () => record }) }, { releaseRequests });
+    deploymentTarget(env, () => assert.fail('Must not deploy an unreviewed release'));
+    const result = await env.call('station:deploy', { _id: record._id, version: '26.3317.9999' });
+    assert.equal(result.status, 'error');
+    assert.match(result.message, /latest release changed/);
+    assert.equal(releaseRequests[0].force, true);
 });
 
 test('failed or missing client acknowledgments are not reported as successful deployments', async () => {
