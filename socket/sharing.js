@@ -1,31 +1,9 @@
 const { randomBytes } = require('node:crypto');
-const { isIP } = require('node:net');
-const axios = require('axios');
+const { createRegionLocator } = require('../utils/sharingLocation');
 const { getActiveSessionUser, onSessionEnded } = require('./session');
 
 const services = new WeakMap();
-const locationCache = new Map();
-
-const locate = async socket => {
-    // The trusted Heroku router appends the actual client to the forwarded chain.
-    const forwarded = process.env.DYNO ? socket.handshake.headers['x-forwarded-for']?.split(',').at(-1)?.trim() : null;
-    const ip = String(forwarded || socket.handshake.address || '').replace(/^::ffff:/, '');
-    if (!isIP(ip) || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1$|f[cd]|fe80:)/i.test(ip)) return null;
-    const cached = locationCache.get(ip);
-    if (cached?.expires > Date.now()) return cached.location;
-    if (!process.env.SHARING_GEO_ACCOUNT_ID || !process.env.SHARING_GEO_LICENSE_KEY) return null;
-    let location = null;
-    try {
-        const { data } = await axios.get(`https://geolite.info/geoip/v2.1/city/${encodeURIComponent(ip)}`, {
-            auth: { username: process.env.SHARING_GEO_ACCOUNT_ID, password: process.env.SHARING_GEO_LICENSE_KEY }, timeout: 4000,
-        });
-        if (data.city?.geoname_id) location = { key: String(data.city.geoname_id),
-            label: [data.city.names?.en, data.subdivisions?.[0]?.iso_code, data.country?.iso_code].filter(Boolean).join(', ') };
-    } catch { /* Location is optional; sharing still works when lookup is unavailable. */ }
-    if (locationCache.size >= 2000) locationCache.delete(locationCache.keys().next().value);
-    locationCache.set(ip, { location, expires: Date.now() + (location ? 86400000 : 300000) });
-    return location;
-};
+const locate = createRegionLocator();
 
 const createSharing = ({ io, authorize = getActiveSessionUser, locatePeer = locate, now = Date.now }) => {
     const peers = new Map();
@@ -58,7 +36,7 @@ const createSharing = ({ io, authorize = getActiveSessionUser, locatePeer = loca
         const generation = socket.data.sessionGeneration;
         const user = await authorize(socket);
         const previous = peers.get(socket.id);
-        const region = previous?.generation === generation ? previous.region : await locatePeer(socket);
+        const region = await locatePeer(socket);
         if (!socket.connected || generation !== socket.data.sessionGeneration || socket.data.expiresAt <= now()) throw new Error('Session changed');
         const peer = previous?.generation === generation ? previous : { socket, generation, nearby: new Set(), token: '', issued: 0 };
         if (now() - peer.issued > 60000 || !peer.token) {

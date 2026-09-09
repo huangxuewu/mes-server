@@ -102,8 +102,17 @@ module.exports = (socket, io) => {
 
     socket.on("config:update", async (data, callback) => {
         try {
-            console.log(data);
             const { key, ...update } = data;
+            if (key === 'integration.ipinfo.token') {
+                if (typeof update.value !== 'string') throw new Error('IPinfo token must be text');
+                const value = update.value.trim();
+                if (value.length > 256 || /\s/.test(value)) throw new Error('Invalid IPinfo token');
+                const config = await db.config.findOneAndUpdate({ key }, {
+                    $set: { value },
+                    $setOnInsert: { _id: `cfg.${key}`, type: 'String', scope: 'Global', status: 'Active', effective: { from: new Date() }, version: 1 },
+                }, { new: true, upsert: true, runValidators: true });
+                return callback({ status: 'success', message: 'Config updated successfully', payload: config });
+            }
             const config = await db.config.findOneAndUpdate({ key }, { $set: update }, { new: true });
             callback({ status: "success", message: "Config updated successfully", payload: config });
         } catch (error) {
