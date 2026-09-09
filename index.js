@@ -70,4 +70,5 @@ app.get("/health", (req, res) => {
 
 server.listen(PORT, HOST, () => {
     console.log("Server is running on ", "http://" + HOST + ":" + PORT);
+    require('./utils/stationRelease').startReleaseChecks();
 });

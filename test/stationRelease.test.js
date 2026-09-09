@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const { getStationUpdate } = require('../utils/stationRelease');
 
 test('MES versions compare numerically with an inclusive remote deployment minimum', () => {
@@ -33,6 +35,43 @@ const fixture = (t, get) => {
 
 const manifest = JSON.stringify({ version: '26.3317.1990', files: [{ url: 'MES-26.3317.1990.exe',
     sha512: Buffer.alloc(64).toString('base64'), size: 100 }] });
+
+test('startup warms the release cache, refreshes without clients, and recovers from upstream failure', async () => {
+    let latest = manifest, calls = 0, refresh, unref = false;
+    const errors = [];
+    const module = { exports: {} };
+    vm.runInNewContext(fs.readFileSync(require.resolve('../utils/stationRelease'), 'utf8'), {
+        module, require: name => name === 'axios' ? { get: async () => {
+            calls++;
+            if (!latest) throw new Error('GitHub unavailable');
+            return { data: latest };
+        } } : require(name),
+        setInterval: (callback, delay) => {
+            assert.equal(delay, 60000);
+            assert.equal(refresh, undefined);
+            refresh = callback;
+            return { unref: () => { unref = true; } };
+        }, console: { error: message => errors.push(message) },
+    });
+    const release = module.exports;
+    release.startReleaseChecks();
+    release.startReleaseChecks();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+    assert.equal(unref, true);
+    assert.equal((await release.getLatestRelease()).version, '26.3317.1990');
+    assert.equal(calls, 1);
+    latest = null;
+    await refresh();
+    assert.equal((await release.getLatestRelease()).error, 'releaseUnavailable');
+    assert.equal(errors.length, 1);
+    latest = manifest.replaceAll('26.3317.1990', '26.3319.1');
+    await refresh();
+    assert.equal((await release.getLatestRelease()).version, '26.3319.1');
+    assert.equal((await release.getLatestRelease()).error, '');
+    assert.equal((await release.getReleaseManifest('latest')).version, '26.3319.1');
+    assert.equal(calls, 3);
+});
 
 test('release lookup uses the published updater manifest and shares concurrent and cached requests', async t => {
     let calls = 0;

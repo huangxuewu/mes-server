@@ -31,6 +31,8 @@ module.exports = (socket, io) => {
     socket.on('station:heartbeat', async (payload, callback) => {
         try {
             if (typeof payload?.stationId !== 'string' || !payload?._id) throw new Error('Invalid station identity');
+            const previousDeployment = socket.data.stationDeployment;
+            const heartbeat = socket.data.stationHeartbeat = (socket.data.stationHeartbeat || 0) + 1;
             const source = payload.computer || {};
             const computer = {};
             for (const key of ['hostname', 'platform', 'release', 'arch', 'cpu', 'appVersion'])
@@ -68,12 +70,14 @@ module.exports = (socket, io) => {
             socket.data.screenshotSupported = payload.screenshotSupported === true;
             socket.data.liveSupported = payload.liveSupported === true;
             const deployment = payload.deployment;
-            socket.data.stationDeployment = ['idle', 'checking', 'downloading', 'installing', 'upToDate', 'failed'].includes(deployment?.status)
-                ? { status: deployment.status, version: typeof deployment.version === 'string' ? deployment.version.slice(0, 100) : '',
-                    error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '',
-                    ...(Number.isFinite(deployment.percent) ? { percent: Math.max(0, Math.min(100, Math.floor(deployment.percent))) } : {}),
-                    ...(['github', 'server'].includes(deployment.source) ? { source: deployment.source } : {}) }
-                : null;
+            if (deployment !== undefined && socket.data.stationHeartbeat === heartbeat && socket.data.stationDeployment === previousDeployment) {
+                socket.data.stationDeployment = ['idle', 'checking', 'downloading', 'installing', 'upToDate', 'failed'].includes(deployment?.status)
+                    ? { status: deployment.status, version: typeof deployment.version === 'string' ? deployment.version.slice(0, 100) : '',
+                        error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '',
+                        ...(Number.isFinite(deployment.percent) ? { percent: Math.max(0, Math.min(100, Math.floor(deployment.percent))) } : {}),
+                        ...(['github', 'server'].includes(deployment.source) ? { source: deployment.source } : {}) }
+                    : null;
+            }
             callback({ status: 'success', payload: station });
             void roster.publish();
             if (screenshotBecameAvailable) void screenshots.schedule().catch(error => console.error('[Station screenshots]', error.message));

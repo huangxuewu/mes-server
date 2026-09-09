@@ -79,4 +79,16 @@ const getStationUpdate = (version, release) => {
     };
 };
 
-module.exports = { getLatestRelease, getStationUpdate, getReleaseManifest, RELEASE_BASE };
+let releaseCheckTimer;
+const startReleaseChecks = () => {
+    if (releaseCheckTimer) return;
+    const refresh = async () => {
+        const release = await getLatestRelease({ force: true });
+        if (release.error) console.error('[Station updates] Latest release unavailable; retrying in one minute.');
+    };
+    void refresh();
+    releaseCheckTimer = setInterval(refresh, 60000);
+    releaseCheckTimer.unref();
+};
+
+module.exports = { getLatestRelease, getStationUpdate, getReleaseManifest, startReleaseChecks, RELEASE_BASE };

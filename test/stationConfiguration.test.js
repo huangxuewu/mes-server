@@ -400,6 +400,39 @@ test('heartbeat reports bounded deployment status without adding it to the datab
     assert.equal((await env.call('stations:get')).payload[0].deployment, null);
 });
 
+test('a slow heartbeat cannot reset a deployment accepted while its database write was pending', async () => {
+    let finish;
+    const env = fixture({ findOneAndUpdate: () => new Promise(resolve => { finish = resolve; }) });
+    env.socket.data.stationDeployment = { status: 'idle' };
+    const reporting = env.call('station:heartbeat', { _id: record._id, stationId: identity, deployment: { status: 'idle' } });
+    env.socket.data.stationDeployment = { status: 'checking', version: '26.3318.1' };
+    finish(record);
+    assert.equal((await reporting).status, 'success');
+    assert.equal(env.socket.data.stationDeployment.status, 'checking');
+});
+
+test('missing deployment telemetry preserves the connected station updater status', async () => {
+    const env = fixture({ findOneAndUpdate: async () => record });
+    env.socket.data.stationDeployment = { status: 'downloading', version: '26.3318.1', percent: 50 };
+    await env.call('station:heartbeat', { _id: record._id, stationId: identity });
+    assert.equal(env.socket.data.stationDeployment?.status, 'downloading');
+    assert.equal(env.socket.data.stationDeployment?.percent, 50);
+});
+
+test('overlapping heartbeats retain the newest progress regardless of database completion order', async () => {
+    for (const order of [[0, 1], [1, 0]]) {
+        const pending = [];
+        const env = fixture({ findOneAndUpdate: () => new Promise(resolve => pending.push(resolve)) });
+        const reports = [25, 75].map(percent => env.call('station:heartbeat', { _id: record._id, stationId: identity,
+            deployment: { status: 'downloading', percent } }));
+        for (const index of order) {
+            pending[index](record);
+            await reports[index];
+        }
+        assert.equal(env.socket.data.stationDeployment.percent, 75);
+    }
+});
+
 test('station update protects identity and telemetry and delivers settings to the linked station', async () => {
     let update;
     const env = fixture({ findByIdAndUpdate: async (_id, data, options) => {
