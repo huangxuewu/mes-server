@@ -47,6 +47,17 @@ test('live sessions stream validated desktop frames and route annotations and tw
     assert.ok(env.events.some(event => event.recipient === 'target' && event.event === 'station:live:ended'));
 });
 
+test('selected monitor is forwarded and must be acknowledged by the station', async () => {
+    const env = fixture({ command: (input, callback) => callback(null, { success: true, displayId: input.displayId }) });
+    const session = await env.start({ displayId: '7' });
+    assert.equal(env.commands[0].displayId, '7');
+    env.service.stop(env.viewer, session.sessionId);
+    const legacy = fixture();
+    await assert.rejects(legacy.start({ displayId: '7' }), /updateRequired/);
+    assert.equal(legacy.service.sessions.size, 0);
+    for (const displayId of ['../screen', 7, {}, '']) await assert.rejects(env.start({ displayId }), /invalidAction/);
+});
+
 test('ending established Live requests one fresh screenshot even when either participant disconnects', async () => {
     for (const participant of ['stop', 'viewer', 'target']) {
         const env = fixture();

@@ -8,7 +8,7 @@ module.exports = (socket, io) => {
             if (!input || typeof input !== 'object') throw new Error('invalidAction');
             if (action === 'start' && !/^[a-f\d]{24}$/i.test(input._id || '')) throw new Error('invalidAction');
             const value = action === 'start' ? input._id : ['frame', 'stop'].includes(action) ? input.sessionId : input;
-            callback({ status: 'success', payload: await live[action](socket, value, { frameProtocol: input.frameProtocol }) });
+            callback({ status: 'success', payload: await live[action](socket, value, { frameProtocol: input.frameProtocol, displayId: input.displayId }) });
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });
     socket.on('disconnect', () => live.stopForSocket(socket.id));

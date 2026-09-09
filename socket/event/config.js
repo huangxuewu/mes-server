@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const { getActiveSessionUser, hasPermission } = require('../session');
 const { getStationScreenshots } = require('../../utils/stationScreenshots');
 const { getStationLive } = require('../../utils/stationLive');
+const { getStationRoster } = require('../../utils/stationRoster');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAC_PATTERN = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
@@ -79,12 +80,14 @@ const normalizeStation = value => {
 module.exports = (socket, io) => {
     const screenshots = getStationScreenshots(io);
     const live = getStationLive(io);
+    const roster = getStationRoster(io);
     const resolved = (station, migrated = false) => {
         if (socket.data.stationPresence?._id !== String(station._id) || socket.data.stationPresence?.stationId !== station.stationId) {
             delete socket.data.stationPresence;
             delete socket.data.stationDeployment;
         }
         socket.data.stationConnection = { _id: String(station._id), stationId: station.stationId };
+        void roster.publish();
         return { outcome: 'resolved', station, migrated };
     };
 
@@ -147,6 +150,7 @@ module.exports = (socket, io) => {
             if (station && !station.stationId)
                 socket.data.stationConnection = { _id: String(station._id), stationId: null };
             callback({ status: "success", message: "Station fetched successfully", payload: station });
+            void roster.publish();
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -157,6 +161,7 @@ module.exports = (socket, io) => {
             const { stationId, lastSeenAt, screenshot, screenshotGeneration, screenshotSupported, screenshotCleanup, screenshotsEnabled, ...legacyStation } = data;
             const station = await db.station.create(legacyStation);
             callback({ status: "success", message: "Station created successfully", payload: station });
+            void roster.publish();
         } catch (error) {
             callback({ status: "error", message: error.message });
         }
@@ -199,6 +204,7 @@ module.exports = (socket, io) => {
                     && client.data.stationPresence.stationId === station.stationId) client.emit('station:update', station);
             }
             callback({ status: "success", message: "Station updated successfully", payload: station });
+            void roster.publish();
             void live.changed(_id).catch(() => {});
             if (data.screenshotsEnabled !== undefined)
                 void screenshots.changed(_id).catch(error => console.error('[Station screenshots]', error.message));
@@ -225,6 +231,7 @@ module.exports = (socket, io) => {
                 client.emit('station:delete', deleted);
             }
             callback({ status: "success", message: "Station deleted successfully", payload: deleted });
+            void roster.publish();
             void live.changed(deleted._id).catch(() => {});
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -275,6 +282,8 @@ module.exports = (socket, io) => {
                 return callback({ status: "success", message: "Station identity conflict", payload: conflict('ownership-race', stations) });
             }
             callback({ status: "error", message: error.message });
+        } finally {
+            if (!socket.data.stationConnection) void roster.publish();
         }
     });
 
@@ -355,6 +364,7 @@ module.exports = (socket, io) => {
             );
             callback({ status: "success", message: "Station released successfully", payload: { released: !!station } });
             if (station) {
+                void roster.publish();
                 void live.changed(station._id).catch(() => {});
                 void screenshots.changed(station._id).catch(error => console.error('[Station screenshots]', error.message));
             }

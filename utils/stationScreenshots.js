@@ -8,8 +8,8 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const services = new WeakMap();
 const generation = station => station.screenshotGeneration || 0;
 const identity = station => ({ _id: String(station._id), stationId: station.stationId });
-const storagePath = (station, mime = station.screenshot?.mime || 'image/jpeg') =>
-    `/DH MES/station-screenshots/${station._id}/${station.stationId}/latest.${mime === 'image/webp' ? 'webp' : 'jpg'}`;
+const storagePath = (station, mime = station.screenshot?.mime || 'image/jpeg', displayId = '') =>
+    `/DH MES/station-screenshots/${station._id}/${station.stationId}/latest${displayId ? `-${displayId}` : ''}.${mime === 'image/webp' ? 'webp' : 'jpg'}`;
 const imageMime = contents => contents?.subarray(0, 4).toString() === 'RIFF' && contents.subarray(8, 12).toString() === 'WEBP'
     ? 'image/webp' : 'image/jpeg';
 const generationFilter = station => station.screenshotGeneration === undefined
@@ -76,6 +76,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             screenshot: station.screenshotsEnabled !== false && station.screenshot?.revision && station.screenshot.stationId === station.stationId
                 ? { revision: station.screenshot.revision, capturedAt: station.screenshot.capturedAt,
                     width: station.screenshot.width, height: station.screenshot.height, size: station.screenshot.size,
+                    ...(station.screenshot.displayId !== undefined ? { displayId: station.screenshot.displayId, displays: station.screenshot.displays || [] } : {}),
                     mime: station.screenshot.mime || 'image/jpeg' } : null,
             screenshotSupported: target ? target.data.screenshotSupported === true : station.screenshotSupported === true,
             screenshotCapturing: state.busy && station.screenshotsEnabled !== false,
@@ -131,7 +132,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             state.connectionId = target.id;
             void notify(id).catch(() => {});
             const response = await new Promise((resolve, reject) => {
-                target.timeout(15000).emit('station:screenshot:capture', { ...identity(station), generation: generation(station), format: 'webp' }, (error, result) => {
+                target.timeout(15000).emit('station:screenshot:capture', { ...identity(station), generation: generation(station), format: 'webp', allDisplays: true }, (error, result) => {
                     if (error) return reject(new Error('Station screenshot timed out'));
                     resolve(result);
                 });
@@ -141,6 +142,24 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
                 : response.contents instanceof Uint8Array ? Buffer.from(response.contents) : null;
             const dimensions = await validateImage(contents, { allowWebp: true });
             const mime = imageMime(contents);
+            const displays = [];
+            if (response.displayId !== undefined) {
+                if (typeof response.displayId !== 'string' || !/^-?\d{1,20}$/.test(response.displayId)
+                    || !Array.isArray(response.displays) || response.displays.length > 7) throw new Error('Invalid screenshot displays');
+                const ids = new Set([response.displayId]);
+                let totalBytes = contents.length;
+                for (const display of response.displays) {
+                    if (typeof display?.displayId !== 'string' || !/^-?\d{1,20}$/.test(display.displayId) || ids.has(display.displayId))
+                        throw new Error('Invalid screenshot display');
+                    ids.add(display.displayId);
+                    const bytes = Buffer.isBuffer(display.contents) ? display.contents
+                        : display.contents instanceof Uint8Array ? Buffer.from(display.contents) : null;
+                    const size = await validateImage(bytes, { allowWebp: true });
+                    totalBytes += bytes.length;
+                    if (totalBytes > 8 * 1024 * 1024) throw new Error('Screenshot displays are too large');
+                    displays.push({ displayId: display.displayId, contents: bytes, mime: imageMime(bytes), ...size, size: bytes.length });
+                }
+            } else if (response.displays?.length) throw new Error('Invalid screenshot displays');
             await assertCurrent(station, target);
             const capturedAt = new Date(now());
             const folders = ['/DH MES', '/DH MES/station-screenshots', `/DH MES/station-screenshots/${station._id}`,
@@ -153,6 +172,18 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             const uploaded = await dropbox.filesUpload({ path: storagePath(station, mime), contents, mode: { '.tag': 'overwrite' }, autorename: false, mute: true }, { signal });
             await assertCurrent(station, target);
             const screenshot = { stationId: station.stationId, revision: uploaded.result.rev, capturedAt, ...dimensions, size: contents.length, mime };
+            if (response.displayId !== undefined) {
+                screenshot.displayId = response.displayId;
+                screenshot.displays = [];
+                for (const display of displays) {
+                    const uploadedDisplay = await dropbox.filesUpload({ path: storagePath(station, display.mime, display.displayId), contents: display.contents,
+                        mode: { '.tag': 'overwrite' }, autorename: false, mute: true }, { signal });
+                    await assertCurrent(station, target);
+                    const { contents: bytes, ...metadata } = display;
+                    screenshot.displays.push({ ...metadata, revision: uploadedDisplay.result.rev });
+                    await storeCache(station, `${display.displayId}:${uploadedDisplay.result.rev}`, bytes).catch(() => {});
+                }
+            }
             const saved = await db.station.findOneAndUpdate({ ...identity(station), screenshotsEnabled: { $ne: false }, ...generationFilter(station) },
                 { $set: { screenshot } }, { new: true }).lean();
             if (!saved) throw new Error('Screenshot settings changed');
@@ -163,6 +194,14 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             // each successful capture if Dropbox was temporarily unavailable.
             await dropbox.filesDeleteV2({ path: storagePath(station, mime === 'image/webp' ? 'image/jpeg' : 'image/webp') },
                 { signal: AbortSignal.timeout(5000) }).catch(() => {});
+            for (const previous of station.screenshot?.displays || []) {
+                const current = screenshot.displays?.find(display => display.displayId === previous.displayId);
+                if (current?.revision !== previous.revision)
+                    await fs.unlink(cachePath(station, `${previous.displayId}:${previous.revision}`)).catch(() => {});
+                if (!current || current.mime !== previous.mime)
+                    await dropbox.filesDeleteV2({ path: storagePath(station, previous.mime, previous.displayId) },
+                        { signal: AbortSignal.timeout(5000) }).catch(() => {});
+            }
             return project(saved);
         } catch (error) {
             state.error = String(error.message || 'Screenshot capture failed').slice(0, 500);
@@ -173,14 +212,10 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             if (state.afterLive) void schedule().catch(() => {});
         }
     };
-    const read = async (id, socket) => {
-        const session = socket.data.sessionGeneration;
-        await authorize(socket);
-        const station = await db.station.findById(id).lean();
-        if (!station?.stationId || station.screenshotsEnabled === false) throw new Error('Station screenshots are disabled');
-        if (!station.screenshot?.revision || station.screenshot.stationId !== station.stationId) throw new Error('No screenshot available');
-        const revision = station.screenshot.revision;
-        const file = cachePath(station, revision);
+    const readImage = async (station, metadata, displayId = '') => {
+        const revision = metadata.revision;
+        const cacheRevision = displayId ? `${displayId}:${revision}` : revision;
+        const file = cachePath(station, cacheRevision);
         let contents;
         try { contents = await fs.readFile(file); }
         catch {
@@ -188,20 +223,33 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
                 const signal = AbortSignal.timeout(30000);
                 const dropbox = await storage(signal);
                 await assertCurrent(station);
-                const result = await dropbox.filesDownload({ path: storagePath(station), rev: revision }, { signal });
+                const result = await dropbox.filesDownload({ path: storagePath(station, metadata.mime, displayId), rev: revision }, { signal });
                 const bytes = Buffer.from(result.result.fileBinary);
                 await validateImage(bytes, { allowWebp: true });
-                if (imageMime(bytes) !== (station.screenshot.mime || 'image/jpeg')) throw new Error('Screenshot format changed');
-                await storeCache(station, revision, bytes).catch(() => {});
+                if (imageMime(bytes) !== (metadata.mime || 'image/jpeg')) throw new Error('Screenshot format changed');
+                await storeCache(station, cacheRevision, bytes).catch(() => {});
                 return bytes;
             })().finally(() => downloads.delete(file)));
             contents = await downloads.get(file);
         }
+        return contents;
+    };
+    const read = async (id, socket) => {
+        const session = socket.data.sessionGeneration;
+        await authorize(socket);
+        const station = await db.station.findById(id).lean();
+        if (!station?.stationId || station.screenshotsEnabled === false) throw new Error('Station screenshots are disabled');
+        if (!station.screenshot?.revision || station.screenshot.stationId !== station.stationId) throw new Error('No screenshot available');
+        const revision = station.screenshot.revision;
+        const contents = await readImage(station, station.screenshot);
+        const displays = [];
+        for (const display of station.screenshot.displays || [])
+            displays.push({ ...display, contents: await readImage(station, display, display.displayId) });
         await authorize(socket);
         const current = await assertCurrent(station);
         if (session !== socket.data.sessionGeneration || !socket.connected || current.screenshot?.revision !== revision)
             throw new Error('Screenshot request changed');
-        return { ...project(current), contents, mime: current.screenshot.mime || 'image/jpeg' };
+        return { ...project(current), contents, mime: current.screenshot.mime || 'image/jpeg', ...(displays.length ? { displays } : {}) };
     };
     const schedule = async () => {
         const ids = [...new Set([...io.sockets.sockets.values()]
@@ -258,9 +306,13 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
         for (const id of new Set(cached.map(file => file.slice(0, 24)))) {
             if (stateFor(id).busy) continue;
             const station = await db.station.findById(id).lean();
-            const retained = station?.screenshot?.revision && station.screenshot.stationId === station.stationId
-                ? path.basename(cachePath(station, station.screenshot.revision)) : null;
-            for (const file of cached.filter(file => file.startsWith(`${id}-`) && file !== retained))
+            const retained = new Set();
+            if (station?.screenshot?.revision && station.screenshot.stationId === station.stationId) {
+                retained.add(path.basename(cachePath(station, station.screenshot.revision)));
+                for (const display of station.screenshot.displays || [])
+                    retained.add(path.basename(cachePath(station, `${display.displayId}:${display.revision}`)));
+            }
+            for (const file of cached.filter(file => file.startsWith(`${id}-`) && !retained.has(file)))
                 await fs.unlink(path.join(cacheDir, file)).catch(() => {});
         }
     };

@@ -3,9 +3,18 @@ const { isIP } = require('node:net');
 const { getActiveSessionUser, hasPermission } = require('../session');
 const { getLatestRelease, getStationUpdate } = require('../../utils/stationRelease');
 const { getStationScreenshots } = require('../../utils/stationScreenshots');
+const { getStationRoster } = require('../../utils/stationRoster');
 
 module.exports = (socket, io) => {
     const screenshots = getStationScreenshots(io);
+    const roster = getStationRoster(io);
+    socket.on('disconnect', () => {
+        if (socket.data.stationConnection || socket.data.stationPresence) void roster.publish();
+    });
+    socket.on('stations:unsubscribe', () => {
+        delete socket.data.stationsViewer;
+        socket.data.stationsSubscription = (socket.data.stationsSubscription || 0) + 1;
+    });
     for (const action of ['get', 'capture']) socket.on(`station:screenshot:${action}`, async (payload, callback) => {
         try {
             const user = await getActiveSessionUser(socket);
@@ -49,6 +58,7 @@ module.exports = (socket, io) => {
             if (!station) {
                 delete socket.data.stationPresence;
                 delete socket.data.stationConnection;
+                void roster.publish();
                 throw new Error('Station identity is no longer linked');
             }
             if (!socket.connected) return;
@@ -63,28 +73,25 @@ module.exports = (socket, io) => {
                     error: typeof deployment.error === 'string' ? deployment.error.slice(0, 500) : '' }
                 : null;
             callback({ status: 'success', payload: station });
+            void roster.publish();
             if (screenshotBecameAvailable) void screenshots.schedule().catch(error => console.error('[Station screenshots]', error.message));
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
     socket.on('stations:get', async (_payload, callback) => {
+        const subscription = socket.data.stationsSubscription || 0;
         try {
             const user = await getActiveSessionUser(socket);
             if (!hasPermission(user, 'access', 'configuration.page.access')) throw new Error('Access denied');
+            if (subscription !== (socket.data.stationsSubscription || 0)) throw new Error('Station subscription changed');
             socket.data.screenshotViewer = socket.data.sessionGeneration;
-            const stations = await db.station.find({}).sort({ name: 1, _id: 1 }).lean();
-            const release = await getLatestRelease();
-            const connections = [...io.sockets.sockets.values()]
-                .filter(client => client.connected)
-                .sort((a, b) => (b.data.stationPresence?.at || 0) - (a.data.stationPresence?.at || 0));
-            callback({ status: 'success', payload: stations.map(station => {
-                const connection = connections.find(client => {
-                    const identity = client.data.stationConnection || client.data.stationPresence;
-                    return identity?._id === String(station._id) && (identity.stationId || null) === (station.stationId || null);
-                });
-                return { ...station, ...screenshots.project(station), liveSupported: connection?.data.liveSupported === true, online: !!connection, deployment: connection?.data.stationDeployment || null,
-                    update: getStationUpdate(station.computer?.appVersion, release) };
-            }) });
+            socket.data.stationsViewer = socket.data.sessionGeneration;
+            const generation = socket.data.sessionGeneration;
+            const records = await roster.read();
+            const currentUser = await getActiveSessionUser(socket);
+            if (generation !== socket.data.sessionGeneration || !hasPermission(currentUser, 'access', 'configuration.page.access'))
+                throw new Error('Access denied');
+            callback({ status: 'success', payload: records });
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
@@ -119,6 +126,7 @@ module.exports = (socket, io) => {
                 if (!response?.success) throw new Error(response?.error || 'Station rejected deployment');
                 if (target.data.stationDeployment === previousDeployment) target.data.stationDeployment = { status: 'checking' };
                 callback({ status: 'success', payload: { _id: String(station._id), deployment: target.data.stationDeployment } });
+                void roster.publish();
             } finally { target.data.deploying = false; }
         } catch (error) { callback({ status: 'error', message: error.message }); }
     });

@@ -29,11 +29,60 @@ const fixture = (station, options = {}) => {
     } finally {
         paths.forEach((path, index) => previous[index] ? require.cache[path] = previous[index] : delete require.cache[path]);
     }
-    return { socket, io, emitted, call: (event, payload = {}) => new Promise(resolve => handlers[event](payload, resolve)) };
+    return { socket, io, emitted, handlers, call: (event, payload = {}) => new Promise(resolve => handlers[event](payload, resolve)) };
 };
 const identity = '123e4567-e89b-42d3-a456-426614174000';
 const record = { _id: '507f1f77bcf86cd799439011', stationId: identity, name: 'Line 1', location: 'Floor', application: 'SOFTWARE',
     computer: { appVersion: '26.3317.1990' } };
+
+test('station resolution, telemetry and disconnect push the current roster to subscribed viewers', async () => {
+    const chain = { sort: () => chain, lean: async () => [record] };
+    const env = fixture({ find: () => chain, findOneAndUpdate: async () => record });
+    const updates = [];
+    const viewer = { connected: true, data: { stationsViewer: 1, sessionGeneration: 1 },
+        emit: (event, payload) => updates.push({ event, payload }) };
+    env.io.sockets.sockets.set('viewer', viewer);
+    await env.call('station:resolve', { stationId: identity });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(updates.at(-1).event, 'stations:changed');
+    assert.equal(updates.at(-1).payload[0].online, true);
+    await env.call('station:heartbeat', { _id: record._id, stationId: identity, liveSupported: true,
+        deployment: { status: 'downloading' } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(updates.at(-1).payload[0].liveSupported, true);
+    assert.equal(updates.at(-1).payload[0].deployment.status, 'downloading');
+    env.socket.connected = false;
+    env.handlers.disconnect();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(updates.at(-1).payload[0].online, false);
+    assert.equal(updates.at(-1).payload[0].deployment, null);
+});
+
+test('roster subscription ends on leaving the page and rejects changed sessions or permissions', async () => {
+    const chain = { sort: () => chain, lean: async () => [record] };
+    const options = {};
+    const env = fixture({ find: () => chain, findOneAndUpdate: async () => record }, options);
+    env.socket.data.sessionGeneration = 1;
+    await env.call('stations:get');
+    assert.equal(env.socket.data.stationsViewer, 1);
+    await env.call('station:resolve', { stationId: identity });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(env.emitted.filter(item => item.event === 'stations:changed').length, 1);
+    env.handlers['stations:unsubscribe']();
+    await env.call('station:resolve', { stationId: identity });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(env.emitted.length, 1);
+    await env.call('stations:get');
+    env.socket.data.sessionGeneration++;
+    await env.call('station:resolve', { stationId: identity });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(env.emitted.length, 1);
+    await env.call('stations:get');
+    options.allowed = false;
+    await env.call('station:resolve', { stationId: identity });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(env.emitted.length, 1);
+});
 
 test('heartbeat binds only the matching station and bounds computer data', async () => {
     let update;

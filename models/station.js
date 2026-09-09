@@ -42,6 +42,9 @@ const stationSchema = new mongoose.Schema({
     screenshotSupported: { type: Boolean, default: false },
     screenshotCleanup: { type: [String], default: [] },
     screenshot: {
+        displayId: String,
+        displays: { type: [{ _id: false, displayId: String, revision: String, width: Number, height: Number, size: Number,
+            mime: { type: String, enum: ['image/jpeg', 'image/webp'] } }], default: undefined },
         mime: { type: String, enum: ['image/jpeg', 'image/webp'] },
         stationId: String,
         revision: String,

@@ -54,6 +54,8 @@ const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot
         return session;
     };
     const start = async (viewer, id, options = {}) => {
+        if (options.displayId !== undefined && (typeof options.displayId !== 'string' || !/^-?\d{1,20}$/.test(options.displayId)))
+            throw new Error('invalidAction');
         const viewerGeneration = viewer.data.sessionGeneration;
         const operator = await authorize(viewer);
         const station = await db.station.findById(id, STATION_FIELDS).lean();
@@ -70,7 +72,9 @@ const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot
         sessions.set(session.id, session);
         try {
             await valid(session);
-            const response = await command(session, 'start', { operator: String(operator?.displayName || operator?.username || '').slice(0, 100) });
+            const response = await command(session, 'start', { operator: String(operator?.displayName || operator?.username || '').slice(0, 100),
+                ...(options.displayId !== undefined ? { displayId: options.displayId } : {}) });
+            if (options.displayId !== undefined && response.displayId !== options.displayId) throw new Error('updateRequired');
             session.nativeOptimized = response.frameProtocol === 2;
             session.chatImages = response.chatImages === true;
             session.fileTransfer = response.fileTransfer === true;

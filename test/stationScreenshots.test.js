@@ -144,6 +144,43 @@ test('failed WebP publication retains the prior JPEG and does not delete it', as
     assert.ok((await env.service.read(env.station._id, env.viewer)).contents.equals(jpeg));
 });
 
+test('multiple monitors retain independent images through cache cleanup and offline recovery', async t => {
+    const portrait = await require('sharp')(jpeg).rotate(90).webp().toBuffer();
+    let displays = [{ displayId: '2', contents: portrait }];
+    const env = await fixture(t, { capture: callback => callback(null, { success: true, contents: jpeg, displayId: '1', displays }) });
+    await env.service.capture(env.station._id);
+    assert.equal(env.commands[0].payload.allDisplays, true);
+    assert.equal(env.station.screenshot.displayId, '1');
+    assert.equal(env.station.screenshot.displays[0].width, 360);
+    assert.equal(env.station.screenshot.displays[0].height, 640);
+    assert.equal(env.station.screenshot.displays[0].mime, 'image/webp');
+    assert.equal(env.station.screenshot.displays[0].contents, undefined);
+    await env.service.cleanup();
+    assert.equal((await fs.readdir(env.cacheDir)).length, 2);
+    for (const file of await fs.readdir(env.cacheDir)) await fs.unlink(path.join(env.cacheDir, file));
+    env.target.connected = false;
+    const restored = await createStationScreenshots(env.dependencies).read(env.station._id, env.viewer);
+    assert.ok(restored.contents.equals(jpeg));
+    assert.ok(restored.displays[0].contents.equals(portrait));
+    assert.equal(restored.displays[0].displayId, '2');
+    assert.ok(env.storageCalls.some(call => call.type === 'download' && call.path.endsWith('/latest-2.webp')));
+    env.target.connected = true;
+    displays = [];
+    await env.service.capture(env.station._id);
+    assert.equal(env.station.screenshot.displays.length, 0);
+    assert.ok(env.storageCalls.some(call => call.type === 'delete' && call.path.endsWith('/latest-2.webp')));
+});
+
+test('invalid monitor images and duplicate or unsafe monitor IDs cannot publish a partial capture', async t => {
+    for (const display of [{ displayId: '1', contents: jpeg }, { displayId: '../bad', contents: jpeg },
+        { displayId: '2', contents: Buffer.from('invalid') }]) {
+        const env = await fixture(t, { capture: callback => callback(null, { success: true, displayId: '1', contents: jpeg, displays: [display] }) });
+        await assert.rejects(env.service.capture(env.station._id), /Invalid screenshot/);
+        assert.equal(env.station.screenshot, undefined);
+        assert.equal(env.counts().uploads, 0);
+    }
+});
+
 test('privacy changes during Dropbox settings lookup prevent capture dispatch', async t => {
     const env = await fixture(t);
     const started = deferred();
