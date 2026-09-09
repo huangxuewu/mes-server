@@ -1,5 +1,7 @@
 # Station Live performance review — 2026-09-08
 
+Update September 9: WebRTC video is now the preferred transport, with this JPEG protocol retained as fallback. See [current transport and verification](station-live-assistance.md). The measurements below describe the earlier JPEG-only implementation.
+
 Follow-up: saved screenshots now select WebP when smaller, with JPEG fallback. Live remains JPEG. The separate [codec measurements](station-screenshots.md#codec-measurements) explain that decision; the Live benchmark below is unchanged.
 
 The principal bottleneck was repeatedly capturing, uploading, decoding, relaying, and rendering a complete desktop JPEG even when the desktop was unchanged. The implemented changes address that waste for the intended use of occasional desktop assistance. Fleet-wide capacity and smooth video performance remain unproven; this review does not certify either.

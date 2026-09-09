@@ -2,7 +2,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const services = new WeakMap();
 const STATION_FIELDS = '_id stationId screenshotsEnabled status screenshotGeneration';
 
-const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot = async () => {}, now = Date.now }) => {
+const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], refreshScreenshot = async () => {}, now = Date.now }) => {
     const sessions = new Map();
     const isSelf = (viewer, station, target) => viewer === target || viewer.id === target?.id
         || [viewer.data.stationConnection, viewer.data.stationPresence].some(binding => binding
@@ -17,7 +17,7 @@ const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot
         return target;
     };
     const command = (session, type, data = {}) => new Promise((resolve, reject) => {
-        session.target.timeout(6000).emit('station:live:command', { ...data, type, sessionId: session.id,
+        session.target.timeout(type === 'video' ? 12000 : 6000).emit('station:live:command', { ...data, type, sessionId: session.id,
             _id: session.stationId, stationId: session.identity, generation: session.generation }, (error, response) => {
             if (error || !response?.success) return reject(new Error(response?.error || 'connectionLost'));
             resolve(response);
@@ -76,12 +76,43 @@ const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot
                 ...(options.displayId !== undefined ? { displayId: options.displayId } : {}) });
             if (options.displayId !== undefined && response.displayId !== options.displayId) throw new Error('updateRequired');
             session.nativeOptimized = response.frameProtocol === 2;
+            session.videoSupported = options.videoProtocol === 1 && response.videoProtocol === 1;
             session.chatImages = response.chatImages === true;
             session.fileTransfer = response.fileTransfer === true;
             session.started = true;
             await valid(session);
-            return { sessionId: session.id, frameProtocol: 2, chatImages: session.chatImages, fileTransfer: session.fileTransfer };
+            return { sessionId: session.id, frameProtocol: 2, chatImages: session.chatImages, fileTransfer: session.fileTransfer,
+                ...(session.videoSupported ? { videoProtocol: 1, iceServers } : {}) };
         } catch (error) { end(session, error.message); throw error; }
+    };
+    const video = async (viewer, input) => {
+        const session = owned(viewer, input.sessionId);
+        if (!session.videoSupported || !['offer', 'stop', 'heartbeat'].includes(input.operation)) throw new Error('invalidAction');
+        if (input.operation === 'offer' && (session.videoAttempted || typeof input.sdp !== 'string'
+            || input.sdp.length > 65536 || !input.sdp.startsWith('v=0\r\n'))) throw new Error('invalidAction');
+        await valid(session);
+        session.touched = now();
+        if (input.operation === 'offer') {
+            if (session.videoAttempted || session.videoStopped) throw new Error('invalidAction');
+            session.videoAttempted = true;
+        }
+        // Stopping invalidates an in-flight offer before awaiting the station acknowledgement.
+        if (input.operation === 'stop') session.videoStopped = true;
+        if (input.operation === 'heartbeat' && (!session.videoAttempted || session.videoStopped)) return { active: false };
+        if (input.operation === 'heartbeat') {
+            if (now() - (session.videoHeartbeatAt ?? -Infinity) < 1000) throw new Error('tooFast');
+            session.videoHeartbeatAt = now();
+        }
+        const response = await command(session, 'video', { operation: input.operation,
+            ...(input.operation === 'offer' ? { sdp: input.sdp, iceServers } : {}) });
+        await valid(session);
+        if (input.operation === 'offer') {
+            if (session.videoStopped) throw new Error('ended');
+            if (typeof response.sdp !== 'string' || response.sdp.length > 65536 || !response.sdp.startsWith('v=0\r\n'))
+                throw new Error('invalidAction');
+            return { sdp: response.sdp };
+        }
+        return { active: response.active === true && !session.videoStopped };
     };
     const frame = async (viewer, id) => {
         const session = owned(viewer, id);
@@ -250,13 +281,19 @@ const createStationLive = ({ io, db, authorize, validateImage, refreshScreenshot
         await Promise.allSettled([...sessions.values()].map(session => now() - session.touched > 30000
             ? end(session, 'connectionLost') : now() - session.validatedAt >= 1000 ? valid(session) : undefined));
     };
-    return { start, frame, action, remoteMessage, transfer, stop, stopForSocket, changed, sweep, sessions };
+    return { start, frame, video, action, remoteMessage, transfer, stop, stopForSocket, changed, sweep, sessions };
 };
 
 const getStationLive = io => {
     if (services.has(io)) return services.get(io);
     const { getActiveSessionUser, hasPermission, onSessionEnded, onPermissionsChanged } = require('../socket/session');
+    const urls = (process.env.SHARING_STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map(value => value.trim()).filter(value => /^stuns?:[^\s]+$/.test(value));
+    const iceServers = urls.length ? [{ urls }] : [];
+    const turn = (process.env.STATION_LIVE_TURN_URLS || '').split(',').map(value => value.trim()).filter(value => /^turns?:[^\s]+$/.test(value));
+    if (turn.length && process.env.STATION_LIVE_TURN_USERNAME && process.env.STATION_LIVE_TURN_CREDENTIAL)
+        iceServers.push({ urls: turn, username: process.env.STATION_LIVE_TURN_USERNAME, credential: process.env.STATION_LIVE_TURN_CREDENTIAL });
     const service = createStationLive({ io, db: require('../models'), validateImage: require('./stationScreenshots').validateImage,
+        iceServers,
         refreshScreenshot: request => require('./stationScreenshots').getStationScreenshots(io).refreshAfterLive(request),
         authorize: async socket => {
             const user = await getActiveSessionUser(socket);

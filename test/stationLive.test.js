@@ -27,6 +27,44 @@ const fixture = (options = {}) => {
         start: options => service.start(viewer, station._id, options) };
 };
 
+test('video is negotiated by both peers, relays bounded SDP, validates leases and preserves JPEG fallback', async () => {
+    const env = fixture({ command: (input, callback) => callback(null, input.type === 'frame' ? { success: true, contents: jpeg }
+        : { success: true, videoProtocol: 1, sdp: 'v=0\r\no=answer', active: true }) });
+    const session = await env.start({ frameProtocol: 2, videoProtocol: 1 });
+    assert.equal(session.videoProtocol, 1);
+    await assert.rejects(env.service.video({ ...env.viewer }, { sessionId: session.sessionId, operation: 'offer', sdp: 'v=0\r\no=offer' }), /ended/);
+    await assert.rejects(env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'offer', sdp: 'x'.repeat(65537) }), /invalidAction/);
+    const answer = await env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'offer', sdp: 'v=0\r\no=offer' });
+    assert.equal(answer.sdp, 'v=0\r\no=answer');
+    assert.equal(env.commands.at(-1).type, 'video');
+    await assert.rejects(env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'offer', sdp: 'v=0\r\no=again' }), /invalidAction/);
+    env.advance(10000);
+    assert.equal((await env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'heartbeat' })).active, true);
+    await env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'stop' });
+    assert.equal((await env.service.frame(env.viewer, session.sessionId)).contents.length, jpeg.length);
+    env.station.screenshotsEnabled = false;
+    await assert.rejects(env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'heartbeat' }), /privacyChanged/);
+    assert.equal(env.service.sessions.size, 0);
+});
+
+test('legacy clients omit video capability and stopped/ended negotiations cannot deliver late answers', async () => {
+    const oldStation = fixture();
+    assert.equal((await oldStation.start({ videoProtocol: 1 })).videoProtocol, undefined);
+    const pending = deferred();
+    const env = fixture({ command: async (input, callback) => {
+        if (input.type === 'video' && input.operation === 'offer') await pending.promise;
+        callback(null, { success: true, videoProtocol: 1, sdp: 'v=0\r\no=answer' });
+    } });
+    const session = await env.start({ videoProtocol: 1 });
+    const offer = env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'offer', sdp: 'v=0\r\no=offer' });
+    await new Promise(resolve => setImmediate(resolve));
+    await env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'stop' });
+    pending.resolve(); await assert.rejects(offer, /ended/);
+    assert.equal(env.service.sessions.size, 1);
+    env.service.stop(env.viewer, session.sessionId);
+    await assert.rejects(env.service.video(env.viewer, { sessionId: session.sessionId, operation: 'heartbeat' }), /ended/);
+});
+
 test('live sessions stream validated desktop frames and route annotations and two-way chat to the linked station', async () => {
     const env = fixture();
     const { sessionId } = await env.start();
