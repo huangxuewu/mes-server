@@ -11,7 +11,7 @@ const fixture = () => {
     let session;
     const load = relative => {
         const filename = path.join(__dirname, '..', relative), module = { exports: {} };
-        vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module, exports: module.exports, process: { env: { JWT_SECRET: 'test-only-secret' } }, setTimeout, clearTimeout, Date, console,
+        vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module, exports: module.exports, process: { env: { JWT_SECRET: 'test-only-secret' } }, setTimeout, clearTimeout, Date, console, Buffer,
             require: name => name.endsWith('/models') ? db : name.endsWith('/session') ? session : require(name.startsWith('.') ? path.resolve(path.dirname(filename), name) : name),
         }, { filename });
         return module.exports;
@@ -27,6 +27,36 @@ const fixture = () => {
     };
     return { db, session, connect, load };
 };
+
+test('signature collections follow self/admin permissions and stay out of public projections', async () => {
+    const { connect, db } = fixture();
+    const worker = connect(ids.b), admin = connect(ids.a);
+    const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=';
+    const update = { _id: ids.b, signatures: [{ id: 'personal-1', image }], defaultSignatureId: 'personal-1' };
+    assert.equal((await worker.call('user:update', update)).status, 'success');
+    assert.equal(db.user.rows[1].defaultSignatureId, 'personal-1');
+    assert.equal((await worker.call('user:update', { ...update, _id: ids.a })).status, 'error');
+    assert.equal((await admin.call('user:update', { ...update, _id: ids.a })).status, 'success');
+    const roster = await worker.call('users:get', {});
+    assert.equal(roster.payload[0].signatures, undefined);
+    assert.equal(roster.payload[0].defaultSignatureId, undefined);
+    assert.equal(roster.payload[1].signatures[0].image, image);
+    for (const invalid of [
+        { signatures: [{ id: 'x', image: 'data:image/svg+xml;base64,AAAA' }], defaultSignatureId: 'x' },
+        { signatures: [{ id: 'x', image: 'data:image/png;base64,AAAA' }], defaultSignatureId: 'x' },
+        { signatures: [{ id: 'x', image }, { id: 'x', image }], defaultSignatureId: 'x' },
+        { signatures: ['x', 'y', 'z'].map(id => ({ id, image })), defaultSignatureId: 'x' },
+        { signatures: [], defaultSignatureId: 'missing' },
+        { signatures: [] },
+        { defaultSignatureId: '' },
+    ]) assert.equal((await worker.call('user:update', { _id: ids.b, ...invalid })).status, 'error');
+    assert.equal(db.user.rows[1].defaultSignatureId, 'personal-1');
+    assert.equal((await worker.call('user:update', { ...update, signatures: [...update.signatures, { id: 'personal-2', image }] })).status, 'success');
+    assert.equal(db.user.rows[1].signatures.length, 2);
+    assert.equal((await worker.call('user:update', { _id: ids.b, signatures: [], defaultSignatureId: '' })).status, 'success');
+    assert.equal(db.user.rows[1].signatures.length, 0);
+    worker.close(); admin.close();
+});
 
 test('login rejects query injection and disabled accounts, and never returns passwords', async () => {
     const { connect, db } = fixture(), actor = connect();

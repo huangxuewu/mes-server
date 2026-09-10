@@ -10,6 +10,11 @@ const userSchema = new mongoose.Schema({
     portrait: String,
     phone: String,
     email: String,
+    signatures: {
+        type: [new mongoose.Schema({ id: String, image: String }, { _id: false })],
+        default: [],
+    },
+    defaultSignatureId: { type: String, default: '' },
     role: String,
     status: {
         type: String,

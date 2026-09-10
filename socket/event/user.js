@@ -7,7 +7,7 @@ const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
 
 const MD5_PATTERN = /^[a-f0-9]{32}$/i;
 const ID_PATTERN = /^[a-f0-9]{24}$/i;
-const PROFILE_FIELDS = ['displayName', 'portrait', 'phone', 'email'];
+const PROFILE_FIELDS = ['displayName', 'portrait', 'phone', 'email', 'signatures', 'defaultSignatureId'];
 const ACCOUNT_FIELDS = [...PROFILE_FIELDS, 'username', 'password', 'confirmPassword', 'role', 'status', 'permission', 'group'];
 const PERMISSION_FIELDS = ['module', 'access', 'create', 'view', 'update', 'modify', 'edit', 'delete', 'approve', 'override', 'export', 'audit'];
 
@@ -15,7 +15,19 @@ const validatePayload = (data, fields) => {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid account payload');
     for (const [key, value] of Object.entries(data)) {
         if (!fields.includes(key)) throw new Error(`Field not allowed: ${key}`);
-        if (key === 'permission') {
+        if (key === 'signatures') {
+            if (!Array.isArray(value) || value.length > 2 || JSON.stringify(value).length > 768 * 1024) throw new Error('Invalid signature collection (maximum 2 signatures)');
+            const ids = new Set();
+            for (const signature of value) {
+                if (!signature || typeof signature !== 'object' || Object.keys(signature).some(field => !['id', 'image'].includes(field))) throw new Error('Invalid signature');
+                if (typeof signature.id !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(signature.id) || ids.has(signature.id)) throw new Error('Invalid signature ID');
+                if (typeof signature.image !== 'string' || signature.image.length > 256 * 1024 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(signature.image)) throw new Error('Invalid signature image');
+                const png = Buffer.from(signature.image.slice(22), 'base64');
+                if (png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.toString('ascii', 12, 16) !== 'IHDR'
+                    || !png.readUInt32BE(16) || !png.readUInt32BE(20) || png.readUInt32BE(16) > 4096 || png.readUInt32BE(20) > 4096) throw new Error('Invalid signature image');
+                ids.add(signature.id);
+            }
+        } else if (key === 'permission') {
             if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid permissions');
             for (const [action, resources] of Object.entries(value)) {
                 if (!PERMISSION_FIELDS.includes(action) || !Array.isArray(resources) || resources.some(resource => typeof resource !== 'string')) throw new Error('Invalid permissions');
@@ -26,6 +38,10 @@ const validatePayload = (data, fields) => {
     if (data.status && !['Active', 'Inactive', 'Disabled', 'Deleted'].includes(data.status)) throw new Error('Invalid account status');
     if (data.role === 'System') throw new Error('System is reserved for MES records and cannot be assigned to an operator');
     if (data.role && !['Admin', 'Manager', 'User'].includes(data.role)) throw new Error('Invalid account role');
+    if ('signatures' in data || 'defaultSignatureId' in data) {
+        if (!Array.isArray(data.signatures) || typeof data.defaultSignatureId !== 'string') throw new Error('Signatures and default must be updated together');
+        if (data.defaultSignatureId && !data.signatures.some(signature => signature.id === data.defaultSignatureId)) throw new Error('Default signature not found');
+    }
 };
 
 const normalizeUserPayload = (payload = {}) => {
