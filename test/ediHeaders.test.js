@@ -91,3 +91,40 @@ test("renderer purchase-order transport applies resolved custom headers", async 
     assert.equal(requests[1].options.headers["x-tenant-id"], undefined);
     assert.equal(requests[1].options.headers.authorization, "Bearer default-token");
 });
+
+test("ERP BOL upload uses tenant headers, ERP filename and multipart fields", async t => {
+    docs = [{ key: EDI_CONFIG_KEYS.customFields, value: fields }];
+    const calls = [];
+    t.mock.method(global, "fetch", async (url, options) => {
+        calls.push({ url, options });
+        return { ok: true, json: async () => ({ result: { name: "123#_456#.pdf" } }) };
+    });
+    const client = await getClient();
+    await client.uploadBol(Buffer.from("%PDF-test"), "123", "456");
+    assert.equal(calls[0].options.method, "DELETE");
+    assert.deepEqual(JSON.parse(calls[0].options.body), { path: "/BOL/123#_456#.pdf" });
+    const { url, options } = calls[1];
+    assert.equal(url, "https://erp.downhomeusa.com/api/v1/dropbox/upload");
+    assert.equal(options.headers["x-tenant-id"], "tenant-123");
+    assert.equal(options.headers.authorization, "ApiKey custom");
+    assert.equal(options.headers["content-type"], undefined);
+    assert.equal(options.body.get("fileName"), "123#_456#.pdf");
+    assert.equal(options.body.get("destinationPath"), "/BOL");
+    assert.equal(await options.body.get("file").text(), "%PDF-test");
+});
+
+test("ERP BOL authentication failure explains the required token at either file step", async t => {
+    docs = [{ key: EDI_CONFIG_KEYS.customFields, value: fields }];
+    let failingMethod = 'DELETE';
+    const calls = [];
+    t.mock.method(global, 'fetch', async (_url, options) => {
+        calls.push(options.method);
+        return { status: options.method === failingMethod ? 401 : 200, ok: options.method !== failingMethod };
+    });
+    const client = await getClient();
+    await assert.rejects(client.uploadBol(Buffer.from('%PDF-test'), '77737664', '84017970841761576'), /Configure the ERP auth token/);
+    assert.deepEqual(calls, ['DELETE']);
+    failingMethod = 'POST';
+    await assert.rejects(client.uploadBol(Buffer.from('%PDF-test'), '77737664', '84017970841761576'), /Configure the ERP auth token/);
+    assert.deepEqual(calls, ['DELETE', 'DELETE', 'POST']);
+});
