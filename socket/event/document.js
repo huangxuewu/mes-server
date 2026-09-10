@@ -9,7 +9,7 @@ const {
 } = require("../../utils/documentSeed");
 const { createDocumentDocx } = require("../../utils/documentDocx");
 const { createFormPdf } = require("../../utils/formPdf");
-const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
+const { getDropbox, getConfiguredDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { createDocumentThumbnail } = require("../../utils/documentThumbnail");
 const { cleanupDocumentResources } = require("../../utils/documentResources");
 const { cleanDocumentPage } = require("../../utils/documentPage");
@@ -373,9 +373,6 @@ module.exports = (rawSocket, rawIo) => {
         try {
             const user = await requireUser(callback);
             if (!user || !requireAccess(user, "create", "document.file.create", callback)) return;
-            if (!getDropbox())
-                return callback({ status: "error", message: "Dropbox storage is not configured on the server" });
-
             const allowedTypes = [
                 "image/jpeg",
                 "image/png",
@@ -389,10 +386,23 @@ module.exports = (rawSocket, rawIo) => {
             let contents;
             if (Buffer.isBuffer(input.content)) contents = input.content;
             else if (input.content instanceof ArrayBuffer) contents = Buffer.from(input.content);
-            else if (ArrayBuffer.isView(input.content)) contents = Buffer.from(input.content.buffer);
+            else if (ArrayBuffer.isView(input.content)) contents = Buffer.from(input.content.buffer, input.content.byteOffset, input.content.byteLength);
             else contents = Buffer.from(String(input.content || ""), "base64");
             if (!contents.length || contents.length > 8 * 1024 * 1024)
                 return callback({ status: "error", message: "File must be between 1 byte and 8 MB" });
+            if (input.mimeType === "application/pdf" && !contents.subarray(0, 1024).includes(Buffer.from("%PDF-")))
+                return callback({ status: "error", message: "Upload a valid PDF file" });
+
+            const dropbox = await getConfiguredDropbox();
+            if (!dropbox)
+                return callback({ status: "error", message: "Dropbox storage is not configured in MES" });
+            const originalName = String(input.fileName || "file").trim();
+            const title = String(input.title || originalName.replace(/\.[^.]+$/, "")).trim();
+            if (!title) return callback({ status: "error", message: "A document title is required" });
+            const documentCategory = normalizeDocumentCategory(input.documentCategory || "Record");
+            const documentNumber = input.autoDocumentNumber === true
+                ? await nextDocumentNumber(documentCategory)
+                : String(input.documentNumber || "").trim();
 
             const documentId = new mongoose.Types.ObjectId();
             const fileName = normalizePathPart(input.fileName);
@@ -402,10 +412,11 @@ module.exports = (rawSocket, rawIo) => {
                 fileName,
                 contents,
                 category: "original",
+                dropbox,
             });
-            const title = String(input.title || fileName.replace(/\.[^.]+$/, "")).trim();
+            if (!stored?.url || !stored.storagePath) throw new Error("Unable to save the document file to Dropbox");
             const asset = {
-                name: fileName,
+                name: originalName,
                 mimeType: input.mimeType,
                 size: contents.length,
                 purpose: "attachment",
@@ -416,19 +427,20 @@ module.exports = (rawSocket, rawIo) => {
             const document = await db.document.create({
                 _id: documentId,
                 title,
-                summary: "Externally managed document file.",
+                documentNumber,
+                summary: String(input.summary || "Externally managed document file.").trim(),
                 type: "uploaded-file",
-                documentCategory: "Record",
+                documentCategory,
                 folder: String(input.folder || "Uploaded files").trim(),
                 status: "Draft",
                 contentJson: {
                     type: "doc",
                     content: [{
                         type: "paragraph",
-                        content: [{ type: "text", text: `Original file: ${fileName}` }],
+                        content: [{ type: "text", text: `Original file: ${originalName}` }],
                     }],
                 },
-                plainText: `Original file: ${fileName}`,
+                plainText: `Original file: ${originalName}`,
                 owner: user._id,
                 createdBy: user._id,
                 updatedBy: user._id,

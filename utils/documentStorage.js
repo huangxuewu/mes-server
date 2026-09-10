@@ -37,8 +37,7 @@ const sharedUrl = async (dropbox, path) => {
     }
 };
 
-const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileName, contents, category = "attachments" }) => {
-    const dropbox = getDropbox();
+const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileName, contents, category = "attachments", dropbox = getDropbox() }) => {
     if (!dropbox) return null;
 
     const safeName = normalizePathPart(fileName);
