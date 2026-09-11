@@ -5,6 +5,7 @@ const { Types: { ObjectId } } = mongoose;
 const { performance } = require('node:perf_hooks');
 const { shouldMarkCompleted, requiresBol } = require("../../utils/outboundScac");
 const { prepareShipmentDocuments } = require("../../utils/outboundOrder");
+const { submitAsns } = require("../../utils/edi/asn");
 
 module.exports = (socket, io) => {
 
@@ -276,9 +277,16 @@ module.exports = (socket, io) => {
                     data.status = 'Completed';
             }
 
-            const update = Object.keys(data).reduce((acc, key) =>
-                Object.assign(acc, { [`loads.$[target].${key}`]: data[key] })
-                , {});
+            const update = {};
+            for (const [key, value] of Object.entries(data)) {
+                if (key === 'checklist' && value) {
+                    for (const type of ['printed', 'picked', 'labeled', 'loading', 'loaded']) {
+                        if (value[type]) update[`loads.$[target].checklist.${type}`] = value[type];
+                    }
+                } else {
+                    update[`loads.$[target].${key}`] = value;
+                }
+            }
 
             const shipment = await db.outbound.findOneAndUpdate(
                 { 'loads.shipmentId': shipmentId },
@@ -594,7 +602,40 @@ module.exports = (socket, io) => {
         }
     });
 
-    // return true if bill of lading already exists
+    socket.on("bill-of-lading:asn-ready", (_payload, callback) => {
+        callback?.({ status: "success", payload: true });
+    });
+
+    socket.on("bill-of-lading:submit-asn", async (payload, callback) => {
+        try {
+            const { loadNumber, shipmentIdArray, requestId, retryShipmentId } = payload || {};
+            if (!Array.isArray(shipmentIdArray) || !shipmentIdArray.length || shipmentIdArray.some(id => typeof id !== "string"))
+                throw new Error("Loaded shipment IDs are required");
+            if (typeof loadNumber !== "string") throw new Error("Load number is required");
+            if (retryShipmentId !== undefined && (typeof retryShipmentId !== 'string' || !shipmentIdArray.includes(retryShipmentId))) throw new Error('Retry shipment must belong to the selected load');
+            const documents = await db.outbound.find({ loads: { $elemMatch: { loadNumber, shipmentId: { $in: shipmentIdArray } } } }).lean();
+            const shipments = documents.flatMap(({ loads, ...parent }) => loads
+                .filter(load => load.loadNumber === loadNumber && shipmentIdArray.includes(load.shipmentId))
+                .map(load => ({ ...parent, ...load })));
+            if (shipments.length !== shipmentIdArray.length) throw new Error("Selected MES shipments could not be found uniquely");
+            const result = await submitAsns({ shipments, retryShipmentId }, {
+                onProgress: async progress => {
+                    if (progress.phase === 'received') {
+                        await db.outbound.updateOne(
+                            { 'loads.shipmentId': progress.shipmentId },
+                            { $set: { 'loads.$[target].checklist.noticed': { status: true, timestamp: new Date() } } },
+                            { arrayFilters: [{ 'target.shipmentId': progress.shipmentId }] }
+                        );
+                    }
+                    socket.emit('bill-of-lading:asn-progress', { ...progress, loadNumber, requestId });
+                },
+            });
+            callback?.({ status: "success", payload: result });
+        } catch (error) {
+            callback?.({ status: "error", message: error.message });
+        }
+    });
+
     socket.on("bill-of-lading:check", async (data, callback) => {
         try {
             const { number } = data;

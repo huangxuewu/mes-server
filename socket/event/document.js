@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const db = require("../../models");
-const { getSessionUserId, hasPermission } = require("../session");
+const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 const {
     prepareAuditReferences,
     prepareDocumentList,
@@ -177,7 +177,7 @@ module.exports = (rawSocket, rawIo) => {
             return null;
         }
 
-        const user = await db.user.findById(userId).lean();
+        const user = await resolveUserPermissions(await db.user.findById(userId).lean());
         if (!user) {
             callback({ status: "error", message: "User not found" });
             return null;

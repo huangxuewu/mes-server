@@ -6,11 +6,18 @@ const { deliverUserChange } = require('../socket/userDelivery');
 const userSchema = new mongoose.Schema({
     displayName: String,
     username: String,
+    usernameKey: { type: String, unique: true, sparse: true },
     password: String,
     portrait: String,
     phone: String,
     email: String,
+    signatures: {
+        type: [new mongoose.Schema({ id: String, image: String }, { _id: false })],
+        default: [],
+    },
+    defaultSignatureId: { type: String, default: '' },
     role: String,
+    permissionCategoryId: { type: String, default: '', index: true },
     status: {
         type: String,
         enum: ["Active", "Inactive", "Disabled", "Deleted"],

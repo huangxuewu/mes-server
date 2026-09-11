@@ -32,6 +32,7 @@ app.use((req, res, next) => {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
+app.use('/register', require('./routes/userRegistration'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({

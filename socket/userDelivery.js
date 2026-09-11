@@ -1,7 +1,8 @@
-const { getActiveSessionUser, getSessionUserId, unbindSocketSession, publicUser, privateUser, canManageAccount } = require('./session');
+const { getActiveSessionUser, getSessionUserId, unbindSocketSession, publicUser, privateUser, canManageAccount, canAdministerAccounts, resolveUserPermissions } = require('./session');
 
 const deliverUserChange = async (io, event, record) => {
     const id = String(record?._id || record);
+    if (event !== 'user:delete') record = await resolveUserPermissions(record);
     await Promise.all([...io.sockets.sockets.values()].map(async socket => {
         if (!getSessionUserId(socket)) return;
         if (event === 'user:delete' && getSessionUserId(socket) === id) {
@@ -20,4 +21,27 @@ const deliverUserChange = async (io, event, record) => {
     }));
 };
 
-module.exports = { deliverUserChange };
+const refreshPermissionCategories = async io => {
+    await Promise.all([...io.sockets.sockets.values()].map(async socket => {
+        if (!getSessionUserId(socket)) return;
+        try {
+            const actor = await getActiveSessionUser(socket);
+            if (canAdministerAccounts(actor)) socket.emit('permissionCategories:changed');
+        } catch {
+            // Expired sessions must not receive configuration updates.
+        }
+    }));
+};
+
+const notifyRegistrationsChanged = async io => {
+    await Promise.all([...io.sockets.sockets.values()].map(async socket => {
+        if (!getSessionUserId(socket)) return;
+        try {
+            if (canAdministerAccounts(await getActiveSessionUser(socket))) socket.emit('userRegistrations:changed');
+        } catch {
+            // Registration details are only available to active administrators.
+        }
+    }));
+};
+
+module.exports = { deliverUserChange, refreshPermissionCategories, notifyRegistrationsChanged };

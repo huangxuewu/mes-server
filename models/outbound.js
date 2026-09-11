@@ -81,6 +81,14 @@ const loadSchema = new mongoose.Schema({
             status: { type: Boolean, default: false, description: "Whether the shipment is completely loaded on the truck" },
             timestamp: { type: Date, default: null },
         },
+        noticed: {
+            status: { type: Boolean, default: false, description: "Whether the ASN has been submitted" },
+            timestamp: { type: Date, default: null },
+        },
+        invoiced: {
+            status: { type: Boolean, default: false, description: "Whether the shipment has been invoiced" },
+            timestamp: { type: Date, default: null },
+        },
     }
 }, {
     _id: false,

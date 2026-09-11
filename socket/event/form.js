@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const db = require("../../models");
-const { getSessionUserId, hasPermission } = require("../session");
+const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 const { createFormPdf } = require("../../utils/formPdf");
 const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { protectDocumentSocket, protectedDocumentEmitter, safeDocument } = require('../../utils/documentAccess');
@@ -64,7 +64,7 @@ module.exports = (rawSocket, rawIo) => {
             callback({ status: "error", message: "Not authenticated" });
             return null;
         }
-        const user = await db.user.findById(userId).lean();
+        const user = await resolveUserPermissions(await db.user.findById(userId).lean());
         if (!user) {
             callback({ status: "error", message: "User not found" });
             return null;

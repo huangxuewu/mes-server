@@ -1,5 +1,5 @@
 const db = require("../../models");
-const { getSessionUserId, hasPermission } = require("../session");
+const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 const { getHandler } = require("../../utils/changeRequestHandlers");
 
 const USER_SELECT = "username displayName firstName lastName";
@@ -13,7 +13,7 @@ module.exports = (socket) => {
             callback({ status: "error", message: "Not authenticated" });
             return null;
         }
-        const user = await db.user.findById(userId).lean();
+        const user = await resolveUserPermissions(await db.user.findById(userId).lean());
         if (!user) {
             callback({ status: "error", message: "User not found" });
             return null;

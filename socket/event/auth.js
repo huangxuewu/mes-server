@@ -1,6 +1,7 @@
 const db = require("../../models")
 const jwt = require('jsonwebtoken');
-const { JWT_SECRET, bindSocketSession, unbindSocketSession, privateUser } = require("../session");
+const { verifyLoginPassword } = require('../../utils/userAccount');
+const { JWT_SECRET, bindSocketSession, unbindSocketSession, privateUser, resolveUserPermissions } = require("../session");
 
 module.exports = (socket, io) => {
     // events
@@ -18,10 +19,11 @@ module.exports = (socket, io) => {
             if (!JWT_SECRET) throw new Error('Authentication secret is not configured');
             if (typeof payload?.username !== 'string' || typeof payload?.password !== 'string') throw new Error('Invalid credentials');
             const { username, password } = payload;
-            const user = await db.user.findOne({ username, password }).lean();
+            const user = await resolveUserPermissions(await db.user.findOne({ username }).lean());
+            const passwordValid = user && await verifyLoginPassword(user.password, password);
             if (attempt !== socket.data.sessionGeneration) throw new Error('Sign-in superseded');
 
-            if (!user || user.status !== 'Active') return callback({ status: "error", message: "Invalid credentials" });
+            if (!user || !passwordValid || user.status !== 'Active') return callback({ status: "error", message: "Invalid credentials" });
 
             const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '10h' });
             bindSocketSession(socket, user, jwt.decode(token).exp * 1000);
@@ -47,7 +49,7 @@ module.exports = (socket, io) => {
             if (!JWT_SECRET) throw new Error('Authentication secret is not configured');
             const decoded = jwt.verify(payload?.token, JWT_SECRET);
             if (!Number.isFinite(decoded.exp) || decoded.exp * 1000 <= Date.now()) throw new Error('Expired session token');
-            const user = await db.user.findById(decoded.id).lean();
+            const user = await resolveUserPermissions(await db.user.findById(decoded.id).lean());
             if (attempt !== socket.data.sessionGeneration) throw new Error('Sign-in superseded');
 
             if (!user || user.status !== 'Active') return callback?.({ status: "error", message: "Account unavailable" });
