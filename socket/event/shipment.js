@@ -277,9 +277,16 @@ module.exports = (socket, io) => {
                     data.status = 'Completed';
             }
 
-            const update = Object.keys(data).reduce((acc, key) =>
-                Object.assign(acc, { [`loads.$[target].${key}`]: data[key] })
-                , {});
+            const update = {};
+            for (const [key, value] of Object.entries(data)) {
+                if (key === 'checklist' && value) {
+                    for (const type of ['printed', 'picked', 'labeled', 'loading', 'loaded']) {
+                        if (value[type]) update[`loads.$[target].checklist.${type}`] = value[type];
+                    }
+                } else {
+                    update[`loads.$[target].${key}`] = value;
+                }
+            }
 
             const shipment = await db.outbound.findOneAndUpdate(
                 { 'loads.shipmentId': shipmentId },
@@ -612,7 +619,16 @@ module.exports = (socket, io) => {
                 .map(load => ({ ...parent, ...load })));
             if (shipments.length !== shipmentIdArray.length) throw new Error("Selected MES shipments could not be found uniquely");
             const result = await submitAsns({ shipments, retryShipmentId }, {
-                onProgress: progress => socket.emit('bill-of-lading:asn-progress', { ...progress, loadNumber, requestId }),
+                onProgress: async progress => {
+                    if (progress.phase === 'received') {
+                        await db.outbound.updateOne(
+                            { 'loads.shipmentId': progress.shipmentId },
+                            { $set: { 'loads.$[target].checklist.noticed': { status: true, timestamp: new Date() } } },
+                            { arrayFilters: [{ 'target.shipmentId': progress.shipmentId }] }
+                        );
+                    }
+                    socket.emit('bill-of-lading:asn-progress', { ...progress, loadNumber, requestId });
+                },
             });
             callback?.({ status: "success", payload: result });
         } catch (error) {

@@ -282,7 +282,7 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
             }
             if (plan.adjustments.length) await client.graphql(SAVE_ADJUSTMENTS, { input: plan.adjustments });
             // ERP receipt completes submission; delivery and partner acknowledgement continue in ERP.
-            onProgress({ phase: 'received', poNumber: plan.mes.poNumber, shipmentId: plan.mes.shipmentId, transactionId: plan.transaction.id });
+            await onProgress({ phase: 'received', poNumber: plan.mes.poNumber, shipmentId: plan.mes.shipmentId, transactionId: plan.transaction.id });
         }
         return { transactions: plans.map(plan => ({ shipmentId: plan.mes.shipmentId, poNumber: plan.mes.poNumber, id: plan.transaction.id })) };
     } finally {
