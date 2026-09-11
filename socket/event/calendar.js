@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const db = require("../../models");
 const dayjs = require("../../utils/dayjs");
-const { getSessionUserId, hasPermission } = require("../session");
+const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 
 const PERMS = {
     eventPublicView: "office.calendar.event.public.view",
@@ -23,7 +23,7 @@ const sameId = (a, b) => String(a) === String(b);
 const loadUser = async (userId) => {
     const oid = toId(userId);
     if (!oid) return null;
-    return db.user.findById(oid).lean();
+    return resolveUserPermissions(await db.user.findById(oid).lean());
 };
 
 const eventVisibilityFilter = (userId, user) => {

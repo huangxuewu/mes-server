@@ -12,6 +12,8 @@ const matches = (row, query) => Object.entries(query).every(([key, expected]) =>
     const values = Array.isArray(actual) ? actual : [actual];
     if (expected && typeof expected === 'object' && !(expected instanceof Date) && !Array.isArray(expected)) return Object.entries(expected).every(([operator, value]) => {
         if (operator === '$exists') return (actual !== undefined) === value;
+        if (operator === '$regex') return values.some(item => typeof item === 'string' && new RegExp(value, expected.$options || '').test(item));
+        if (operator === '$options') return true;
         if (operator === '$ne') return !values.some(item => equal(item, value));
         if (operator === '$in') return values.some(item => value.some(candidate => equal(item, candidate)));
         if (operator === '$nin') return !values.some(item => value.some(candidate => equal(item, candidate)));

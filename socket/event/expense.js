@@ -1,5 +1,5 @@
 const db = require("../../models");
-const { getSessionUserId, hasPermission } = require("../session");
+const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 
 const PAGE_ACCESS_PERMISSION = "financial.page.access";
 const APPROVE_PERMISSION = "finance.expense.payment.approve";
@@ -30,7 +30,7 @@ module.exports = (socket, io) => {
             return null;
         }
 
-        const user = await db.user.findById(userId).lean();
+        const user = await resolveUserPermissions(await db.user.findById(userId).lean());
         if (!user) {
             callback({ status: "error", message: "User not found" });
             return null;

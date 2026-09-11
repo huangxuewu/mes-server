@@ -21,6 +21,13 @@ const userRoom = (userId) => `user:${String(userId)}`;
 
 const getSessionUserId = (socket) => socket.data?.userId ?? null;
 
+const resolveUserPermissions = async user => {
+    if (!user?.permissionCategoryId) return user;
+    const category = /^[a-f0-9]{24}$/i.test(user.permissionCategoryId)
+        ? await require('../models').permissionCategory.findById(user.permissionCategoryId).lean() : null;
+    return { ...(user.toObject ? user.toObject() : user), permission: category?.permission || {}, permissionCategoryName: category?.name || '' };
+};
+
 const hasPermission = (user, action, resource) => {
     if (!user) return false;
     // Admin is the highest operator role; System is reserved for MES service actions.
@@ -30,6 +37,7 @@ const hasPermission = (user, action, resource) => {
 };
 
 const sessionSignature = user => createHash('sha256').update(JSON.stringify({
+    permissionCategoryId: user.permissionCategoryId || '', permissionCategoryName: user.permissionCategoryName || '',
     username: user.username || '', password: user.password || '', role: user.role || '', status: user.status || '',
     permission: Object.fromEntries(['module', 'access', 'create', 'view', 'update', 'modify', 'edit', 'delete', 'approve', 'override', 'export', 'audit']
         .map(action => [action, [...(user.permission?.[action] || [])].sort()])),
@@ -84,7 +92,7 @@ const getActiveSessionUser = async socket => {
         unbindSocketSession(socket);
         throw new Error('Sign in to continue');
     }
-    const user = await require('../models').user.findById(id).lean();
+    const user = await resolveUserPermissions(await require('../models').user.findById(id).lean());
     if (getSessionUserId(socket) !== id || socket.data.sessionGeneration !== generation) throw new Error('Session changed');
     if (!user || user.status !== 'Active' || authenticationSignature(user) !== socket.data.authenticationSignature) {
         unbindSocketSession(socket);
@@ -115,6 +123,7 @@ module.exports = {
     userRoom,
     getSessionUserId,
     hasPermission,
+    resolveUserPermissions,
     canAdministerAccounts,
     canManageAccount,
     bindSocketSession,

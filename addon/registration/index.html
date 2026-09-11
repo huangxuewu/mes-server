@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Create your MES account</title>
+    <link rel="stylesheet" href="/register/assets/style.css">
+    <script src="/register/assets/app.js" defer></script>
+</head>
+<body>
+    <main>
+        <header><span class="brand"><!-- MANUFACTURER_NAME --></span><span class="brand-note">Your workplace, connected.</span></header>
+        <section class="card">
+            <p class="eyebrow">WELCOME TO THE TEAM</p>
+            <h1>Create your account</h1>
+            <p class="intro">Tell us a little about yourself. Your administrator will review your details and set up your access.</p>
+            <p id="status" role="status" aria-live="polite">Checking your invitation…</p>
+            <form id="registration" hidden>
+                <div class="profile-fields">
+                    <div class="photo-field">
+                        <div class="photo-preview">
+                            <img id="preview" alt="Your profile photo" hidden>
+                            <span id="photo-placeholder" aria-hidden="true">+</span>
+                            <span class="photo-action" aria-hidden="true">Select file</span>
+                            <input id="portrait" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Select profile photo" aria-describedby="portrait-hint" required>
+                        </div>
+                        <small id="portrait-hint">JPG, PNG or WebP<br>Up to 5 MB</small>
+                    </div>
+                    <div class="fields identity-fields">
+                        <div class="field"><label for="displayName">Full name</label><input id="displayName" name="displayName" autocomplete="name" maxlength="100" placeholder="Your full name" required></div>
+                        <div class="field"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@company.com" required></div>
+                    </div>
+                </div>
+                <div class="fields login-fields">
+                    <div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-zA-Z0-9._@+\-]{3,64}" required><small>3–64 letters, numbers, dots, underscores, @, + or -.</small></div>
+                    <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small>At least 8 characters.</small></div>
+                    <div class="field"><label for="confirmPassword">Confirm password</label><input id="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></div>
+                </div>
+                <p id="error" class="error" role="alert" hidden></p>
+                <button id="submit" type="submit">Submit registration <span aria-hidden="true">→</span></button>
+                <p class="fine-print">You can sign in once your administrator provisions your account.</p>
+            </form>
+            <section id="complete" hidden><div class="success-mark" aria-hidden="true">✓</div><h2 id="complete-title">Registration submitted</h2><p id="complete-message">Your details have been sent to your administrator. They will assign your permissions and activate your account.</p></section>
+        </section>
+        <footer>Manufacturing Execution System</footer>
+    </main>
+</body>
+</html>

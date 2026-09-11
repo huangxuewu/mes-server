@@ -8,11 +8,13 @@ const { Collection, ids } = require('./support/messageFixture');
 const fixture = () => {
     const db = { user: new Collection([{ _id: ids.a, username: 'admin', password: 'hashed-secret', displayName: 'Admin', status: 'Active', role: 'Admin', permission: { view: ['document.article.view'] } },
         { _id: ids.b, username: 'worker', password: 'worker-secret', displayName: 'Worker', status: 'Active', role: 'User', permission: { view: [] } }]) };
+    db.permissionCategory = new Collection();
+    const io = { sockets: { sockets: new Map() } };
     let session;
     const load = relative => {
         const filename = path.join(__dirname, '..', relative), module = { exports: {} };
         vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module, exports: module.exports, process: { env: { JWT_SECRET: 'test-only-secret' } }, setTimeout, clearTimeout, Date, console, Buffer,
-            require: name => name.endsWith('/models') ? db : name.endsWith('/session') ? session : require(name.startsWith('.') ? path.resolve(path.dirname(filename), name) : name),
+            require: name => name.endsWith('/models') ? db : name.endsWith('/session') ? session : name.endsWith('/userDelivery') ? load('socket/userDelivery.js') : require(name.startsWith('.') ? path.resolve(path.dirname(filename), name) : name),
         }, { filename });
         return module.exports;
     };
@@ -21,8 +23,10 @@ const fixture = () => {
     const connect = userId => {
         const handlers = new Map(), received = [], rooms = new Set();
         const socket = { id: `socket-${++socketSequence}`, data: {}, on: (name, handler) => handlers.set(name, handler), emit: (event, payload) => received.push({ event, payload }), join: room => rooms.add(room), leave: room => rooms.delete(room) };
+        io.sockets.sockets.set(socket.id, socket);
         if (userId) session.bindSocketSession(socket, db.user.rows.find(user => user._id === userId));
         load('socket/event/auth.js')(socket, {}); load('socket/event/user.js')(socket, {});
+        load('socket/event/permissionCategory.js')(socket, io);
         return { socket, received, rooms, close: () => session.unbindSocketSession(socket), call: (event, input) => new Promise(resolve => handlers.get(event)(input, resolve)) };
     };
     return { db, session, connect, load };
@@ -262,4 +266,108 @@ test('System is an MES actor, not an operator account administrator', async () =
         assert.equal((await system.call('user:update', { _id: ids.a, displayName: 'Human admin' })).status, 'error');
         assert.equal(db.user.writes.length, 0);
     } finally { system.close(); }
+});
+
+
+test('category assignment replaces personal permissions and login, roster and reconnect agree', async t => {
+    const { db, connect, session } = fixture();
+    const admin = connect(ids.a), worker = connect(ids.b);
+    t.after(() => { admin.close(); worker.close(); });
+    db.user.rows[1].permission = { view: ['old-personal'] };
+    const created = await admin.call('permissionCategory:create', { name: 'Purchasing', permission: { view: ['purchase', 'purchase'], access: ['financial.page.access'] } });
+    assert.equal(created.status, 'success');
+    const categoryId = created.payload._id;
+    assert.equal(created.payload.permission.view.length, 1);
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: categoryId })).status, 'success');
+    assert.equal(Object.keys(db.user.rows[1].permission).length, 0);
+    const current = await session.getActiveSessionUser(worker.socket);
+    assert.equal(session.hasPermission(current, 'view', 'purchase'), true);
+    assert.equal(session.hasPermission(current, 'view', 'old-personal'), false);
+    const roster = await admin.call('users:get', {});
+    assert.equal(roster.payload.find(user => user._id === ids.b).permission.view[0], 'purchase');
+    const login = await worker.call('auth:login', { username: 'worker', password: 'worker-secret' });
+    assert.equal(login.payload.user.permissionCategoryName, 'Purchasing');
+    assert.equal(login.payload.user.permission.view[0], 'purchase');
+    const rebound = await worker.call('auth:bind', { token: login.payload.token });
+    assert.equal(rebound.payload.user.permission.view[0], 'purchase');
+    assert.equal(rebound.payload.user.password, undefined);
+});
+
+test('editing one category updates all bound members and revokes subscriptions without logout', async t => {
+    const { db, connect, session } = fixture();
+    const admin = connect(ids.a), worker = connect(ids.b), otherStation = connect(ids.b);
+    t.after(() => [admin, worker, otherStation].forEach(client => client.close()));
+    const result = await admin.call('permissionCategory:create', { name: 'Office', permission: { view: ['office.calendar.event.public.view'] } });
+    await admin.call('user:update', { _id: ids.b, permissionCategoryId: result.payload._id });
+    await session.getActiveSessionUser(worker.socket);
+    await session.getActiveSessionUser(otherStation.socket);
+    const generation = worker.socket.data.sessionGeneration;
+    assert.equal(worker.rooms.has(session.PUBLIC_EVENT_ROOM), true);
+    const updated = await admin.call('permissionCategory:update', { _id: result.payload._id, name: 'Office updated', permission: { view: ['replacement'] } });
+    assert.equal(updated.status, 'success');
+    for (const client of [worker, otherStation]) {
+        assert.equal(client.rooms.has(session.PUBLIC_EVENT_ROOM), false);
+        const refreshed = client.received.filter(item => item.event === 'auth:permissions').at(-1).payload;
+        assert.equal(refreshed.permission.view[0], 'replacement');
+        assert.equal(refreshed.permissionCategoryName, 'Office updated');
+        assert.equal(refreshed.password, undefined);
+        assert.equal(client.received.some(item => item.event === 'permissionCategories:changed'), false);
+    }
+    assert.equal(worker.socket.data.sessionGeneration, generation);
+    assert.ok(admin.received.some(item => item.event === 'permissionCategories:changed'));
+});
+
+test('only Admin manages categories and assignments; assigned users cannot receive individual overrides', async t => {
+    const { db, connect } = fixture();
+    const admin = connect(ids.a), worker = connect(ids.b), anonymous = connect();
+    t.after(() => [admin, worker, anonymous].forEach(client => client.close()));
+    for (const client of [worker, anonymous]) {
+        assert.equal((await client.call('permissionCategories:get', {})).status, 'error');
+        assert.equal((await client.call('permissionCategory:create', { name: 'Bad', permission: {} })).status, 'error');
+    }
+    const created = await admin.call('permissionCategory:create', { name: 'Buyer', permission: { view: ['purchase'] } });
+    const categoryId = created.payload._id;
+    assert.equal((await worker.call('user:update', { _id: ids.b, permissionCategoryId: categoryId })).status, 'error');
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: ids.outsider })).status, 'error');
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: categoryId, permission: { view: ['override'] } })).status, 'error');
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: categoryId })).status, 'success');
+    assert.equal((await admin.call('user:update', { _id: ids.b, permission: { view: ['override'] } })).status, 'error');
+    db.user.rows[1].role = 'Manager';
+    const manager = connect(ids.b); t.after(() => manager.close());
+    assert.equal((await manager.call('permissionCategory:update', { _id: categoryId, name: 'Escalate', permission: {} })).status, 'error');
+    assert.equal((await admin.call('permissionCategory:create', { name: '', permission: {} })).status, 'error');
+    assert.equal((await admin.call('permissionCategory:create', { name: 'Invalid', permission: { arbitrary: [] } })).status, 'error');
+    assert.equal((await admin.call('permissionCategory:create', { name: 'Invalid', permission: { view: [12] } })).status, 'error');
+});
+
+test('Admin can switch a group user to explicitly chosen personal permissions in one save', async t => {
+    const { connect, session } = fixture();
+    const admin = connect(ids.a), worker = connect(ids.b);
+    t.after(() => { admin.close(); worker.close(); });
+    const category = await admin.call('permissionCategory:create', { name: 'Office', permission: { view: ['group.resource'] } });
+    await admin.call('user:update', { _id: ids.b, permissionCategoryId: category.payload._id });
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: '', permission: { view: ['personal.resource'] } })).status, 'success');
+    const personal = await session.getActiveSessionUser(worker.socket);
+    assert.equal(session.hasPermission(personal, 'view', 'personal.resource'), true);
+    assert.equal(session.hasPermission(personal, 'view', 'group.resource'), false);
+    assert.equal((await admin.call('user:update', { _id: ids.b, permissionCategoryId: category.payload._id, permission: { view: ['personal.resource'] } })).status, 'error');
+});
+
+test('unassigned legacy accounts retain permissions; removal or missing categories never restore them', async t => {
+    const { db, connect, session } = fixture();
+    db.user.rows[1].permission = { view: ['legacy'] };
+    const admin = connect(ids.a), worker = connect(ids.b);
+    t.after(() => { admin.close(); worker.close(); });
+    assert.equal(session.hasPermission(await session.getActiveSessionUser(worker.socket), 'view', 'legacy'), true);
+    const category = await admin.call('permissionCategory:create', { name: 'Office', permission: { view: ['office'] } });
+    await admin.call('user:update', { _id: ids.b, permissionCategoryId: category.payload._id });
+    await admin.call('user:update', { _id: ids.b, permissionCategoryId: '' });
+    const removed = await session.getActiveSessionUser(worker.socket);
+    assert.equal(session.hasPermission(removed, 'view', 'office'), false);
+    assert.equal(session.hasPermission(removed, 'view', 'legacy'), false);
+    db.user.rows[1].permissionCategoryId = ids.outsider;
+    db.user.rows[1].permission = { view: ['legacy'] };
+    assert.equal(session.hasPermission(await session.getActiveSessionUser(worker.socket), 'view', 'legacy'), false);
+    db.user.rows[0].permissionCategoryId = ids.outsider;
+    assert.equal(session.hasPermission(await session.getActiveSessionUser(admin.socket), 'delete', 'anything'), true);
 });

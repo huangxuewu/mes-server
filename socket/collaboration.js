@@ -4,7 +4,7 @@ const Y = require("yjs");
 const { Hocuspocus } = require("@hocuspocus/server");
 const { WebSocketServer } = require("ws");
 const db = require("../models");
-const { JWT_SECRET, hasPermission } = require("./session");
+const { JWT_SECRET, hasPermission, resolveUserPermissions } = require("./session");
 const { sessionSignature, isBoundDocumentSession, onSessionEnded, onPermissionsChanged } = require('./session');
 const { acquireDocument, assertAccess } = require('../utils/documentAccess');
 
@@ -35,7 +35,7 @@ const collaboration = new Hocuspocus({
             throw new Error("Invalid collaboration session");
 
         const [user, document] = await Promise.all([
-            db.user.findById(userId).lean(),
+            db.user.findById(userId).lean().then(resolveUserPermissions),
             db.document.findOne({ _id: documentName, isTemplate: false, status: { $ne: "Archived" } }).lean(),
         ]);
         if (!user || !document || !canUseDocumentCenter(user))
@@ -58,7 +58,7 @@ const collaboration = new Hocuspocus({
         try {
             jwt.verify(context.sessionToken, JWT_SECRET);
             if (!isBoundDocumentSession(context.socketId, context.userId)) throw new Error('Session ended');
-            const [user, record] = await Promise.all([db.user.findById(context.userId).lean(), db.document.findById(documentName).lean()]);
+            const [user, record] = await Promise.all([db.user.findById(context.userId).lean().then(resolveUserPermissions), db.document.findById(documentName).lean()]);
             assertAccess(user, record, context.documentToken);
             if (context.signature !== sessionSignature(user) || context.version !== (record.securityVersion || 0) || document.fileSettingsFrozen)
                 throw new Error('Document access changed');
