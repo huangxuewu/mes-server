@@ -32,9 +32,6 @@ const CREATE_ASN = `mutation MesCreateAsn($input: CreateTransactionInput!) {
 const SAVE_ADJUSTMENTS = `mutation MesAsnAdjustments($input: [LoadShipmentAdjustmentsInput!]!) {
     upsertLoadShipmentAdjustments(input: $input) { id }
 }`;
-const SAVE_BOL = `mutation MesAsnBol($input: LoadInput!) {
-    upsertLoad(input: $input) { id bol_number }
-}`;
 const normalize = value => String(value ?? "").trim();
 const identifier = value => normalize(value).replace(/[^0-9A-Za-z]/g, "");
 const activeLoads = new Set();
@@ -199,11 +196,10 @@ const buildAsn = (shipment, mes, now = new Date()) => {
     return { message, adjustments, bolNumber, quantities, remainingQuantities };
 };
 
-const submitAsns = async ({ shipments, file, retryShipmentId }, { clientFactory = getClient, onProgress = () => {} } = {}) => {
+const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getClient, onProgress = () => {} } = {}) => {
     if (!shipments?.length) throw new Error("No loaded shipments selected");
     const loadNumber = normalize(shipments[0].loadNumber);
     if (!/^\d+$/.test(loadNumber) || shipments.some(shipment => normalize(shipment.loadNumber) !== loadNumber)) throw new Error("Invalid MES load selection");
-    if (!Buffer.isBuffer(file) || file.length >= 10000000 || file.subarray(0, 5).toString() !== "%PDF-") throw new Error("BOL must be a PDF smaller than 10 MB");
     const selected = retryShipmentId === undefined ? shipments : shipments.filter(shipment => shipment.shipmentId === retryShipmentId);
     if (!selected.length || (retryShipmentId !== undefined && selected.length !== 1)) throw new Error('Retry shipment must belong uniquely to the selected load');
     const client = await clientFactory();
@@ -284,36 +280,11 @@ const submitAsns = async ({ shipments, file, retryShipmentId }, { clientFactory 
                     plan.transaction = { id: result.createTransaction.id };
                 }
             }
+            if (plan.adjustments.length) await client.graphql(SAVE_ADJUSTMENTS, { input: plan.adjustments });
             // ERP receipt completes submission; delivery and partner acknowledgement continue in ERP.
             onProgress({ phase: 'received', poNumber: plan.mes.poNumber, shipmentId: plan.mes.shipmentId, transactionId: plan.transaction.id });
-            if (plan.adjustments.length) await client.graphql(SAVE_ADJUSTMENTS, { input: plan.adjustments });
         }
-        const bolNumber = plans[0].bolNumber;
-        const erpLoadId = Number(plans[0].shipment.load.id);
-        const transactions = plans.map(plan => ({ shipmentId: plan.mes.shipmentId, poNumber: plan.mes.poNumber, id: plan.transaction.id }));
-        // A row retry may create only that PO's ASN. Other POs must already have matching receipts before BOL upload.
-        if (retryShipmentId !== undefined) {
-            for (const mes of shipments.filter(shipment => shipment.shipmentId !== retryShipmentId)) {
-                const matches = rows.filter(row => normalize(row.load_shipment_notice_id) === normalize(mes.shipmentId) && normalize(row.po?.po_number) === normalize(mes.poNumber));
-                const shipment = matches.length === 1 ? matches[0] : null;
-                const transaction = shipment && latestAsn(shipment);
-                if (!transaction || transactionState(transaction) === 'failed' || !mes.checklist?.loaded?.status || !mes.bol?.url)
-                    return { bolNumber, erpLoadId, bolUploaded: false, transactions };
-                try {
-                    const existing = buildAsn(shipment, mes);
-                    if (Number(shipment.load.id) !== erpLoadId || existing.bolNumber !== bolNumber || asnContents(transactionDocument(transaction)) !== asnContents(existing.message.transactionSets[0]))
-                        return { bolNumber, erpLoadId, bolUploaded: false, transactions };
-                } catch {
-                    return { bolNumber, erpLoadId, bolUploaded: false, transactions };
-                }
-                transactions.push({ shipmentId: mes.shipmentId, poNumber: mes.poNumber, id: transaction.id });
-            }
-        }
-        onProgress({ phase: 'uploadingBol', poNumber: '', erpLoadId });
-        await client.uploadBol(file, loadNumber, bolNumber);
-        const result = await client.graphql(SAVE_BOL, { input: { id: erpLoadId, bol_number: bolNumber } });
-        if (normalize(result?.upsertLoad?.bol_number) !== bolNumber) throw new Error("ERP BOL uploaded but load number update was not confirmed; retry to finish");
-        return { bolNumber, erpLoadId, bolUploaded: true, transactions };
+        return { transactions: plans.map(plan => ({ shipmentId: plan.mes.shipmentId, poNumber: plan.mes.poNumber, id: plan.transaction.id })) };
     } finally {
         activeLoads.delete(key);
     }
@@ -321,4 +292,4 @@ const submitAsns = async ({ shipments, file, retryShipmentId }, { clientFactory 
 
 const poChanged = shipment => shipment.po?.po_created_at && shipment.created_at && new Date(shipment.po.po_created_at) > new Date(shipment.created_at);
 
-module.exports = { ASN_QUERY, ACCOUNT_QUERY, CREATE_ASN, SAVE_ADJUSTMENTS, SAVE_BOL, buildAsn, transactionState, latestAsn, submitAsns };
+module.exports = { ASN_QUERY, ACCOUNT_QUERY, CREATE_ASN, SAVE_ADJUSTMENTS, buildAsn, transactionState, latestAsn, submitAsns };

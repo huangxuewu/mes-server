@@ -601,7 +601,7 @@ module.exports = (socket, io) => {
 
     socket.on("bill-of-lading:submit-asn", async (payload, callback) => {
         try {
-            const { loadNumber, shipmentIdArray, file, requestId, retryShipmentId } = payload || {};
+            const { loadNumber, shipmentIdArray, requestId, retryShipmentId } = payload || {};
             if (!Array.isArray(shipmentIdArray) || !shipmentIdArray.length || shipmentIdArray.some(id => typeof id !== "string"))
                 throw new Error("Loaded shipment IDs are required");
             if (typeof loadNumber !== "string") throw new Error("Load number is required");
@@ -611,7 +611,7 @@ module.exports = (socket, io) => {
                 .filter(load => load.loadNumber === loadNumber && shipmentIdArray.includes(load.shipmentId))
                 .map(load => ({ ...parent, ...load })));
             if (shipments.length !== shipmentIdArray.length) throw new Error("Selected MES shipments could not be found uniquely");
-            const result = await submitAsns({ shipments, file, retryShipmentId }, {
+            const result = await submitAsns({ shipments, retryShipmentId }, {
                 onProgress: progress => socket.emit('bill-of-lading:asn-progress', { ...progress, loadNumber, requestId }),
             });
             callback?.({ status: "success", payload: result });

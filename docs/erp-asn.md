@@ -1,37 +1,35 @@
 # Automatic ASN after MES BOL upload
 
-Verified on 2026-09-10 from the deployed [DMS ASN screen](https://erp.downhomeusa.com/shipping/asn), its JavaScript modules and the live GraphQL schema. The browser session was logged out. No production transaction or file was submitted during development.
+## Scope
+
+MES uploads the BOL PDF to its existing Dropbox destination and saves the link. When `Auto Submit ASN` is selected, MES then submits ASNs for loaded POs. The option defaults to off. MES does not upload the PDF to ERP or update the ERP load through `upsertLoad`.
 
 ## ERP contract
 
-- Select a `loadShipment` by load number, full PO/DC number and ShipIQ `load_shipment_notice_id`. Its mapped `shipment_notice.shipment_id` must agree and its notice must not be cancelled.
-- Read the PO vendor's `ediAccounts.isa_id`. The DMS page maps an ISA ID ending in `DMS` to account code `Domestic`.
-- Supply EDI 856 JSON with shipment/order/carton/item hierarchy. Required data includes the ERP load-shipment ID, four-digit destination and buying-party DC codes, carrier SCAC/routing, BOL references, UPC/DPCI, units per carton, UOM, and existing ERP SSCC packing numbers.
-- `createTransaction(CreateTransactionInput)` receives `account_code: Domestic`, `stream: LIVE`, `type: SHIP_NOTICE_MANIFEST_856`, and the JSON message. The transaction's shipment identification is the ERP load-shipment ID, **not** the BOL number.
-- For partial quantities, call `upsertLoadShipmentAdjustments` with actual and expected item quantities, shipment notice ID, carrier, load/BOL numbers, carton count and dates.
-- `createTransaction` returns an ID when ERP receives the request. The deployed ASN page then opens its delivery/acknowledgement status dialog. ERP tracks eventual partner success separately: validation `VALID`, delivery `DELIVERED`, and acknowledgment `ACCEPTED` or `OVERDUE`. `INVALID`, `FAILED`, `REJECTED` and `ACCEPTEDWITHERRORS` are failures. MES completion requires ERP receipt, not eventual partner success.
-- The ERP BOL uploader replaces the exact `/BOL/<load>#_<bol>#.pdf` file through `DELETE /api/v1/dropbox/file` followed by multipart `POST /api/v1/dropbox/upload` on the ERP **web** origin. Multipart fields are `file`, `fileName`, and `destinationPath: /BOL`. It then calls `upsertLoad({ id, bol_number })`.
+The ASN contract was inspected on 2026-09-10 using the deployed ERP ASN screen and GraphQL schema.
 
-Source modules: [ASN send](https://erp.downhomeusa.com/assets/index-DGIIroon.js), [transaction states](https://erp.downhomeusa.com/assets/transaction-D8ZK0oNE.js), [BOL uploader](https://erp.downhomeusa.com/assets/index-BvgXFtse.js), [file transport](https://erp.downhomeusa.com/assets/helper-BYs1kzRN.js). Asset filenames belong to this deployed version and can change.
+- Match each ERP `loadShipment` by load number, full PO/DC number and ShipIQ `load_shipment_notice_id`. Its mapped shipment ID must agree and its notice must not be cancelled.
+- Read the vendor's `ediAccounts.isa_id`; the supported DMS account maps to `Domestic`.
+- Send EDI 856 shipment/order/carton/item JSON through `createTransaction` with account code `Domestic`, stream `LIVE` and type `SHIP_NOTICE_MANIFEST_856`.
+- Use the ERP load-shipment ID for shipment identification, and the saved MES BOL number for MB and BM references.
+- Sending units are MES `quantity - backorder`. Match each item uniquely, validate case packs and PO quantities, and use the existing ERP SSCC carton labels.
+- Save required partial-quantity adjustments with `upsertLoadShipmentAdjustments`.
+- Completion requires an ERP transaction ID and saved quantity adjustments. MES does not poll EDI delivery or partner acknowledgement.
 
-## MES behavior
+Existing accepted or in-progress transactions are checked against the MES BOL and carton/item contents and reused. Different contents require ERP review. Every selected PO is validated before the first create, and a fresh ERP read precedes each create. The existing EDI configuration supplies the API origin and credentials; no browser credentials are copied.
 
-Both BOL dialogs offer `Auto Submit ASN`, initially unchecked. The outbound Pinia store uploads the PDF to MES Dropbox and saves its link first. Only shipments marked loaded are selected. `bill-of-lading:submit-asn` reloads those shipments from MongoDB, so the client cannot substitute arbitrary ERP quantities or BOL numbers.
+## MES flow and status list
 
-Before sending the PDF for ASN submission, the client checks `bill-of-lading:asn-ready` with an eight-second timeout. An outdated or unavailable backend leaves the saved BOL available for retry. After MES saves the BOL, both dialogs show all POs with right-aligned submission statuses. Unloaded POs remain visible as `Shipment Not Loaded`; the PO heading shows the loaded/total count only when some POs are not loaded. The title is `Upload BOL` followed by a load-number badge. The ERP BOL-upload row appears when its upload begins. Request-scoped progress events identify each shipment and its ERP transaction receipt; the button displays animated loading dots. Active row statuses show `Submitting` or `Uploading` followed by animated dots. The footer button keeps its dimensions while displaying dots. Completed results remain available until Confirm; in the gate dialog, Confirm finishes the existing load-completion flow.
+The outbound Pinia store owns upload and ASN state for both BOL dialogs. After the Dropbox upload and MES link save, the client checks `bill-of-lading:asn-ready` with an eight-second timeout. It then sends load number, loaded shipment IDs and a request ID to `bill-of-lading:submit-asn`. The PDF is not included in this request. The server reloads authoritative shipment records from MongoDB.
 
-PO submission errors display an `Attention needed` link to `/shipping/asn/send?shipment_id=<ShipIQ shipment ID>`. The deployed ERP send page resolves that query parameter through `load_shipment_notice_id`. Electron's existing external-window handler opens the link in the default browser. BOL upload errors link to `/shipping/load/<ERP load ID>?loadNumber=<load number>`, using the ERP load ID returned for the selected shipments. For load 77737664, the verified ERP load ID is 2015.
+Both dialogs display `Upload BOL` followed by a load-number badge. The list includes all selected POs, with the loaded/total count in the heading when some are unloaded. Unloaded rows display `Shipment Not Loaded`. Active rows display `Submitting` followed by animated dots. Successful rows display `Received by ERP`. There is no ERP document-upload row.
 
-Failed or unsent PO rows offer `Retry` with a refresh icon directly after the PO number. The client sends `retryShipmentId` with the full load selection; the server may create or adjust only that PO. It reads the other POs' receipts before deciding whether the final BOL upload can run. A partial retry keeps the other row statuses and the saved MES PDF. The footer is `Confirm`, which starts the initial upload or dismisses its results, and never starts an ASN retry. BOL attention links remain available for manual upload while integration authentication is pending.
+Failed or unsent PO rows offer `Retry` with a refresh icon beside the PO number. A retry creates or adjusts only that PO and preserves other row statuses and the saved MES Dropbox upload. The client finishes when all loaded rows are received. `Attention needed` opens `/shipping/asn/send?shipment_id=<ShipIQ shipment ID>` in the default browser.
 
-The server uses the saved MES BOL number for both MB and BM references and the ERP file/load number. Sending units are MES `quantity - backorder`; they must match a unique ERP item, agree on case pack, fit existing carton labels and remain within PO quantities. As on the ERP page, a short shipment may contain fewer cartons than the ShipIQ notice: actual MES quantities determine the ASN carton count. Unloaded POs are not submitted.
+The footer button retains its width and height while showing loading dots. `Confirm` starts the initial upload or dismisses completed results; ASN retries are per PO. In the gate dialog, confirming results finishes the existing load-completion flow.
 
-Existing EDI configuration provides the API origin, web origin, authentication token and custom headers (including `x-tenant-id`). The configured ERP identity needs ASN-send access and BOL-upload access for the intended tenant. Credentials are not copied from a browser.
+## Verification and limitations
 
-A read-only check on 2026-09-10 found that the configured API key works for GraphQL but the web-origin `/api/v1/dropbox/search` endpoint returns 401 `Authentication is required`; the equivalent API-origin path returns 404. The deployed BOL uploader sends an ERP bearer token and tenant header. The MES ERP auth token is currently unset. Automatic BOL upload therefore needs a valid ERP auth token with access to that tenant, or ERP support for the integration API key on its BOL endpoints. MES reports the authentication requirement and offers the correct load page for manual BOL upload.
+Mocked server tests cover payloads, partial quantities, existing and ambiguous receipts, adjustment retries, pending partner processing and absence of ERP document uploads or load updates. Client tests cover PO status progression, retry isolation, callback reconciliation, unloaded rows, duplicate clicks and omission of PDF bytes from ASN requests.
 
-Existing accepted or in-progress ASNs are checked against the MES BOL and carton/item contents, then reused without creating another transaction. Different contents require ERP review. Every selected PO is validated before the first create; a fresh ERP read precedes each create. Once every selected PO has an ERP transaction ID and required quantity adjustments are saved, MES uploads the BOL and confirms the corresponding ERP load's BOL number. It does not poll validation, delivery, or partner acknowledgement. Retry preserves the successful MES upload and can finish an ERP BOL-upload/load-update failure, including when partner processing is still pending. Rows say `Received by ERP` rather than implying delivery or partner acceptance.
-
-There is a per-load process lock and an in-memory guard for a create request with an unknown outcome. These are not a distributed, durable idempotency guarantee. After a server restart or an ambiguous network outcome, inspect ERP before manually resending. ERP transaction records remain the authority for completed and pending work.
-
-Verification: mocked integration tests exercise payloads, partial quantities, missing/ambiguous receipts, pending partner processing and BOL-upload retries; client tests cover PO status progression, partial failures, callback reconciliation, selection and duplicate clicks. The production client build passes. A read-only ERP check on 2026-09-10 confirmed load 77737664 had transactions 1039888558 and 1039888577, both VALID/DELIVERED/ACCEPTED. No production submission was performed by these checks.
+The server has a per-load process lock and an in-memory guard for create requests with unknown outcomes. These do not provide durable distributed idempotency. ERP transaction records remain the authority after an ambiguous response or server restart.
