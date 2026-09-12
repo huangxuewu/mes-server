@@ -52,9 +52,10 @@ test('malformed layouts, unsupported sizes, invalid settings and ownership field
     await f.call('dashboard:update', layout());
     for (const mutate of [
         d => { d.version = 2; }, d => { d.widgets[0].type = 'unknown'; }, d => { d.widgets[0].size = 'small'; },
-        d => { d.widgets[0].x = 8; }, d => { d.widgets[0].y = -1; }, d => { d.widgets[0].y = 1.5; },
+        d => { d.widgets[0].x = 8; }, d => { d.widgets[0].y = -1; }, d => { d.widgets[0].y = 1.1; },
+        d => { d.widgets[0].y = '1'; }, d => { d.widgets[0].y = null; },
         d => { d.widgets[0].w = 13; }, d => { d.widgets[0].w = 3; }, d => { d.widgets[0].w = 4.5; },
-        d => { d.widgets[0].h = 1; }, d => { d.widgets[0].h = 21; }, d => { d.widgets[0].h = 2.5; },
+        d => { d.widgets[0].h = 1; }, d => { d.widgets[0].h = 21; }, d => { d.widgets[0].h = 2.1; },
         d => { d.widgets[0].w = null; }, d => { d.widgets[0].h = '4'; },
         d => { d.widgets[0].w = 10; d.widgets[0].x = 3; },
         d => { d.widgets[0].settings.week = 'next-year'; }, d => { d.widgets[0].settings.departmentId = { $ne: '' }; },
@@ -83,13 +84,74 @@ test('shipping period selections round-trip and invalid period lists are rejecte
     }
 });
 
+test('auto-expansion round-trips for every widget and rejects non-booleans', async () => {
+    const f = fixture();
+    for (const type of ['attendance', 'hours', 'shipping', 'inbound', 'outbound', 'agenda']) {
+        const data = layout();
+        Object.assign(data.widgets[0], { type, size: 'medium', h: 3.25, settings: {} });
+        for (const autoExpand of [true, false]) {
+            data.widgets[0].settings.autoExpand = autoExpand;
+            assert.equal((await f.call('dashboard:update', data)).status, 'success');
+            const saved = (await f.call('dashboard:get', {})).payload.widgets[0];
+            assert.equal(saved.settings.autoExpand, autoExpand);
+            assert.equal(saved.h, 3.25);
+        }
+        for (const autoExpand of ['true', 1, null, {}]) {
+            data.widgets[0].settings.autoExpand = autoExpand;
+            assert.equal((await f.call('dashboard:update', data)).status, 'error');
+        }
+    }
+});
+
+test('metric visibility round-trips for each metric widget and rejects non-booleans', async () => {
+    const f = fixture();
+    for (const type of ['attendance', 'hours', 'shipping', 'inbound', 'outbound']) {
+        const data = layout();
+        Object.assign(data.widgets[0], { type, size: 'medium', settings: {} });
+        for (const hideMetrics of [true, false]) {
+            data.widgets[0].settings.hideMetrics = hideMetrics;
+            assert.equal((await f.call('dashboard:update', data)).status, 'success');
+            assert.equal((await f.call('dashboard:get', {})).payload.widgets[0].settings.hideMetrics, hideMetrics);
+        }
+        for (const hideMetrics of ['true', 1, null, {}]) {
+            data.widgets[0].settings.hideMetrics = hideMetrics;
+            assert.equal((await f.call('dashboard:update', data)).status, 'error');
+        }
+    }
+});
+
 test('custom widget dimensions round-trip independently of their original preset', async () => {
     const f = fixture();
     const data = layout();
-    Object.assign(data.widgets[0], { x: 2, w: 10, h: 7 });
+    Object.assign(data.widgets[0], { x: 2, y: 1.25, w: 10, h: 7.5 });
     assert.equal((await f.call('dashboard:update', data)).status, 'success');
     const saved = (await f.call('dashboard:get', {})).payload.widgets[0];
     assert.equal(saved.w, 10);
-    assert.equal(saved.h, 7);
+    assert.equal(saved.h, 7.5);
+    assert.equal(saved.y, 1.25);
     assert.equal(saved.size, 'large');
+});
+
+test('outbound widgets save their own status filters and fine dimensions', async () => {
+    const f = fixture();
+    const data = layout();
+    Object.assign(data.widgets[0], { type: 'outbound', size: 'medium', w: 4, h: 4.25, y: 0.5 });
+    for (const status of ['', 'Pending', 'Carrier Accepted, Awaiting Pickup', 'Past Pickup', 'Picked Up', 'Completed', 'Cancelled']) {
+        data.widgets[0].settings = { range: 'week', status };
+        assert.equal((await f.call('dashboard:update', data)).status, 'success');
+        assert.deepEqual((await f.call('dashboard:get', {})).payload.widgets[0], data.widgets[0]);
+    }
+    data.widgets[0].settings.status = 'Receiving';
+    assert.equal((await f.call('dashboard:update', data)).status, 'error');
+    data.widgets[0].type = 'outbound';
+    for (const range of ['today', 'threeDays', 'currentWeek', 'week']) {
+        data.widgets[0].settings = { range, status: '' };
+        assert.equal((await f.call('dashboard:update', data)).status, 'success');
+        assert.equal((await f.call('dashboard:get', {})).payload.widgets[0].settings.range, range);
+    }
+    data.widgets[0].settings.range = 'month';
+    assert.equal((await f.call('dashboard:update', data)).status, 'error');
+    data.widgets[0].type = 'inbound';
+    data.widgets[0].settings.status = 'Picked Up';
+    assert.equal((await f.call('dashboard:update', data)).status, 'error');
 });

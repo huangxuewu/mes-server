@@ -2,16 +2,21 @@ const db = require('../../models');
 const { getActiveSessionUser } = require('../session');
 
 const types = {
-    attendance: { sizes: ['small', 'medium'], settings: ['departmentId', 'teamId', 'category'] },
-    hours: { sizes: ['medium', 'large'], settings: ['departmentId', 'teamId', 'week'] },
-    shipping: { sizes: ['medium', 'large'], settings: ['unit', 'periods', 'disabledDates'] },
-    inbound: { sizes: ['small', 'medium', 'large'], settings: ['range', 'status'] },
+    attendance: { sizes: ['small', 'medium'], settings: ['departmentId', 'teamId', 'category', 'hideMetrics'] },
+    hours: { sizes: ['medium', 'large'], settings: ['departmentId', 'teamId', 'week', 'hideMetrics'] },
+    shipping: { sizes: ['medium', 'large'], settings: ['unit', 'periods', 'disabledDates', 'hideMetrics'] },
+    inbound: { sizes: ['small', 'medium', 'large'], settings: ['range', 'status', 'hideMetrics'] },
+    outbound: { sizes: ['small', 'medium', 'large'], settings: ['range', 'status', 'hideMetrics'] },
     agenda: { sizes: ['small', 'medium', 'large'], settings: ['range'] },
 };
 const choices = {
     category: ['all', 'present', 'absent', 'onBreak', 'activeEarly', 'activeOnTime', 'activeLate', 'activeDayOff', 'clockedOut', 'noShow', 'notStarted', 'dayOff'],
     week: ['current', 'previous'], unit: ['box', 'piece', 'pallet'], range: ['today', 'week'],
     status: ['', 'Pending', 'Scheduled', 'Ocean Transit', 'Discharged', 'En Route', 'In Transit', 'Receiving', 'Parked', 'Received', 'Completed', 'Cancelled', 'On Hold', 'Postponed'],
+};
+const outboundChoices = {
+    range: ['today', 'threeDays', 'currentWeek', 'week'],
+    status: ['', 'Pending', 'Carrier Accepted, Awaiting Pickup', 'Past Pickup', 'Picked Up', 'Completed', 'Cancelled'],
 };
 
 const validate = payload => {
@@ -23,16 +28,18 @@ const validate = payload => {
         const definition = widget && types[widget.type];
         if (!definition || Object.keys(widget).some(key => !['id', 'type', 'size', 'x', 'y', 'w', 'h', 'settings'].includes(key))
             || typeof widget.id !== 'string' || !/^[\w-]{1,80}$/.test(widget.id) || ids.has(widget.id)
-            || !definition.sizes.includes(widget.size) || !Number.isInteger(widget.x) || !Number.isInteger(widget.y)
+            || !definition.sizes.includes(widget.size) || !Number.isInteger(widget.x) || typeof widget.y !== 'number' || !Number.isInteger(widget.y * 4)
             || (widget.w !== undefined && (!Number.isInteger(widget.w) || widget.w < 4 || widget.w > 12))
-            || (widget.h !== undefined && (!Number.isInteger(widget.h) || widget.h < 2 || widget.h > 20))
+            || (widget.h !== undefined && (typeof widget.h !== 'number' || !Number.isInteger(widget.h * 4) || widget.h < 2 || widget.h > 20))
             || widget.x < 0 || widget.x + (widget.w ?? (widget.size === 'large' ? 8 : 4)) > 12 || widget.y < 0 || widget.y > 1000
             || !widget.settings || typeof widget.settings !== 'object' || Array.isArray(widget.settings))
             throw new Error('dashboard.invalid');
         ids.add(widget.id);
         for (const [key, value] of Object.entries(widget.settings)) {
-            if (!definition.settings.includes(key)) throw new Error('dashboard.invalid');
-            if (choices[key] && !choices[key].includes(value)) throw new Error('dashboard.invalid');
+            if (key !== 'autoExpand' && !definition.settings.includes(key)) throw new Error('dashboard.invalid');
+            if (['hideMetrics', 'autoExpand'].includes(key) && typeof value !== 'boolean') throw new Error('dashboard.invalid');
+            const allowed = widget.type === 'outbound' ? outboundChoices[key] ?? choices[key] : choices[key];
+            if (allowed && !allowed.includes(value)) throw new Error('dashboard.invalid');
             if (key === 'periods' && (!Array.isArray(value) || value.length > 3 || new Set(value).size !== value.length
                 || value.some(period => !['thisWeek', 'nextWeek', 'future'].includes(period))))
                 throw new Error('dashboard.invalid');
