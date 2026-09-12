@@ -24,6 +24,24 @@ const fixture = () => {
 const layout = () => ({ version: 1, widgets: [{ id: 'one', type: 'hours', size: 'large', x: 0, y: 0,
     settings: { departmentId: '', teamId: '', week: 'current' } }] });
 
+test('interaction round-trips for every widget, accepts legacy omission and rejects non-booleans', async () => {
+    const f = fixture();
+    for (const type of ['attendance', 'hours', 'shipping', 'inbound', 'outbound', 'agenda']) {
+        const data = layout();
+        Object.assign(data.widgets[0], { type, size: 'medium', settings: {} });
+        assert.equal((await f.call('dashboard:update', data)).status, 'success');
+        for (const interaction of [true, false]) {
+            data.widgets[0].settings.interaction = interaction;
+            assert.equal((await f.call('dashboard:update', data)).status, 'success');
+            assert.equal((await f.call('dashboard:get', {})).payload.widgets[0].settings.interaction, interaction);
+        }
+        for (const interaction of ['true', 1, null, {}, []]) {
+            data.widgets[0].settings.interaction = interaction;
+            assert.equal((await f.call('dashboard:update', data)).status, 'error');
+        }
+    }
+});
+
 test('dashboard reads and writes only the authenticated account', async () => {
     const f = fixture();
     assert.equal((await f.call('dashboard:get', {})).payload, null);

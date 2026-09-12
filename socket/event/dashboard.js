@@ -36,8 +36,8 @@ const validate = payload => {
             throw new Error('dashboard.invalid');
         ids.add(widget.id);
         for (const [key, value] of Object.entries(widget.settings)) {
-            if (key !== 'autoExpand' && !definition.settings.includes(key)) throw new Error('dashboard.invalid');
-            if (['hideMetrics', 'autoExpand'].includes(key) && typeof value !== 'boolean') throw new Error('dashboard.invalid');
+            if (!['autoExpand', 'interaction'].includes(key) && !definition.settings.includes(key)) throw new Error('dashboard.invalid');
+            if (['hideMetrics', 'autoExpand', 'interaction'].includes(key) && typeof value !== 'boolean') throw new Error('dashboard.invalid');
             const allowed = widget.type === 'outbound' ? outboundChoices[key] ?? choices[key] : choices[key];
             if (allowed && !allowed.includes(value)) throw new Error('dashboard.invalid');
             if (key === 'periods' && (!Array.isArray(value) || value.length > 3 || new Set(value).size !== value.length
