@@ -64,8 +64,11 @@ const createAsnMonitor = ({ db, getClient, logger = console, intervalMs = ASN_CH
                         }
                         // A new submission must not be overwritten by an older check still in flight.
                         try {
+                            const update = { 'loads.$[target].asn': asn };
+                            if (asn.state === 'accepted' && asn.final)
+                                update['loads.$[target].checklist.noticed.acceptedAt'] = load.checklist.noticed.acceptedAt || asn.checkedAt;
                             await db.outbound.updateOne({ _id: document._id, client: 'Target' }, {
-                                $set: { 'loads.$[target].asn': asn },
+                                $set: update,
                             }, { arrayFilters: [{ 'target.shipmentId': load.shipmentId, 'target.loadNumber': load.loadNumber,
                                 'target.checklist.noticed.status': true,
                                 'target.checklist.noticed.timestamp': load.checklist.noticed.timestamp ?? null,

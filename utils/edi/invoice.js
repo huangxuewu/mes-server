@@ -8,7 +8,7 @@ const INVOICE_QUERY = `query MesInvoice($filter: PurchaseOrderFilter, $first: In
         edges { node {
             po_number vendor_id vendor_name department po_status po_created_at
             payment_type_code payment_basis_date_code payment_terms_discount payment_discount_days_due payment_terms_net_days
-            destinationCenter { dc_code dc_name address_line city state zip_code }
+            destinationCenter { dc_code dc_name address_line city state zip_code port_code }
             items { id external_id item_bar_code tcin item_description item_unit_cost total_item_qty }
             load_shipments { id load_shipment_notice_id created_at load { load_number bol_number }
                 shipment_notice { shipment_id status assigned_scac executing_scac pro bol }
@@ -57,6 +57,28 @@ const amountCents = items => {
     return Number(cents);
 };
 
+const isPoLoaded = mes => {
+    if (!mes.items?.length) return false;
+    const required = new Map();
+    for (const item of mes.items) {
+        if (!item.styleCode || !Number.isSafeInteger(item.quantity) || item.quantity < 0) return false;
+        required.set(item.styleCode, (required.get(item.styleCode) || 0) + item.quantity);
+    }
+    const loaded = new Map();
+    for (const load of mes.loads || []) {
+        if (['Cancelled', 'Canceled'].includes(load.status) || load.checklist?.loaded?.status !== true) continue;
+        // MES loads inherit the PO items unless they have their own allocation.
+        const items = load.items ?? mes.items;
+        if (!Array.isArray(items)) return false;
+        for (const item of items) {
+            if (!required.has(item.styleCode) || !Number.isSafeInteger(item.quantity) || item.quantity < 0) return false;
+            loaded.set(item.styleCode, (loaded.get(item.styleCode) || 0) + item.quantity);
+        }
+    }
+    return [...required.values()].some(quantity => quantity > 0)
+        && [...required].every(([styleCode, quantity]) => (loaded.get(styleCode) || 0) === quantity);
+};
+
 const inspectInvoice = (po, mes, record = {}) => {
     if (mes?.client !== 'Target') throw new Error('Sales invoices currently support Target orders only');
     if (!po || po.po_number !== mes.poNumber) throw new Error('ERP purchase order was not found uniquely');
@@ -94,7 +116,7 @@ const inspectInvoice = (po, mes, record = {}) => {
     const sent = new Map();
     const reasons = [];
     const mesLoads = (mes.loads || []).filter(load => load.status !== 'Cancelled' && load.status !== 'Canceled');
-    if (!mesLoads.length || mesLoads.some(load => load.status !== 'Completed')) reasons.push('shipmentIncomplete');
+    if (!isPoLoaded(mes) || mesLoads.some(load => load.status !== 'Completed')) reasons.push('shipmentIncomplete');
     if (['CANCELLED', 'CANCELED'].includes(text(po.po_status).toUpperCase())) reasons.push('poCancelled');
     if (!items.length) reasons.push('noItems');
     const relevant = [];
@@ -193,4 +215,4 @@ const readPurchaseOrders = async (client, numbers) => {
 };
 
 module.exports = { INVOICE_QUERY, REFRESH_INVOICE, CREATE_INVOICE, accepted, domestic, documentJson, transactionSet,
-    amountCents, inspectInvoice, buildInvoice, invoiceFingerprint, readPurchaseOrders };
+    amountCents, isPoLoaded, inspectInvoice, buildInvoice, invoiceFingerprint, readPurchaseOrders };

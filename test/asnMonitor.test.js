@@ -36,8 +36,11 @@ const setup = () => {
             for (const load of value.loads) if (load.shipmentId === filter['target.shipmentId'] && load.loadNumber === filter['target.loadNumber']
                 && (load.asn?.transactionId ?? null) === filter['target.asn.transactionId']
                 && +(load.asn?.checkedAt ?? null) === +filter['target.asn.checkedAt']
-                && +load.checklist.noticed.timestamp === +filter['target.checklist.noticed.timestamp'])
+                && +load.checklist.noticed.timestamp === +filter['target.checklist.noticed.timestamp']) {
                 load.asn = update.$set['loads.$[target].asn'];
+                if (update.$set['loads.$[target].checklist.noticed.acceptedAt'])
+                    load.checklist.noticed.acceptedAt = update.$set['loads.$[target].checklist.noticed.acceptedAt'];
+            }
         },
     } };
     const client = { graphql: async (query, variables) => {
@@ -68,10 +71,14 @@ test('discovers legacy noticed Target POs, polls pending/overdue, then persists 
     await state.monitor.run();
     assert.equal(state.document.loads[0].asn.state, 'accepted');
     assert.equal(state.document.loads[0].asn.final, true);
+    const acceptedAt = state.document.loads[0].checklist.noticed.acceptedAt;
+    assert.equal(acceptedAt, state.document.loads[0].asn.checkedAt);
+    assert.notEqual(+acceptedAt, +state.document.loads[0].checklist.noticed.timestamp);
     assert.equal(accepted(state.transaction), true);
     const count = state.calls.length;
     await state.monitor.run();
     assert.equal(state.calls.length, count);
+    assert.equal(state.document.loads[0].checklist.noticed.acceptedAt, acceptedAt);
     assert.equal(state.closed(), 4);
     assert.equal(ASN_CHECK_INTERVAL_MS, 300000);
 });

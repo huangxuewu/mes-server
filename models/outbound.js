@@ -94,10 +94,13 @@ const loadSchema = new mongoose.Schema({
         noticed: {
             status: { type: Boolean, default: false, description: "Whether the ASN has been submitted" },
             timestamp: { type: Date, default: null },
+            acceptedAt: { type: Date, default: null, description: "When MES confirmed Target accepted the ASN" },
         },
         invoiced: {
             status: { type: Boolean, default: false, description: "Whether the shipment has been invoiced" },
             timestamp: { type: Date, default: null },
+            transactionId: String,
+            acceptedAt: { type: Date, default: null, description: "When MES confirmed Target accepted the invoice" },
         },
     }
 }, {
