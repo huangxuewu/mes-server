@@ -53,6 +53,10 @@ test('malformed layouts, unsupported sizes, invalid settings and ownership field
     for (const mutate of [
         d => { d.version = 2; }, d => { d.widgets[0].type = 'unknown'; }, d => { d.widgets[0].size = 'small'; },
         d => { d.widgets[0].x = 8; }, d => { d.widgets[0].y = -1; }, d => { d.widgets[0].y = 1.5; },
+        d => { d.widgets[0].w = 13; }, d => { d.widgets[0].w = 3; }, d => { d.widgets[0].w = 4.5; },
+        d => { d.widgets[0].h = 1; }, d => { d.widgets[0].h = 21; }, d => { d.widgets[0].h = 2.5; },
+        d => { d.widgets[0].w = null; }, d => { d.widgets[0].h = '4'; },
+        d => { d.widgets[0].w = 10; d.widgets[0].x = 3; },
         d => { d.widgets[0].settings.week = 'next-year'; }, d => { d.widgets[0].settings.departmentId = { $ne: '' }; },
         d => { d.widgets[0].settings.secret = true; }, d => { d.widgets.push({ ...d.widgets[0] }); },
         d => { d.widgets[0].settings = []; }, d => { d.widgets = null; }, d => { d.widgets = Array(51).fill(d.widgets[0]); },
@@ -61,4 +65,31 @@ test('malformed layouts, unsupported sizes, invalid settings and ownership field
         assert.equal((await f.call('dashboard:update', data)).status, 'error');
     }
     assert.equal(f.records.get('user-a').widgets[0].settings.week, 'current');
+});
+
+test('shipping period selections round-trip and invalid period lists are rejected', async () => {
+    const f = fixture();
+    const data = layout();
+    data.widgets[0].type = 'shipping';
+    data.widgets[0].settings = { unit: 'box', periods: ['thisWeek', 'nextWeek', 'future'] };
+    for (const periods of [['thisWeek', 'nextWeek', 'future'], ['nextWeek'], []]) {
+        data.widgets[0].settings.periods = periods;
+        assert.equal((await f.call('dashboard:update', data)).status, 'success');
+        assert.deepEqual((await f.call('dashboard:get', {})).payload.widgets[0].settings.periods, periods);
+    }
+    for (const periods of ['thisWeek', null, ['09/11'], ['thisWeek', 'thisWeek'], ['future', 'unknown']]) {
+        data.widgets[0].settings.periods = periods;
+        assert.equal((await f.call('dashboard:update', data)).status, 'error');
+    }
+});
+
+test('custom widget dimensions round-trip independently of their original preset', async () => {
+    const f = fixture();
+    const data = layout();
+    Object.assign(data.widgets[0], { x: 2, w: 10, h: 7 });
+    assert.equal((await f.call('dashboard:update', data)).status, 'success');
+    const saved = (await f.call('dashboard:get', {})).payload.widgets[0];
+    assert.equal(saved.w, 10);
+    assert.equal(saved.h, 7);
+    assert.equal(saved.size, 'large');
 });
