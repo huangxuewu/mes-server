@@ -3,7 +3,7 @@ const { createHash } = require('node:crypto');
 // Verified against the deployed DMS invoice screen and ERP GraphQL schema, 2026-09-12.
 const TRANSACTION_FIELDS = `id transaction_type business_number created_at stream sender_isa_id receiver_isa_id
     validation_status delivery_status acknowledgment_status document { json_data }`;
-const INVOICE_QUERY = `query MesInvoice($filter: PurchaseOrderFilter, $first: Int, $after: String) {
+const INVOICE_QUERY = `query MesInvoice($filter: PurchaseOrderFilter, $first: Int, $after: String, $includeDocuments: Boolean! = true) {
     po(filter: $filter, first: $first, after: $after) {
         edges { node {
             po_number vendor_id vendor_name department po_status po_created_at
@@ -13,13 +13,10 @@ const INVOICE_QUERY = `query MesInvoice($filter: PurchaseOrderFilter, $first: In
             load_shipments { id load_shipment_notice_id created_at load { load_number bol_number }
                 shipment_notice { shipment_id status assigned_scac executing_scac pro bol }
                 shipment_tracking { asn_sent_at } }
-            edi_transaction { ${TRANSACTION_FIELDS} }
+            edi_transaction { ${TRANSACTION_FIELDS.replace('document { json_data }', 'document @include(if: $includeDocuments) { json_data }')} }
         } }
         pageInfo { hasNextPage endCursor }
     }
-}`;
-const REFRESH_INVOICE = `mutation MesRefreshInvoice($id: Int!) {
-    refreshTransaction(account_code: Domestic, transaction_id: $id) { ${TRANSACTION_FIELDS} }
 }`;
 const CREATE_INVOICE = `mutation MesCreateInvoice($input: CreateTransactionInput!) {
     createTransaction(input: $input) { id }
@@ -128,7 +125,7 @@ const inspectInvoice = (po, mes, record = {}) => {
         const shipment = matches[0];
         const asn = asns.get(text(shipment.id));
         relevant.push({ shipment, asn });
-        if (!accepted(asn) || (load.asn?.transactionId && String(asn?.id) !== load.asn.transactionId)) reasons.push('asnNotAccepted');
+        if (!accepted(asn) || (load.asn?.transactionId && !transactions.some(transaction => String(transaction.id) === String(load.asn.transactionId)))) reasons.push('asnNotAccepted');
     }
     for (const [shipmentId, asn] of asns) {
         if (!accepted(asn)) { reasons.push('asnNotAccepted'); continue; }
@@ -169,8 +166,45 @@ const inspectInvoice = (po, mes, record = {}) => {
         asns: relevant.map(({ shipment, asn }) => ({ shipmentId: shipment.id, transactionId: asn?.id, acknowledgment: asn?.acknowledgment_status || 'MISSING' })) };
 };
 
-const buildInvoice = (po, state, invoiceDate) => {
+const invoiceReview = (po, state, invoiceDate) => {
+    const shipments = (po.load_shipments || []).filter(Boolean);
+    const dated = shipments.filter(row => Number.isFinite(new Date(row.created_at).getTime()))
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const first = dated[0] || shipments[0];
+    const last = dated.at(-1) || first;
+    const shipment = first?.shipment_tracking ? first : last?.shipment_tracking ? last : first;
+    const at = shipment?.shipment_tracking?.asn_sent_at;
+    return { invoiceNumber: state.invoiceNumber, invoiceDate,
+        shipDate: at && Number.isFinite(new Date(at).getTime())
+            ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date(at))
+            : (state.shipDate || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
+        scac: ['SCII', 'SQKO'].includes(shipment?.shipment_notice?.assigned_scac) ? 'SOCS'
+            : shipment?.shipment_notice?.assigned_scac || state.carrier?.identificationCode || '',
+        bolNumber: shipment?.shipment_notice?.bol || shipment?.load?.bol_number || state.bol || '',
+        loadNumber: shipment?.load?.load_number || '',
+        items: (state.items || []).map(({ line, quantity }) => ({ line, quantity })) };
+};
+
+const buildInvoice = (po, state, invoiceDate, review) => {
     if (!state.ready) throw new Error('Invoice is not ready for submission');
+    if (review) {
+        if (!review || typeof review !== 'object' || Array.isArray(review)
+            || Object.keys(review).some(key => !['invoiceNumber', 'invoiceDate', 'shipDate', 'scac', 'bolNumber', 'loadNumber', 'items'].includes(key)))
+            throw new Error('Invalid invoice review fields');
+        for (const field of ['invoiceNumber', 'bolNumber'])
+            if (typeof review[field] !== 'string' || !/^[A-Za-z0-9 -]{1,30}$/.test(review[field])) throw new Error(`Invalid ${field}`);
+        if (!/^[A-Z]{2,4}$/.test(review.scac || '')) throw new Error('A valid SCAC is required');
+        if (!Array.isArray(review.items) || review.items.length !== state.items.length
+            || state.items.some(item => review.items.filter(value => value.line === item.line && value.quantity === item.quantity).length !== 1))
+            throw new Error('Invoice quantities must match the completed PO and accepted ASNs');
+        if (review.loadNumber !== invoiceReview(po, state, invoiceDate).loadNumber) throw new Error('ERP shipment selection changed. Review the invoice again.');
+        const date = new Date(`${review.shipDate}T00:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(review.shipDate || '') || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== review.shipDate)
+            throw new Error('A valid ship date is required');
+        state = { ...state, invoiceNumber: review.invoiceNumber, shipDate: review.shipDate.replace(/-/g, ''), bol: review.bolNumber,
+            carrier: { ...state.carrier, identificationCode: review.scac } };
+        invoiceDate = review.invoiceDate;
+    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate || '') || new Date(`${invoiceDate}T00:00:00Z`).toISOString().slice(0, 10) !== invoiceDate)
         throw new Error('A valid invoice date is required');
     const terms = Object.fromEntries(Object.entries({ termsTypeCode: po.payment_type_code, termsBasisDateCode: po.payment_basis_date_code,
@@ -199,11 +233,11 @@ const buildInvoice = (po, state, invoiceDate) => {
 };
 const invoiceFingerprint = message => createHash('sha256').update(JSON.stringify(message)).digest('hex');
 
-const readPurchaseOrders = async (client, numbers) => {
+const readPurchaseOrders = async (client, numbers, includeDocuments = true) => {
     const rows = [];
     let after;
     do {
-        const data = await client.graphql(INVOICE_QUERY, { filter: { po_number: { in: numbers } }, first: 100, after });
+        const data = await client.graphql(INVOICE_QUERY, { filter: { po_number: { in: numbers } }, first: 100, after, includeDocuments });
         if (!data?.po?.edges) throw new Error('ERP did not return purchase orders');
         rows.push(...data.po.edges.map(edge => edge.node));
         const page = data.po.pageInfo;
@@ -214,5 +248,5 @@ const readPurchaseOrders = async (client, numbers) => {
     return rows;
 };
 
-module.exports = { INVOICE_QUERY, REFRESH_INVOICE, CREATE_INVOICE, accepted, domestic, documentJson, transactionSet,
-    amountCents, isPoLoaded, inspectInvoice, buildInvoice, invoiceFingerprint, readPurchaseOrders };
+module.exports = { INVOICE_QUERY, CREATE_INVOICE, accepted, domestic, documentJson, transactionSet,
+    amountCents, isPoLoaded, inspectInvoice, invoiceReview, buildInvoice, invoiceFingerprint, readPurchaseOrders };

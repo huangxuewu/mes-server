@@ -1,4 +1,5 @@
 const { getClient } = require("./client");
+const { createOrderfulClient } = require("./orderful");
 
 // Contract verified against the ERP DMS ASN send page and GraphQL schema, 2026-09-10.
 const ASN_QUERY = `query MesAsn($filter: LoadShipmentFilter, $first: Int, $after: String) {
@@ -44,7 +45,7 @@ const transactionState = transaction => {
     const delivery = normalize(transaction.delivery_status).toUpperCase();
     const acknowledgment = normalize(transaction.acknowledgment_status).toUpperCase();
     if (validation === "INVALID" || delivery === "FAILED" || ["REJECTED", "ACCEPTEDWITHERRORS"].includes(acknowledgment)) return "failed";
-    return validation === "VALID" && delivery === "DELIVERED" && ["ACCEPTED", "OVERDUE"].includes(acknowledgment) ? "success" : "pending";
+    return validation === "VALID" && delivery === "DELIVERED" && acknowledgment === "ACCEPTED" ? "success" : "pending";
 };
 
 const transactionDocument = transaction => {
@@ -196,13 +197,20 @@ const buildAsn = (shipment, mes, now = new Date()) => {
     return { message, adjustments, bolNumber, quantities, remainingQuantities };
 };
 
-const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getClient, onProgress = () => {} } = {}) => {
+const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getClient, getOrderfulTransaction, onProgress = () => {} } = {}) => {
     if (!shipments?.length) throw new Error("No loaded shipments selected");
     const loadNumber = normalize(shipments[0].loadNumber);
     if (!/^\d+$/.test(loadNumber) || shipments.some(shipment => normalize(shipment.loadNumber) !== loadNumber)) throw new Error("Invalid MES load selection");
     const selected = retryShipmentId === undefined ? shipments : shipments.filter(shipment => shipment.shipmentId === retryShipmentId);
     if (!selected.length || (retryShipmentId !== undefined && selected.length !== 1)) throw new Error('Retry shipment must belong uniquely to the selected load');
     const client = await clientFactory();
+    getOrderfulTransaction ||= createOrderfulClient({ db: require('../../models') });
+    const verifyShipment = async shipment => {
+        const transactions = [];
+        for (const transaction of shipment.po?.edi_transaction || []) if (transaction.transaction_type === '856')
+            transactions.push(await getOrderfulTransaction({ id: transaction.id, type: '856', businessNumber: transaction.business_number, poNumber: shipment.po.po_number }));
+        return { ...shipment, po: { ...shipment.po, edi_transaction: transactions } };
+    };
     const key = `${client.config.baseUrl}:${client.headers["x-tenant-id"] || ""}:${loadNumber}`;
     if (activeLoads.has(key)) throw new Error("ASN submission is already running for this load");
     activeLoads.add(key);
@@ -220,12 +228,13 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
             after = next;
         } while (after);
         // Validate every selected PO before creating the first transaction.
-        const plans = selected.map(mes => {
+        const plans = [];
+        for (const mes of selected) {
             onProgress({ phase: 'preparing', poNumber: mes.poNumber, shipmentId: mes.shipmentId });
             if (!mes.checklist?.loaded?.status || !mes.bol?.url) throw new Error(`PO ${mes.poNumber}: load and upload the MES BOL first`);
             const matches = rows.filter(row => normalize(row.load_shipment_notice_id) === normalize(mes.shipmentId) && normalize(row.po?.po_number) === normalize(mes.poNumber));
             if (matches.length !== 1) throw new Error(`PO ${mes.poNumber}: expected one matching ERP shipment, found ${matches.length}`);
-            const shipment = matches[0];
+            const shipment = await verifyShipment(matches[0]);
             const transaction = latestAsn(shipment);
             const plan = { mes, shipment, transaction, ...buildAsn(shipment, mes), attemptKey: `${key}:${shipment.id}` };
             if (transaction && transactionState(transaction) !== "failed") {
@@ -237,8 +246,8 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
             }
             if ((!transaction || transactionState(transaction) === 'failed') && attemptedShipments.has(plan.attemptKey)) throw new Error(`PO ${mes.poNumber}: previous ASN outcome is unknown; check ERP before resending`);
             if (!transaction && poChanged(shipment)) throw new Error(`PO ${mes.poNumber}: ERP PO changed after the load was created; review ASN in ERP`);
-            return plan;
-        });
+            plans.push(plan);
+        }
         if (new Set(plans.map(plan => plan.shipment.id)).size !== plans.length) throw new Error("Duplicate shipment selection");
         if (new Set(plans.map(plan => plan.bolNumber)).size !== 1) throw new Error("Selected shipments must share the same MES BOL number");
         if (new Set(plans.map(plan => plan.shipment.load.id)).size !== 1) throw new Error("Selected shipments belong to different ERP loads");
@@ -264,7 +273,8 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
             onProgress({ phase: 'submitting', poNumber: plan.mes.poNumber, shipmentId: plan.mes.shipmentId });
             if (!plan.transaction || transactionState(plan.transaction) === "failed") {
                 const current = await client.graphql(ASN_QUERY, { filter: { id: { eq: Number(plan.shipment.id) } }, first: 1 });
-                const shipment = current?.loadShipment?.edges?.[0]?.node;
+                const currentShipment = current?.loadShipment?.edges?.[0]?.node;
+                const shipment = currentShipment && await verifyShipment(currentShipment);
                 if (!shipment || poChanged(shipment)) throw new Error(`PO ${plan.mes.poNumber}: ERP shipment changed; review it before sending`);
                 const refreshed = buildAsn(shipment, plan.mes);
                 const transaction = latestAsn(shipment);
@@ -281,7 +291,7 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
                 }
             }
             if (plan.adjustments.length) await client.graphql(SAVE_ADJUSTMENTS, { input: plan.adjustments });
-            // ERP receipt completes submission; delivery and partner acknowledgement continue in ERP.
+            // ERP receipt completes submission; delivery and partner acknowledgement are checked directly with Orderful by the monitor.
             await onProgress({ phase: 'received', poNumber: plan.mes.poNumber, shipmentId: plan.mes.shipmentId, transactionId: plan.transaction.id });
         }
         return { transactions: plans.map(plan => ({ shipmentId: plan.mes.shipmentId, poNumber: plan.mes.poNumber, id: plan.transaction.id })) };

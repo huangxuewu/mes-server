@@ -624,7 +624,7 @@ module.exports = (socket, io) => {
                         await db.outbound.updateOne(
                             { poNumber: progress.poNumber, 'loads.shipmentId': progress.shipmentId },
                             { $set: {
-                                'loads.$[target].checklist.noticed': { status: true, timestamp: new Date() },
+                                'loads.$[target].checklist.noticed': { status: true, timestamp: null, acceptedAt: null },
                                 'loads.$[target].asn': { transactionId: String(progress.transactionId), state: 'pending', final: false, error: '' },
                             } },
                             { arrayFilters: [{ 'target.shipmentId': progress.shipmentId, 'target.loadNumber': loadNumber }] }

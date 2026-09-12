@@ -1,8 +1,9 @@
-const { accepted, domestic, transactionSet, readPurchaseOrders, REFRESH_INVOICE } = require('./invoice');
+const { accepted, domestic, readPurchaseOrders } = require('./invoice');
+const { createOrderfulClient, readOrderfulPo } = require('./orderful');
 
 const ASN_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
-const createAsnMonitor = ({ db, getClient, logger = console, intervalMs = ASN_CHECK_INTERVAL_MS }) => {
+const createAsnMonitor = ({ db, getClient, getOrderfulTransaction = createOrderfulClient({ db }), logger = console, intervalMs = ASN_CHECK_INTERVAL_MS }) => {
     let timer;
     let running;
     let stopped = false;
@@ -11,18 +12,20 @@ const createAsnMonitor = ({ db, getClient, logger = console, intervalMs = ASN_CH
         running = (async () => {
             const client = await getClient();
             const cursor = db.outbound.find({ client: 'Target', loads: { $elemMatch: {
-                'checklist.noticed.status': true, 'asn.final': { $ne: true },
+                status: 'Completed', 'checklist.noticed.status': true,
+                $or: [{ 'asn.final': { $ne: true } }, { 'asn.source': { $ne: 'orderful' } }],
             } } }, { poNumber: 1, client: 1, loads: 1 }).lean().cursor();
             try {
                 for await (const document of cursor) {
                     if (stopped) break;
-                    const loads = document.loads.filter(load => load.checklist?.noticed?.status && !load.asn?.final);
+                    const loads = document.loads.filter(load => load.status === 'Completed' && load.checklist?.noticed?.status === true
+                        && (!load.asn?.final || load.asn?.source !== 'orderful'));
                     let po;
                     let lookupError;
                     try {
-                        const orders = await readPurchaseOrders(client, [document.poNumber]);
+                        const orders = await readPurchaseOrders(client, [document.poNumber], false);
                         if (orders.length !== 1 || orders[0].po_number !== document.poNumber) throw new Error('ERP purchase order was not found uniquely');
-                        po = orders[0];
+                        po = await readOrderfulPo({ ...orders[0], edi_transaction: (orders[0].edi_transaction || []).filter(row => row.transaction_type === '856') }, document, {}, getOrderfulTransaction);
                     } catch (error) { lookupError = error; }
                     for (const load of loads) {
                         if (stopped) break;
@@ -38,39 +41,32 @@ const createAsnMonitor = ({ db, getClient, logger = console, intervalMs = ASN_CH
                             const transactions = (po.edi_transaction || []).filter(transaction => domestic(transaction)
                                 && transaction.transaction_type === '856' && String(transaction.business_number) === shipmentId)
                                 .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                            if (load.asn?.transactionId && !transactions.some(transaction => String(transaction.id) === load.asn.transactionId))
-                                throw new Error('Waiting for the submitted ASN to appear in ERP');
-                            const transaction = transactions[0];
-                            if (!transaction) throw new Error('Waiting for the submitted ASN to appear in ERP');
-                            if (!/^\d+$/.test(String(transaction.id))) throw new Error('Invalid ASN transaction ID');
-                            const result = await client.graphql(REFRESH_INVOICE, { id: Number(transaction.id) });
-                            const updated = result?.refreshTransaction;
-                            if (!updated || String(updated.id) !== String(transaction.id) || !domestic(updated)
-                                || updated.transaction_type !== '856' || String(updated.business_number) !== shipmentId)
-                                throw new Error('ERP returned an ASN for a different shipment or account');
-                            const set = transactionSet(updated);
-                            if (set && (String(set.beginningSegmentForShipNotice?.[0]?.shipmentIdentification) !== shipmentId
-                                || (set.HL_loop || []).flatMap(level => level.purchaseOrderReference || [])
-                                    .some(reference => reference.purchaseOrderNumber !== document.poNumber)))
-                                throw new Error('ASN document does not match the shipment PO');
+                            const updated = transactions[0];
+                            if (!updated) throw new Error('Waiting for the submitted ASN transaction ID');
                             const rejected = ['REJECTED', 'ACCEPTEDWITHERRORS'].includes(updated.acknowledgment_status);
                             const success = accepted(updated);
                             const failed = rejected || updated.validation_status === 'INVALID' || updated.delivery_status === 'FAILED';
-                            asn = { transactionId: String(updated.id), state: success ? 'accepted' : failed ? 'failed' : 'pending',
+                            asn = { transactionId: String(updated.id), source: 'orderful', state: success ? 'accepted' : failed ? 'failed' : 'pending',
                                 final: success || rejected, validation: updated.validation_status, delivery: updated.delivery_status,
                                 acknowledgment: updated.acknowledgment_status, checkedAt: new Date(), error: '' };
+                            asn.submittedAt = updated.created_at;
+                            asn.acceptedAt = updated.accepted_at;
                         } catch (error) {
-                            asn = { ...load.asn, state: load.asn?.state || 'pending', final: false, checkedAt: new Date(), error: error.message };
+                            asn = { ...load.asn, state: 'pending', final: false, checkedAt: new Date(), error: error.message };
                         }
                         // A new submission must not be overwritten by an older check still in flight.
                         try {
-                            const update = { 'loads.$[target].asn': asn };
-                            if (asn.state === 'accepted' && asn.final)
-                                update['loads.$[target].checklist.noticed.acceptedAt'] = load.checklist.noticed.acceptedAt || asn.checkedAt;
+                            const { submittedAt, acceptedAt, ...stored } = asn;
+                            const update = { 'loads.$[target].asn': stored };
+                            if (!asn.error && asn.source === 'orderful') {
+                                update['loads.$[target].checklist.noticed.status'] = true;
+                                update['loads.$[target].checklist.noticed.timestamp'] = submittedAt;
+                                update['loads.$[target].checklist.noticed.acceptedAt'] = acceptedAt || null;
+                            }
                             await db.outbound.updateOne({ _id: document._id, client: 'Target' }, {
                                 $set: update,
                             }, { arrayFilters: [{ 'target.shipmentId': load.shipmentId, 'target.loadNumber': load.loadNumber,
-                                'target.checklist.noticed.status': true,
+                                'target.checklist.noticed.status': load.checklist.noticed.status,
                                 'target.checklist.noticed.timestamp': load.checklist.noticed.timestamp ?? null,
                                 'target.asn.checkedAt': load.asn?.checkedAt ?? null,
                                 'target.asn.transactionId': load.asn?.transactionId ?? null }], runValidators: true });

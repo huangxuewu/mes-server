@@ -61,7 +61,7 @@ test("remaining PO quantity accounts for prior accepted ASN", () => {
 
 test("ERP status semantics include overdue acceptance and reject accepted-with-errors", () => {
     assert.equal(transactionState(successful), "success");
-    assert.equal(transactionState({ ...successful, acknowledgment_status: "OVERDUE" }), "success");
+    assert.equal(transactionState({ ...successful, acknowledgment_status: "OVERDUE" }), "pending");
     assert.equal(transactionState({ ...successful, acknowledgment_status: "ACCEPTEDWITHERRORS" }), "failed");
     assert.equal(transactionState({ id: 1 }), "pending");
 });
@@ -92,7 +92,7 @@ const transport = (loadNumber, { adjustmentFailure = false, createFailure = fals
             throw new Error("ASN submission must not upload the BOL to ERP");
         },
     };
-    return { mes, shipment, calls, client, options: { clientFactory: async () => client } };
+    return { mes, shipment, calls, client, options: { clientFactory: async () => client, getOrderfulTransaction: async ({ id }) => structuredClone(shipment.po.edi_transaction.find(row => row.id === id)) } };
 };
 
 test("ASN receipt finishes after quantity adjustments without uploading the PDF or updating the ERP load", async () => {
@@ -183,7 +183,7 @@ test("multiple loaded POs each receive an ASN without uploading the BOL to ERP",
         },
         async uploadBol(...args) { uploaded.push(args); },
     };
-    const result = await submitAsns({ shipments: [first.mes, second.mes] }, { clientFactory: async () => client });
+    const result = await submitAsns({ shipments: [first.mes, second.mes] }, { clientFactory: async () => client, getOrderfulTransaction: async ({ id }) => structuredClone(rows.flatMap(row => row.po.edi_transaction).find(row => row.id === id)) });
     assert.deepEqual(created, ["1", "2"]);
     assert.equal(uploaded.length, 0);
     assert.equal(result.transactions.length, 2);
@@ -225,7 +225,7 @@ test("row retries create only the selected PO and return its receipt without a B
         async uploadBol(...args) { uploads.push(args); },
     };
     const request = { shipments: [first.mes, second.mes] };
-    const options = { clientFactory: async () => client };
+    const options = { clientFactory: async () => client, getOrderfulTransaction: async ({ id }) => structuredClone(rows.flatMap(row => row.po.edi_transaction).find(row => row.id === id)) };
     // An invalid other PO must not prevent retrying the selected PO.
     second.mes.items[0].quantity = -1;
     const firstResult = await submitAsns({ ...request, retryShipmentId: 'SHIP1' }, options);

@@ -54,6 +54,7 @@ const loadSchema = new mongoose.Schema({
     status: { type: String, default: "Pending" },
     asn: {
         transactionId: String,
+        source: String,
         state: { type: String, enum: ['pending', 'accepted', 'failed'] },
         final: Boolean,
         validation: String,
@@ -94,13 +95,13 @@ const loadSchema = new mongoose.Schema({
         noticed: {
             status: { type: Boolean, default: false, description: "Whether the ASN has been submitted" },
             timestamp: { type: Date, default: null },
-            acceptedAt: { type: Date, default: null, description: "When MES confirmed Target accepted the ASN" },
+            acceptedAt: { type: Date, default: null, description: "Orderful acknowledgment creation time for the accepted ASN" },
         },
         invoiced: {
             status: { type: Boolean, default: false, description: "Whether the shipment has been invoiced" },
             timestamp: { type: Date, default: null },
             transactionId: String,
-            acceptedAt: { type: Date, default: null, description: "When MES confirmed Target accepted the invoice" },
+            acceptedAt: { type: Date, default: null, description: "Orderful acknowledgment creation time for the accepted invoice" },
         },
     }
 }, {

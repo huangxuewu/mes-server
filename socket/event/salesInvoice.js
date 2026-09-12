@@ -1,22 +1,5 @@
-const db = require('../../models');
 const { getActiveSessionUser, hasPermission } = require('../session');
-const { getClient } = require('../../utils/edi/client');
-const { getConfiguredDropbox } = require('../../utils/documentStorage');
-const { createInvoiceFlow } = require('../../utils/edi/invoiceFlow');
-
-const flow = createInvoiceFlow({ db, getClient, getDropbox: getConfiguredDropbox,
-    getOrderfulMessage: async transactionId => {
-        const config = await db.config.findOne({ key: 'integration.edi.orderfulApiKey', status: 'Active' }).lean();
-        const key = process.env.ORDERFUL_API_KEY || config?.value;
-        if (!key) throw new Error('Add the Orderful API key under Integration > EDI to retrieve invoice JSON');
-        if (!/^\d+$/.test(String(transactionId))) throw new Error('Invalid Orderful transaction ID');
-        const response = await fetch(`https://api.orderful.com/v3/transactions/${transactionId}/message`, {
-            headers: { accept: 'application/json', 'orderful-api-key': key }, signal: AbortSignal.timeout(30000), redirect: 'error',
-        });
-        if (!response.ok) throw new Error(`Orderful invoice JSON fetch failed (${response.status})`);
-        return response.json();
-    },
-});
+const flow = require('../../utils/edi/salesInvoices');
 
 module.exports = socket => {
     const actions = { list: ['access', 'financial.page.access'], get: ['access', 'financial.page.access'],

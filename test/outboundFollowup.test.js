@@ -45,7 +45,7 @@ test('ASN receipt records Noticed before reporting success, including partial su
         updateOne: async (...args) => { writes.push(args); },
     } };
     const { handlers, events } = fixture(db, async (_request, { onProgress }) => {
-        await onProgress({ phase: 'received', shipmentId: 'SHIP1' });
+        await onProgress({ phase: 'received', shipmentId: 'SHIP1', poNumber: 'PO1', transactionId: '100' });
         assert.equal(writes.length, 1);
         throw new Error('Later submission failed');
     });
@@ -53,9 +53,11 @@ test('ASN receipt records Noticed before reporting success, including partial su
     await handlers['bill-of-lading:submit-asn']({ loadNumber: '1234', shipmentIdArray: ['SHIP1'] }, response => { result = response; });
     assert.equal(result.status, 'error');
     const update = writes[0][1].$set;
-    assert.deepEqual(Object.keys(update), ['loads.$[target].checklist.noticed']);
+    assert.deepEqual(Object.keys(update), ['loads.$[target].checklist.noticed', 'loads.$[target].asn']);
+    assert.equal(update['loads.$[target].asn'].transactionId, '100');
     assert.equal(update['loads.$[target].checklist.noticed'].status, true);
-    assert.ok(update['loads.$[target].checklist.noticed'].timestamp instanceof Date);
+    assert.equal(update['loads.$[target].checklist.noticed'].timestamp, null);
+    assert.equal(update['loads.$[target].checklist.noticed'].acceptedAt, null);
     assert.equal(writes[0][2].arrayFilters[0]['target.shipmentId'], 'SHIP1');
     assert.equal(events[0].payload.phase, 'received');
 });

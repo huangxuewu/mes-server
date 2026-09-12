@@ -60,6 +60,11 @@ const asnMonitor = require('./utils/edi/asnMonitor').createAsnMonitor({
 });
 asnMonitor.start();
 server.on('close', () => { void asnMonitor.stop(); });
+const invoiceMonitor = require('./utils/edi/invoiceMonitor').createInvoiceMonitor({
+    db: require('./models'), getClient: require('./utils/edi/client').getClient, flow: require('./utils/edi/salesInvoices'),
+});
+invoiceMonitor.start();
+server.on('close', () => { void invoiceMonitor.stop(); });
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
