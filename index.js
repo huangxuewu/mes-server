@@ -55,6 +55,11 @@ startDocumentLifecycle(io);
 startMessageAttachmentCleanup();
 require('./utils/stationScreenshots').getStationScreenshots(io).start();
 dataSync.start();
+const asnMonitor = require('./utils/edi/asnMonitor').createAsnMonitor({
+    db: require('./models'), getClient: require('./utils/edi/client').getClient,
+});
+asnMonitor.start();
+server.on('close', () => { void asnMonitor.stop(); });
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));

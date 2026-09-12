@@ -52,6 +52,16 @@ const loadSchema = new mongoose.Schema({
     pallets: { type: Number, default: 0 },
     commodity: { type: String, default: "" },
     status: { type: String, default: "Pending" },
+    asn: {
+        transactionId: String,
+        state: { type: String, enum: ['pending', 'accepted', 'failed'] },
+        final: Boolean,
+        validation: String,
+        delivery: String,
+        acknowledgment: String,
+        checkedAt: Date,
+        error: String,
+    },
     bol: {
         url: { type: String, default: "" },
         number: { type: String, default: "" },

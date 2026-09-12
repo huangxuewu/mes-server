@@ -622,9 +622,12 @@ module.exports = (socket, io) => {
                 onProgress: async progress => {
                     if (progress.phase === 'received') {
                         await db.outbound.updateOne(
-                            { 'loads.shipmentId': progress.shipmentId },
-                            { $set: { 'loads.$[target].checklist.noticed': { status: true, timestamp: new Date() } } },
-                            { arrayFilters: [{ 'target.shipmentId': progress.shipmentId }] }
+                            { poNumber: progress.poNumber, 'loads.shipmentId': progress.shipmentId },
+                            { $set: {
+                                'loads.$[target].checklist.noticed': { status: true, timestamp: new Date() },
+                                'loads.$[target].asn': { transactionId: String(progress.transactionId), state: 'pending', final: false, error: '' },
+                            } },
+                            { arrayFilters: [{ 'target.shipmentId': progress.shipmentId, 'target.loadNumber': loadNumber }] }
                         );
                     }
                     socket.emit('bill-of-lading:asn-progress', { ...progress, loadNumber, requestId });
