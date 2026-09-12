@@ -51,8 +51,11 @@ const associationSignature = associations => JSON.stringify(
 );
 
 const prepareThreads = async (fetched, myEmail, candidates, mailbox) => {
+    const loadNumbers = candidates.map(candidate => candidate.loadNumber);
     const storedThreads = await db.emailThread.find({ mailbox,
-        ...(fetched.length ? { threadId: { $in: fetched.map(thread => thread.threadId) } } : {}),
+        ...(fetched.length ? { threadId: { $in: fetched.map(thread => thread.threadId) } } : { $or: [
+            { loadNumber: { $in: loadNumbers } }, { 'loadAssociations.loadNumber': { $in: loadNumbers } },
+        ] }),
     }).lean();
     const existing = storedThreads.map(thread => hydrateThread(thread, candidates));
     const knownIds = new Set(existing.flatMap(t => t.messages.map(m => m.messageId)));
@@ -181,12 +184,14 @@ appointmentRefresh.start();
 module.exports = (socket, io) => {
     socket.on("appointments:query", async (payload, callback) => {
         try {
-            const { context } = await getClient();
-            const [storedThreads, candidates] = await Promise.all([
-                db.emailThread.find(context.mailbox ? { $or: [{ mailbox: context.mailbox }, { mailbox: { $exists: false } }] }
-                    : { mailbox: { $exists: false } }).sort({ updatedAt: -1 }).lean(),
-                getCandidates(),
-            ]);
+            const [{ context }, candidates] = await Promise.all([getClient(), getCandidates()]);
+            const mailboxFilter = context.mailbox ? { $or: [{ mailbox: context.mailbox }, { mailbox: { $exists: false } }] }
+                : { mailbox: { $exists: false } };
+            const loadNumbers = candidates.map(candidate => candidate.loadNumber);
+            const filter = { $and: [mailboxFilter, { $or: [
+                { loadNumber: { $in: loadNumbers } }, { 'loadAssociations.loadNumber': { $in: loadNumbers } },
+            ] }] };
+            const storedThreads = await db.emailThread.find(filter).sort({ updatedAt: -1 }).lean();
             const threads = storedThreads.map(thread => hydrateThread(thread, candidates));
             callback({ status: "success", message: "Threads fetched successfully", payload: threads });
         } catch (error) {

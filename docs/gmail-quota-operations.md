@@ -26,6 +26,8 @@ The persisted quota uses the smallest allocation any worker has reported. Reduci
 
 `appointments:refresh` acknowledges the durable job immediately. `appointments:sync-status` retrieves the same status, and its server event publishes updates. The client also checks status every ten seconds while a job is active and on reconnect, so notifications work across server processes without adding a Socket.IO adapter. The five-minute normal refresh interval remains in place. Manual refresh shares active work and cannot bypass cooldown.
 
+`appointments:query` returns stored threads associated with active outgoing loads (`Carrier Accepted, Awaiting Pickup` or `Past Pickup`), including shared-thread associations. It filters in MongoDB before loading message bodies instead of returning the entire mailbox archive. No active loads means an empty result. Sync completion uses the same active-load scope when updating associations; historical records remain stored. Compound mailbox/load-number indexes support both canonical and shared associations.
+
 Each job step processes a search/history page or one thread. Search pagination and pending thread IDs survive restart. Appointment writes, deduplication, and the checkpoint commit in the same transaction under a renewable lease. The first scan captures a history boundary and replays arrivals; subsequent scans read history and backfill newly active load references. An expired history cursor schedules another guarded baseline. Duplicate messages are guarded by mailbox and message ID.
 
 Rate and transient failures pause dispatch at the appropriate shared scope. Retry-After, explicit retry dates, and structured RetryInfo are honored. Backoff adds jitter and increases to a 64-second ceiling, with at least a minute for minute-quota failures. After five retries, successive retry groups defer for increasingly long intervals, capped at one hour. Authentication and permission failures are marked failed instead of repeatedly consuming Gmail quota. Failed attempts still consume the local allowance. Google SDK data-request retries are disabled; token acquisition occurs separately and cached OAuth clients reuse access tokens.
@@ -49,7 +51,7 @@ During rollout compare local request metrics with Google Cloud usage, check queu
 Run the focused server suites:
 
 ```powershell
-node --test utils/gmail.test.js utils/gmailQuota.test.js utils/gmailSync.test.js utils/appointmentRefresh.test.js utils/appointmentFilter.test.js utils/emailWeight.test.js utils/emailSignature.test.js test/gmailIntegration.test.js
+node --test utils/gmail.test.js utils/gmailQuota.test.js utils/gmailSync.test.js utils/appointmentRefresh.test.js utils/appointmentFilter.test.js utils/emailWeight.test.js utils/emailSignature.test.js test/gmailIntegration.test.js test/appointmentQuery.test.js
 ```
 
 The integration suite requires `GMAIL_TEST_URI` pointing to an isolated localhost replica set with a database name beginning `gmail_test_`. It creates uniquely named test databases; it never uses MES's production connection or sends Gmail messages. Without this variable, the database-dependent tests are skipped. Tests cover a simulated 500-thread scan, rolling-window boundaries, two independent database connections, shared cooldown, lease takeover, persisted send outcomes, mailbox migration, pagination, cursor expiry, and old-mail backfill.

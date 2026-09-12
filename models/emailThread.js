@@ -55,6 +55,8 @@ const emailThreadSchema = new mongoose.Schema({
 });
 
 emailThreadSchema.index({ mailbox: 1, threadId: 1 }, { unique: true, name: 'mailbox_thread_unique' });
+emailThreadSchema.index({ mailbox: 1, loadNumber: 1 });
+emailThreadSchema.index({ mailbox: 1, 'loadAssociations.loadNumber': 1 });
 const EmailThread = database.model("emailThread", emailThreadSchema, "emailThread");
 
 EmailThread.createIndexes({

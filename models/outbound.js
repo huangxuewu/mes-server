@@ -175,6 +175,7 @@ Outbound.getActiveLoads = async () => {
     const loads = await Outbound.aggregate([
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
         { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
+        { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
         { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
         { $project: { loads: 0 } },
         { $group: { _id: "$loadNumber", loads: { $push: "$$ROOT" } } },
