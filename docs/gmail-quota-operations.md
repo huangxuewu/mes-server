@@ -18,7 +18,7 @@ Before deployment, inspect [the project's Gmail quotas](https://console.cloud.go
 
 Deploy the server and client changes together. Retire old server workers before allowing Gmail activity: old binaries do not use the new gate. MongoDB must support transactions (replica set); existing MES change streams already require a replica set. Do not erase quota records during restart or rollout.
 
-The first sync or send associates legacy `emailThread` records without a mailbox with the currently configured, authenticated mailbox. Keep the original mailbox connected for this upgrade. The upgrade first creates a unique `(mailbox, threadId)` index, preserves records, and removes only the old unique single-field `threadId` index. Subsequent mailbox changes preserve separately scoped records. Configuration-test requests do not perform this migration. Reverting to an older application version after migration requires a compatibility review; pause sync instead for operational rollback.
+The first sync or send associates legacy `emailThread` records without a mailbox with the currently configured, authenticated mailbox. Keep the original mailbox connected for this upgrade. The upgrade first creates a unique `(mailbox, threadId)` index, preserves records, and removes only the old unique single-field `threadId` index. If a legacy thread already has a mailbox-scoped copy, a transaction merges messages by message ID and associations by load number, retains the scoped record's ID and current values, and removes the legacy copy only with the successful merge. Subsequent mailbox changes preserve separately scoped records. Configuration-test requests do not perform this migration. Reverting to an older application version after migration requires a compatibility review; pause sync instead for operational rollback.
 
 The persisted quota uses the smallest allocation any worker has reported. Reducing environment limits applies automatically. Raising them later requires a coordinated, reviewed update to the matching `gmailQuota` document's `userBudget`/`projectBudget`, while retaining its reservations and cooldowns. Do not change limits on only one worker.
 
@@ -36,6 +36,7 @@ Interactive requests can wait up to five seconds for admission. Once dispatched,
 
 - `gmail.request`: method, charged units, conservative rolling mailbox units, and duration. No credentials or email bodies are logged.
 - `gmail.sync.deferred`: retry category, error code/name, and attempt count.
+- `gmail.sync.failed`: non-retryable operation failure. Duplicate-key errors (`11000`) include the collection, index, and key field names, without key values or message bodies. They do not enter the automatic transient retry loop.
 - `gmail.sync.unavailable`: coordination failure; no new request is admitted when coordination is unavailable.
 - `gmailQuota`: active reservations, project/mailbox cooldowns and pacing, and effective allocations.
 - `gmailSync`: job status, requested time, last successful sync, next retry, current checkpoint, and lease owner/expiry.

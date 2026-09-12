@@ -51,7 +51,7 @@ const classifyError = (error, now = Date.now(), attempt = 0, random = Math.rando
     }
     const longLimit = /dailyLimit|daily limit|mail sending|bandwidth/i.test(details);
     const quota = status === 429 || ((status === 403 || status === 400) && /quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(details));
-    const transient = status >= 500 || (!status && /ETIMEDOUT|ECONNRESET|EAI_AGAIN|timeout|network/i.test(`${error?.code} ${details}`));
+    const transient = (status >= 500 && status < 600) || (!status && /ETIMEDOUT|ECONNRESET|EAI_AGAIN|timeout|network/i.test(`${error?.code} ${details}`));
     if (!quota && !transient) return null;
     const backoff = Math.min(64000, (2 ** attempt) * 1000 + Math.floor(random() * 1000));
     const delay = longLimit ? 60 * 60 * 1000 : Math.max(backoff, quota ? WINDOW_MS : 0);

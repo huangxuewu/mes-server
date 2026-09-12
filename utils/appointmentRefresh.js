@@ -88,12 +88,19 @@ function createAppointmentRefreshCoordinator({ connection, executeStep, notify =
                 const attempts = deferred ? state.attempts || 0 : (state.attempts || 0) + 1;
                 const retryable = deferred || Boolean(failure);
                 const nextRetryAt = error.nextRetryAt || failure?.nextRetryAt || new Date(Date.now() + intervalMs);
-                if (attempts > 5) nextRetryAt.setTime(Math.max(+nextRetryAt,
+                if (retryable && attempts > 5) nextRetryAt.setTime(Math.max(+nextRetryAt,
                     Date.now() + Math.min(60 * 60 * 1000, intervalMs * 2 ** Math.min(4, Math.floor((attempts - 1) / 6)))));
                 await states().updateOne(leaseFilter(), { $set: { attempts, nextRetryAt,
                     syncStatus: retryable ? 'waiting' : 'failed', leaseUntil: new Date(0) }, $inc: { revision: 1 } });
-                if (!deferred) logger.warn?.('gmail.sync.deferred', { reason: failure?.reason || 'operationFailed',
-                    code: error.code || error.name, attempts });
+                if (!deferred) logger.warn?.(retryable ? 'gmail.sync.deferred' : 'gmail.sync.failed', {
+                    reason: failure?.reason || (error.code === 11000 ? 'duplicateKey' : 'operationFailed'),
+                    code: error.code || error.name, attempts,
+                    ...(error.code === 11000 ? {
+                        collection: error.message?.match(/collection:\s+(\S+)/)?.[1],
+                        index: error.message?.match(/index:\s+(\S+)\s+dup key/)?.[1],
+                        keyFields: Object.keys(error.keyPattern || {}),
+                    } : {}),
+                });
             } finally {
                 clearInterval(heartbeat);
                 notify(await status());

@@ -229,6 +229,100 @@ test('mailbox upgrade preserves legacy appointments and scopes uniqueness to eac
     assert.equal((await threads.findOne({ mailbox: 'mailbox-a' })).messages[0].messageId, 'message');
 });
 
+test('overlapping legacy threads migrate atomically across workers without losing messages or appointments', { skip: !uri }, async t => {
+    const { connection, other } = await fixture(t);
+    const threads = connection.db.collection('emailThread');
+    await threads.createIndex({ mailbox: 1, threadId: 1 }, { unique: true, name: 'mailbox_thread_unique' });
+    await threads.insertMany([
+        { _id: 'legacy', threadId: 'overlap', subject: 'Original subject', status: 'New', messages: [
+            { messageId: 'shared', body: 'original', loadNumbers: ['old-load'] },
+            { messageId: 'legacy-only', body: 'preserved' },
+        ], loadAssociations: [{ loadNumber: 'shared-load', status: 'New' }, { loadNumber: 'old-load', status: 'Scheduled' }] },
+        { _id: 'current', mailbox: 'mailbox-a', threadId: 'overlap', status: 'Confirmed', messages: [
+            { messageId: 'shared', body: 'current', loadNumbers: ['new-load'] },
+            { messageId: 'current-only', body: 'also preserved' },
+        ], loadAssociations: [{ loadNumber: 'shared-load', status: 'Confirmed' }, { loadNumber: 'new-load', status: 'New' }] },
+        { _id: 'other-mailbox', mailbox: 'mailbox-b', threadId: 'overlap', messages: [] },
+    ]);
+    // This is the old migration's failure, before its checkpoint can advance.
+    await assert.rejects(threads.updateMany({ mailbox: { $exists: false } }, { $set: { mailbox: 'mailbox-a' } }),
+        error => error.code === 11000);
+    await Promise.all([prepareGmailMailbox(connection, 'mailbox-a'), prepareGmailMailbox(other, 'mailbox-a')]);
+    const current = await threads.findOne({ _id: 'current' });
+    assert.equal(await threads.countDocuments({ mailbox: { $exists: false } }), 0);
+    assert.equal(await threads.countDocuments({ mailbox: 'mailbox-a' }), 1);
+    assert.equal(current.subject, 'Original subject');
+    assert.equal(current.status, 'Confirmed');
+    assert.deepEqual(current.messages.map(message => message.messageId), ['shared', 'legacy-only', 'current-only']);
+    assert.equal(current.messages[0].body, 'current');
+    assert.deepEqual(current.messages[0].loadNumbers, ['old-load', 'new-load']);
+    assert.deepEqual(current.loadAssociations, [{ loadNumber: 'shared-load', status: 'Confirmed' },
+        { loadNumber: 'old-load', status: 'Scheduled' }, { loadNumber: 'new-load', status: 'New' }]);
+    assert.deepEqual((await threads.findOne({ _id: 'other-mailbox' })).messages, []);
+    await prepareGmailMailbox(connection, 'mailbox-a');
+    assert.deepEqual(await threads.findOne({ _id: 'current' }), current);
+});
+
+test('failed legacy merge rolls back both records and retries successfully from the saved job', { skip: !uri }, async t => {
+    const { connection } = await fixture(t);
+    const threads = connection.db.collection('emailThread');
+    const originals = [
+        { _id: 'legacy', threadId: 'overlap', messages: [{ messageId: 'legacy-only' }] },
+        { _id: 'current', mailbox: 'mailbox-a', threadId: 'overlap', messages: [{ messageId: 'current-only' }] },
+    ];
+    await threads.insertMany(originals);
+    const deleteOne = threads.deleteOne.bind(threads);
+    threads.deleteOne = async () => { throw new Error('interrupted merge'); };
+    const migrationConnection = { db: { collection: () => threads }, startSession: () => connection.startSession() };
+    await assert.rejects(prepareGmailMailbox(migrationConnection, 'mailbox-a'), /interrupted merge/);
+    for (const original of originals) assert.deepEqual(await threads.findOne({ _id: original._id }), original);
+    threads.deleteOne = deleteOne;
+    const coordinator = createAppointmentRefreshCoordinator({ connection, logger: quiet, executeStep: async () => {
+        await prepareGmailMailbox(migrationConnection, 'mailbox-a');
+        return { complete: true };
+    } });
+    t.after(() => coordinator.stop());
+    await coordinator.status();
+    await connection.db.collection('gmailSync').updateOne({ _id: 'appointments' }, { $set: { syncStatus: 'waiting', attempts: 101 } });
+    await coordinator.tick();
+    const state = await connection.db.collection('gmailSync').findOne({ _id: 'appointments' });
+    assert.equal(state.syncStatus, 'complete');
+    assert.equal(state.attempts, 0);
+    assert.ok(state.lastSuccessfulSyncAt);
+    assert.equal(await threads.countDocuments(), 1);
+    assert.deepEqual((await threads.findOne({ _id: 'current' })).messages.map(message => message.messageId), ['legacy-only', 'current-only']);
+});
+
+test('duplicate-key failure exits automatic retries and logs the index without private key values', { skip: !uri }, async t => {
+    const { connection } = await fixture(t);
+    const warnings = [];
+    let calls = 0;
+    const coordinator = createAppointmentRefreshCoordinator({ connection,
+        logger: { ...quiet, warn: (...args) => warnings.push(args) }, executeStep: async () => {
+            calls++;
+            throw Object.assign(new Error('E11000 duplicate key error collection: test.emailThread index: mailbox_thread_unique dup key: { mailbox: "private" }'),
+                { code: 11000, keyPattern: { mailbox: 1, threadId: 1 }, keyValue: { mailbox: 'private' } });
+        } });
+    t.after(() => coordinator.stop());
+    await coordinator.status();
+    const lastSuccessfulSyncAt = new Date('2026-09-08T17:39:38.447Z');
+    const progress = { pending: ['thread-to-resume'] };
+    await connection.db.collection('gmailSync').updateOne({ _id: 'appointments' }, { $set: {
+        syncStatus: 'waiting', attempts: 100, progress, lastSuccessfulSyncAt,
+    } });
+    await coordinator.tick();
+    const state = await connection.db.collection('gmailSync').findOne({ _id: 'appointments' });
+    assert.equal(state.attempts, 101);
+    assert.equal(state.syncStatus, 'failed');
+    assert.deepEqual(state.progress, progress);
+    assert.deepEqual(state.lastSuccessfulSyncAt, lastSuccessfulSyncAt);
+    await connection.db.collection('gmailSync').updateOne({ _id: 'appointments' }, { $set: { nextRetryAt: new Date(0) } });
+    await coordinator.tick();
+    assert.equal(calls, 1);
+    assert.deepEqual(warnings, [['gmail.sync.failed', { reason: 'duplicateKey', code: 11000, attempts: 101,
+        collection: 'test.emailThread', index: 'mailbox_thread_unique', keyFields: ['mailbox', 'threadId'] }]]);
+});
+
 test('retry exhaustion defers the saved step instead of starting an unbounded retry loop', { skip: !uri }, async t => {
     const { connection } = await fixture(t);
     const coordinator = createAppointmentRefreshCoordinator({ connection, logger: quiet, executeStep: async () => {

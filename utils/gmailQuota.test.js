@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { admission, quotaSettings, classifyError, METHOD_COSTS, WINDOW_MS } = require('./gmailQuota');
 
+test('database duplicate keys and other non-HTTP numeric codes are not transient Gmail failures', () => {
+    for (const code of [11000, '11000', 600, 8000]) {
+        assert.equal(classifyError({ code, message: 'E11000 duplicate key error' }), null);
+    }
+    for (const code of [500, '503', 599, 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']) {
+        assert.equal(classifyError({ code }).reason, 'transient');
+    }
+});
+
 test('budgets stay below verified limits and reject invalid configuration', () => {
     assert.deepEqual(quotaSettings({}), { userBudget: 4800, projectBudget: 960000 });
     assert.equal(quotaSettings({ GMAIL_USER_QUOTA_LIMIT: '3000' }).userBudget, 2400);
