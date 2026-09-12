@@ -103,6 +103,14 @@ module.exports = (socket, io) => {
     socket.on("config:update", async (data, callback) => {
         try {
             const { key, ...update } = data;
+            if (key === 'integration.edi.orderfulApiKey') {
+                if (typeof update.value !== 'string') throw new Error('Orderful API key must be text');
+                const config = await db.config.findOneAndUpdate({ key }, {
+                    $set: { value: update.value.trim() },
+                    $setOnInsert: { _id: `cfg.${key}`, type: 'String', scope: 'Global', status: 'Active', effective: { from: new Date() }, version: 1 },
+                }, { new: true, upsert: true, runValidators: true });
+                return callback({ status: 'success', message: 'Config updated successfully', payload: config });
+            }
             if (key === 'integration.ipinfo.token') {
                 if (typeof update.value !== 'string') throw new Error('IPinfo token must be text');
                 const value = update.value.trim();
