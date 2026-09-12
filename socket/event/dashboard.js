@@ -7,6 +7,7 @@ const types = {
     shipping: { sizes: ['medium', 'large'], settings: ['unit', 'periods', 'disabledDates', 'hideMetrics'] },
     inbound: { sizes: ['small', 'medium', 'large'], settings: ['range', 'status', 'hideMetrics'] },
     outbound: { sizes: ['small', 'medium', 'large'], settings: ['range', 'status', 'hideMetrics'] },
+    salesInvoice: { sizes: ['small', 'medium', 'large'], settings: ['hideMetrics'] },
     agenda: { sizes: ['small', 'medium', 'large'], settings: ['range'] },
 };
 const choices = {

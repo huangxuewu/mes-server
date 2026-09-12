@@ -173,3 +173,14 @@ test('outbound widgets save their own status filters and fine dimensions', async
     data.widgets[0].settings.status = 'Picked Up';
     assert.equal((await f.call('dashboard:update', data)).status, 'error');
 });
+
+
+test('sales invoice widget sizes and common settings persist', async () => {
+    const f = fixture();
+    for (const size of ['small', 'medium', 'large']) {
+        const data = { version: 1, widgets: [{ id: 'invoice', type: 'salesInvoice', size, x: 0, y: 0,
+            settings: { hideMetrics: false, interaction: true, autoExpand: false } }] };
+        assert.equal((await f.call('dashboard:update', data)).status, 'success');
+        assert.equal((await f.call('dashboard:get', {})).payload.widgets[0].type, 'salesInvoice');
+    }
+});
