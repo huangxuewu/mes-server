@@ -31,7 +31,7 @@ async function fixture(t, options = {}) {
     const config = { connection, getBusinessContext: async () => ({ businessDate, timeZone: 'America/New_York' }),
         notify: () => notifications++, logger: quiet, ...options };
     const services = [];
-    const start = () => { const service = createDataSync(config); services.push(service); service.start(); return service; };
+    const start = () => { const service = (options.serviceFactory || createDataSync)(config); services.push(service); service.start(); return service; };
     const sync = start();
     t.after(async () => { for (const service of services) await service.stop(); await connection.close(); });
     await waitFor(async () => (await sync.status()).capture.available);
@@ -757,7 +757,7 @@ test('edge: killing a capture process mid-batch allows fenced takeover without m
     const { fork } = require('node:child_process');
     const f = await fixture(t, { leaseMs: 1500 });
     await f.sync.stop();
-    const child = fork(path.join(__dirname, 'support/dataSyncWorker.cjs'), [uri, f.connection.name], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true });
+    const child = fork(path.join(__dirname, 'support/dataSyncWorker.cjs'), [uri, f.connection.name, 'hold-batch'], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true });
     let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
     t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
     await new Promise((resolve, reject) => {
@@ -766,14 +766,23 @@ test('edge: killing a capture process mid-batch allows fenced takeover without m
         child.once('error', error => { clearTimeout(timer); reject(error); });
     });
     const old = await f.client();
-    await f.connection.db.collection('employee').insertMany(Array.from({ length: 400 }, (_, index) => ({ index })));
-    const interruptedHead = await waitFor(async () => {
-        const head = (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v2' })).datasets.employees.head;
-        return head >= 5 && head;
+    const staged = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('No capture batch was staged')), 10000);
+        child.on('message', message => { if (message.batchStaged) { clearTimeout(timer); resolve(message.batchStaged); } });
     });
-    assert.ok(interruptedHead < 400, 'the crash must occur before the batch is fully captured');
+    await f.connection.db.collection('employee').insertMany(Array.from({ length: 400 }, (_, index) => ({ index })));
+    const stagedCount = await staged;
+    assert.ok(stagedCount > 1, 'kill while a multi-event transaction is staged');
+    const interruptedHead = (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v2' })).datasets.employees.head;
+    assert.ok(interruptedHead + stagedCount <= 400);
+    assert.equal(await f.connection.db.collection('syncJournalV2').countDocuments({ dataset: 'employees' }), interruptedHead);
     const exited = new Promise(resolve => child.once('exit', resolve)); child.kill('SIGKILL'); await exited;
-    f.start(); await f.catchUp('employees', 400);
+    f.start();
+    // A killed client cannot abort its transaction; MongoDB may retain its locks until the server's 60s lifetime expires.
+    await waitFor(async () => {
+        const status = await f.sync.status();
+        return status.capture.available && status.datasets.employees.sequence === 400;
+    }, 120000);
     // Collection creation may reset the old baseline; either an explicit reset or complete replay is safe.
     try { await old.recover(); assert.equal(old.records.size, 400); }
     catch (error) { assert.equal(error.code, 'RESET_REQUIRED'); assert.equal((await f.client()).records.size, 400); }
@@ -802,13 +811,102 @@ test('upgraded sockets retain legacy delivery until explicit subscription acknow
     assert.ok(rooms.has('data-sync-v1'), 'existing v1 clients retain their activation contract');
 });
 
+test('capture receives metadata without full inserted documents and still refreshes client records', { skip: !uri }, async t => {
+    const received = [];
+    const f = await fixture(t, { serviceFactory: config => {
+        const watch = config.connection.db.watch.bind(config.connection.db);
+        config.connection.db.watch = (...args) => {
+            const stream = watch(...args);
+            const next = stream.tryNext.bind(stream);
+            stream.tryNext = async () => {
+                const change = await next();
+                if (change) received.push(change);
+                return change;
+            };
+            return stream;
+        };
+        return createDataSync(config);
+    } });
+    const client = await f.client();
+    const employee = { name: 'Large profile', portrait: 'x'.repeat(500000) };
+    const { insertedId } = await f.connection.db.collection('employee').insertOne(employee);
+    await f.catchUp('employees', 1);
+    const change = received.find(change => String(change.documentKey?._id) === String(insertedId));
+    assert.ok(change);
+    assert.equal(change.operationType, 'insert');
+    assert.equal(Object.hasOwn(change, 'fullDocument'), false);
+    assert.ok(Buffer.byteLength(JSON.stringify(change)) < 2000);
+    await client.recover();
+    assert.equal(client.records.get(String(insertedId)).name, 'Large profile');
+});
+
+test('capture commits bounded batches with contiguous sequences across a large burst', { skip: !uri }, async t => {
+    const f = await fixture(t);
+    await f.sync.stop();
+    const original = f.connection.db.collection.bind(f.connection.db);
+    const batches = [];
+    f.connection.db.collection = name => {
+        const collection = original(name);
+        if (name === 'syncJournalV2') {
+            const insert = collection.insertMany.bind(collection);
+            collection.insertMany = async (entries, options) => { batches.push(entries.length); return insert(entries, options); };
+        }
+        return collection;
+    };
+    await original('employee').insertMany(Array.from({ length: 1000 }, (_, index) => ({ name: `Employee ${index}` })));
+    f.start();
+    await f.catchUp('employees', 1000);
+    assert.ok(batches.length < 30, `Expected bounded batches, got ${batches.length}`);
+    assert.ok(batches.every(count => count <= 100));
+    assert.equal(batches.reduce((sum, count) => sum + count, 0), 1000);
+    const entries = await original('syncJournalV2').find({ dataset: 'employees' }).sort({ sequence: 1 }).toArray();
+    assert.deepEqual(entries.map(entry => entry.sequence), Array.from({ length: 1000 }, (_, i) => i + 1));
+    assert.equal(new Set(entries.map(entry => entry._id)).size, 1000);
+});
+
+test('retention cleanup yields to lease renewal under database latency', { skip: !uri }, async t => {
+    const errors = [];
+    const f = await fixture(t, { leaseMs: 1500, logger: { ...quiet, error: (...args) => errors.push(args) } });
+    await f.sync.stop();
+    const original = f.connection.db.collection.bind(f.connection.db);
+    const pause = () => new Promise(resolve => setTimeout(resolve, 35));
+    let cleanupQueries = 0;
+    f.connection.db.collection = name => {
+        const collection = original(name);
+        if (!['syncState', 'syncJournalV2'].includes(name)) return collection;
+        for (const method of ['findOne', 'updateOne', 'insertMany']) {
+            const operation = collection[method].bind(collection);
+            collection[method] = async (...args) => { await pause(); return operation(...args); };
+        }
+        const find = collection.find.bind(collection);
+        collection.find = (...args) => {
+            const cursor = find(...args);
+            const array = cursor.toArray.bind(cursor);
+            cursor.toArray = async () => {
+                if (name === 'syncJournalV2' && args[0].dataset && args[0].sequence?.$gt !== undefined) cleanupQueries++;
+                await pause(); return array();
+            };
+            return cursor;
+        };
+        return collection;
+    };
+    await original('employee').insertMany(Array.from({ length: 300 }, (_, index) => ({ index })));
+    f.start();
+    await f.catchUp('employees', 300);
+    await waitFor(() => cleanupQueries >= DATASETS.length);
+    assert.ok(!errors.some(args => args.includes('LEASE_LOST')), JSON.stringify(errors));
+    assert.equal((await f.sync.status()).capture.available, true);
+});
+
 test('a recently active consumer still reports stale source capture as unavailable', { skip: !uri }, async t => {
     const f = await fixture(t); await f.sync.stop();
     const original = f.connection.db.watch.bind(f.connection.db);
-    let release; const held = new Promise(resolve => { release = resolve; }); let delivered = false;
+    let release; const held = new Promise(resolve => { release = resolve; }); let delivered = false, drained = false;
     f.connection.db.watch = (...args) => {
         const stream = original(...args), next = stream.tryNext.bind(stream);
         stream.tryNext = async () => {
+            // Finish the source batch before holding the following poll; capture must retain its old source time.
+            if (delivered && !drained) { drained = true; return null; }
             if (delivered) await held;
             const change = await next();
             if (change?.operationType === 'insert') { change.wallTime = new Date(Date.now() - 60000); delivered = true; }
@@ -843,4 +941,31 @@ for (const field of ['businessDate', 'timeZone']) test(`a ${field} change while 
     f.connection.db.collection = name => name === 'inbound' ? collection : original(name);
     try { await assert.rejects(f.sync.snapshot({ dataset: 'inbound', scope: '2026-09-07' }), { code: 'RESET_REQUIRED' }); }
     finally { f.connection.db.collection = original; }
+});
+
+test('snapshot and delta byte limits do not repeatedly serialize the growing page', { skip: !uri }, async t => {
+    const filename = path.join(__dirname, '../utils/dataSync.js');
+    const module = { exports: {} };
+    let pageSerializations = 0;
+    vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module,
+        require: require('node:module').createRequire(filename), Date, Buffer, setTimeout, clearTimeout,
+        JSON: { ...JSON, stringify: value => {
+            if (value?.upserts) pageSerializations++;
+            return JSON.stringify(value);
+        } },
+    });
+    const f = await fixture(t, { serviceFactory: module.exports.createDataSync });
+    await f.connection.db.collection('employee').insertOne({ name: 'Anchor' });
+    await f.catchUp('employees', 1);
+    const cursor = await f.current('employees');
+    await f.connection.db.collection('employee').insertMany(Array.from({ length: 500 }, (_, index) => ({ name: `${index}: ${'x'.repeat(2000)}` })));
+    await f.catchUp('employees', 501);
+    for (const read of [() => f.sync.snapshot({ dataset: 'employees', scope: 'all' }),
+        () => f.sync.pull({ dataset: 'employees', scope: 'all', cursor })]) {
+        pageSerializations = 0;
+        const page = await read();
+        assert.equal(page.upserts.length, 500);
+        assert.ok(pageSerializations <= 3, `Serialized the growing page ${pageSerializations} times`);
+        assert.ok(Buffer.byteLength(JSON.stringify(page)) <= 4 * 1024 * 1024);
+    }
 });

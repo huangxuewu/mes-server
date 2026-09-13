@@ -321,27 +321,25 @@ async function resolveScheduleBounds(employeeId, date) {
     try {
         if (!employeeId || !date) return null;
 
-        const employee = await database.model("employee").findById(employeeId).lean();
+        const employee = await database.model("employee").findById(employeeId).select('team department').lean();
         if (!employee) return null;
 
         const dayName = DAY_NAMES[dayjs(date).day()];
 
-        const override = employee.team
-            ? await database.model("workSchedule").findOne({ teamId: employee.team, date }).lean()
-            : null;
-
         const Template = database.model("workScheduleTemplate");
-        let template = employee.department
-            ? await Template.findOne({ isDefault: true, applyScope: "department", departmentId: employee.department }).lean()
-            : null;
-        if (!template) template = await Template.findOne({ isDefault: true, applyScope: "all" }).lean();
+        const select = 'isWorkingDay workStartTime workEndTime weekdayOverrides';
+        const [override, departmentTemplate, configDoc] = await Promise.all([
+            employee.team ? database.model('workSchedule').findOne({ teamId: employee.team, date }).select(select).lean() : null,
+            employee.department ? Template.findOne({ isDefault: true, applyScope: 'department', departmentId: employee.department }).select(select).lean() : null,
+            database.model('config').findOne({ key: 'attendance.workingHours', status: 'Active' }).select('value').lean(),
+        ]);
+        const template = departmentTemplate || await Template.findOne({ isDefault: true, applyScope: 'all' }).select(select).lean();
 
         const templateWeekday = template?.weekdayOverrides?.[dayName];
         const templateDay = template && templateWeekday && typeof templateWeekday === "object"
             ? { ...template, ...templateWeekday }
             : template;
 
-        const configDoc = await database.model("config").findOne({ key: "attendance.workingHours", status: "Active" }).lean();
         const global = configDoc?.value || {};
         const globalWeekday = global.weekdayOverrides?.[dayName] || null;
         const globalBase = { workStartTime: global.officialStartTime, workEndTime: global.officialEndTime };
@@ -529,18 +527,8 @@ timecardSchema.pre('save', async function (next) {
 // This ensures hash chain is maintained even when using direct MongoDB updates
 timecardSchema.post(['findOneAndUpdate', 'findByIdAndUpdate'], async function (doc) {
     try {
-        if (doc) {
-            // Recalculate totals if punches exist
-            if (doc.punches && doc.punches.length > 0) {
-                doc.punches.sort((a, b) => new Date(a.time) - new Date(b.time));
-                const scheduleBounds = await resolveScheduleBounds(doc.employeeId, doc.date);
-                doc.totals = calculateTimecardTotals(doc.punches, scheduleBounds);
-            }
-
-            // Recalculate hash (previousHash should remain unchanged on updates)
-            doc.currentHash = calculateTimecardHash(doc);
-            await doc.save();
-        }
+        // The save hook already recalculates totals, meal-break policy and the hash.
+        if (doc) await doc.save();
     } catch (error) {
         console.error('Error in post-update hook for hash chain:', error);
     }

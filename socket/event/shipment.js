@@ -393,17 +393,21 @@ module.exports = (socket, io) => {
     };
 
     socket.on("load:sync", async (payloads, callback) => {
+        const startTime = performance.now();
+        let phase = 'validate';
+        const timings = {};
         try {
             if (!Array.isArray(payloads) || !payloads.length)
                 return callback?.({ status: "error", message: "Invalid or empty payloads" });
 
-            const startTime = performance.now();
-
-            // Fetch only necessary fields and ensure indexes on poNumber and loads.shipmentId
+            const poNumbers = [...new Set(payloads.filter(payload => payload?.poNumber
+                && String(payload.load?.shipmentId ?? '').trim()).map(payload => payload.poNumber))];
+            phase = 'fetch';
             const last2Month = dayjs().subtract(2, 'month').format('YYYY-MM-DD');
             const shipments = await db.outbound
                 .find(
                     {
+                        poNumber: { $in: poNumbers },
                         $or: [
                             { 'loads.status': { $ne: 'Completed' } },
                             { 'loads.pickupDate': { $gte: last2Month } }
@@ -413,12 +417,16 @@ module.exports = (socket, io) => {
                 )
                 .lean();
 
+            timings.fetchMs = Math.round(performance.now() - startTime);
+            phase = 'merge';
             const shipmentMap = new Map(shipments.map(s => [s.poNumber, s]));
+            const originalLoads = new Map(shipments.map(shipment => [shipment.poNumber, JSON.stringify(shipment.loads)]));
             const touchedPos = new Set();
             const allocationIssues = [];
 
             // Pass 1: merge ShipIQ load metadata
             for (const payload of payloads) {
+                if (!payload) continue;
                 const { poNumber, load } = payload;
                 const shipmentId = String(load?.shipmentId ?? '').trim();
 
@@ -430,6 +438,10 @@ module.exports = (socket, io) => {
                 const { loads } = shipment;
                 const loadIndex = loads.findIndex(doc => String(doc?.shipmentId ?? '').trim() === shipmentId);
                 const updatedLoad = { ...load, shipmentId };
+                for (const [field, value] of Object.entries(updatedLoad)) {
+                    const fieldType = db.outbound.schema.path('loads').schema.path(field);
+                    if (fieldType) updatedLoad[field] = fieldType.cast(value);
+                }
 
                 loadIndex !== -1
                     ? Object.assign(loads[loadIndex], { ...loads[loadIndex], ...updatedLoad })
@@ -475,33 +487,37 @@ module.exports = (socket, io) => {
                     if (!loadRef?.items?.length) delete loadRef.items;
                 }
 
+                if (JSON.stringify(shipment.loads) === originalLoads.get(poNumber)) continue;
                 bulkOps.push({
                     updateOne: {
-                        filter: { poNumber },
+                        filter: { _id: shipment._id },
                         update: { $set: { loads: shipment.loads } }
                     }
                 });
             }
 
+            timings.mergeMs = Math.round(performance.now() - startTime) - timings.fetchMs;
+            phase = 'save';
+            const saveStarted = performance.now();
             if (bulkOps.length > 0)
                 await db.outbound.bulkWrite(bulkOps);
+            timings.saveMs = Math.round(performance.now() - saveStarted);
 
-            // Keep order.buyers.done in sync with live load statuses (ShipIQ path skips outbound.save hooks)
-            for (const poNumber of touchedPos) {
-                const shipment = shipmentMap.get(poNumber);
-                if (!shipment?.loads?.some(l => ['Picked Up', 'Completed'].includes(l.status))) continue;
-                await db.order.updateShipmentStatus(shipment);
-            }
+            phase = 'orders';
+            const ordersStarted = performance.now();
+            await db.order.updateShipmentStatus([...touchedPos].map(poNumber => shipmentMap.get(poNumber)));
+            timings.ordersMs = Math.round(performance.now() - ordersStarted);
 
             const elapsedTimeMs = performance.now() - startTime;
-            console.log(`Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`);
+            console.log('[load:sync] completed', { elapsedMs: Math.round(elapsedTimeMs), received: payloads.length,
+                matched: touchedPos.size, changed: bulkOps.length, ...timings });
             callback?.({
                 status: "success",
                 message: `Load synced successfully in ${elapsedTimeMs.toFixed(2)}ms`,
                 payload: { allocationIssues },
             });
         } catch (error) {
-            console.error("Load Sync Error:", error);
+            console.error('[load:sync] failed', { phase, elapsedMs: Math.round(performance.now() - startTime), ...timings }, error);
             callback?.({ status: "error", message: error.message });
         }
     });

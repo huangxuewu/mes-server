@@ -136,12 +136,10 @@ const outboundSchema = new mongoose.Schema({
     timestamps: true
 });
 
-const Outbound = database.model("outbound", outboundSchema, "outbound");
+outboundSchema.index({ poNumber: 1 });
+outboundSchema.index({ masterPO: 1 });
 
-Outbound.createIndexes({
-    "masterPO": 1,
-    "poNumber": 1,
-});
+const Outbound = database.model("outbound", outboundSchema, "outbound");
 
 Outbound
     .watch([], { fullDocument: "updateLookup" })
