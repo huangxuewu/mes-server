@@ -13,9 +13,9 @@ test('database duplicate keys and other non-HTTP numeric codes are not transient
 
 test('budgets stay below verified limits and reject invalid configuration', () => {
     assert.deepEqual(quotaSettings({}), { userBudget: 4800, projectBudget: 960000 });
-    assert.equal(quotaSettings({ GMAIL_USER_QUOTA_LIMIT: '3000' }).userBudget, 2400);
-    assert.equal(quotaSettings({ GMAIL_USER_QUOTA_LIMIT: '15000' }).userBudget, 4800);
-    assert.throws(() => quotaSettings({ GMAIL_USER_QUOTA_LIMIT: 'no' }));
+    assert.equal(quotaSettings({ 'integration.gmail.userQuotaLimit': '3000' }).userBudget, 2400);
+    assert.equal(quotaSettings({ 'integration.gmail.userQuotaLimit': '15000' }).userBudget, 4800);
+    assert.throws(() => quotaSettings({ 'integration.gmail.userQuotaLimit': 'no' }));
 });
 
 test('500 thread reads plus mixed operations fit every rolling window, including boundaries', () => {

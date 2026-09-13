@@ -6,9 +6,9 @@ const normalizePathPart = (value) => String(value || "")
     .slice(0, 100) || "file";
 
 const getDropbox = ({ signal, config = {} } = {}) => {
-    const clientId = String(config['integration.dropbox.clientId'] || '').trim() || process.env.DROPBOX_CLIENT_ID;
-    const clientSecret = String(config['integration.dropbox.clientSecret'] || '').trim() || process.env.DROPBOX_CLIENT_SECRET;
-    const refreshToken = String(config['integration.dropbox.refreshToken'] || '').trim() || process.env.DROPBOX_REFRESH_TOKEN;
+    const clientId = String(config['integration.dropbox.clientId'] || '').trim();
+    const clientSecret = String(config['integration.dropbox.clientSecret'] || '').trim();
+    const refreshToken = String(config['integration.dropbox.refreshToken'] || '').trim();
     if (!clientId || !clientSecret || !refreshToken) return null;
     return new Dropbox({ clientId, clientSecret, refreshToken,
         fetch: signal ? (url, options) => fetch(url, { ...options, signal }) : fetch });
@@ -37,7 +37,8 @@ const sharedUrl = async (dropbox, path) => {
     }
 };
 
-const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileName, contents, category = "attachments", dropbox = getDropbox() }) => {
+const uploadDocumentFile = async ({ documentId, documentNumber, revision, fileName, contents, category = "attachments", dropbox }) => {
+    if (dropbox === undefined) dropbox = await getConfiguredDropbox();
     if (!dropbox) return null;
 
     const safeName = normalizePathPart(fileName);

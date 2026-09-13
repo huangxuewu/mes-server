@@ -6,6 +6,7 @@ const { createGmailQuota, GmailDeferred } = require('./gmailQuota');
 const { prepareGmailMailbox } = require('./gmailMailbox');
 
 let quota;
+const { readRuntimeConfig } = require('./runtimeConfig');
 const authClients = new Map();
 const hash = value => createHash('sha256').update(value).digest('hex');
 
@@ -185,8 +186,9 @@ const getClient = async (overrides = {}) => {
     }
     const connection = db.config.db;
     quota ||= createGmailQuota({ connection });
-    const project = process.env.GMAIL_QUOTA_PROJECT || config.clientId.match(/^(\d+)-/)?.[1];
-    if (!project) throw new Error('Set GMAIL_QUOTA_PROJECT to the Gmail Cloud project number');
+    const runtime = await readRuntimeConfig({ db });
+    const project = runtime['integration.gmail.quotaProject'] || config.clientId.match(/^(\d+)-/)?.[1];
+    if (!project) throw new Error('Set the Gmail quota project number in MES System Configuration');
     const identityKey = hash(`${config.clientId}:${config.refreshToken}`);
     const identities = connection.db.collection('gmailIdentity');
     const identity = await identities.findOne({ _id: identityKey });
@@ -218,7 +220,7 @@ const getClient = async (overrides = {}) => {
         } }, { upsert: true });
         return data;
     };
-    return { request, profile, context, connection, identityKey };
+    return { request, profile, context, connection, identityKey, incrementalSync: runtime['integration.gmail.incrementalSync'] };
 };
 
 const getHeader = (message, name) =>

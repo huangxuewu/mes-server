@@ -16,7 +16,7 @@ The page reads saved `queueRow` snapshots from the existing `salesInvoice` colle
 
 ## Setup
 
-Deploy both server and client changes. Under Configuration → Integration → EDI, set the **Orderful API key** for Down Home's account. The server may alternatively read `ORDERFUL_API_KEY`. The key is sent only to `api.orderful.com`, not to ERP. The existing ERP connection and Dropbox settings remain the other required integrations.
+Deploy both server and client changes. Under Configuration → Integration → EDI, set the **Orderful API key** for Down Home's account. The saved setting is the only credential source. The key is sent only to `api.orderful.com`, not to ERP. The existing ERP connection and Dropbox settings remain the other required integrations.
 
 Finance access requires `access: financial.page.access`. Sending invoices and saving PDFs additionally require `create: finance.salesInvoice.submit`; this is available in the permission editor. Admin/System retain their existing bypass. No existing user's grants are changed by this feature.
 

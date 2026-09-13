@@ -34,14 +34,14 @@ const fixture = (status = 'Draft') => {
     const dependencies = {
         mongoose: { isValidObjectId: () => true },
         '../../models': db,
-        '../session': { getSessionUserId: () => 'operator', hasPermission: () => true, getActiveSessionUser: async () => ({ _id: 'operator', role: 'System' }) },
+        '../session': { getSessionUserId: () => 'operator', resolveUserPermissions: async user => user, hasPermission: () => true, getActiveSessionUser: async () => ({ _id: 'operator', role: 'System' }) },
         '../../utils/documentAccess': { protectDocumentSocket: socket => socket, protectedDocumentEmitter: io => io, safeDocument: async value => value },
         '../../utils/formPdf': { createFormPdf: async input => {
             calls.push(['render', input]);
             return Buffer.from(JSON.stringify(input));
         } },
         '../../utils/documentStorage': {
-            getDropbox: () => ({}), normalizePathPart: value => value,
+            getConfiguredDropbox: async () => ({}), normalizePathPart: value => value,
             uploadDocumentFile: async input => {
                 calls.push(['upload', input]);
                 return { url: 'https://example.test/form.pdf', storagePath: '/form-a/revision-2/form.pdf' };

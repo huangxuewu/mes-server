@@ -17,7 +17,7 @@ const createRegionLocator = ({ db, http = axios, env = process.env, now = Date.n
                 $or: [{ 'effective.to': null }, { 'effective.to': { $gte: at } }],
             }, { key: 1, value: 1 }).maxTimeMS(1500).lean();
             const config = Object.fromEntries(records.map(({ key, value }) => [key, String(value ?? '').trim()]));
-            const token = config['integration.ipinfo.token'] || env.SHARING_IPINFO_TOKEN?.trim();
+            const token = config['integration.ipinfo.token'];
             if (!token) return null;
             const credentials = createHash('sha256').update(token).digest('hex');
             const cached = cache.get(ip);

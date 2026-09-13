@@ -44,13 +44,11 @@ test('screenshots use existing active MES Dropbox settings without environment c
     assert.equal((await env.getConfiguredDropbox()).options.refreshToken, 'rotated-token');
 });
 
-test('saved settings take precedence with environment fallback and incomplete storage stays unavailable', async () => {
+test('missing saved credentials never fall back to runtime values', async () => {
     const env = fixture({ DROPBOX_CLIENT_ID: 'env-id', DROPBOX_CLIENT_SECRET: 'env-secret', DROPBOX_REFRESH_TOKEN: 'env-token' });
     env.set({ clientId: 'saved-id', clientSecret: ' ' });
     const client = await env.getConfiguredDropbox();
-    assert.equal(client.options.clientId, 'saved-id');
-    assert.equal(client.options.clientSecret, 'env-secret');
-    assert.equal(client.options.refreshToken, 'env-token');
+    assert.equal(client, null);
     const missing = fixture();
     missing.set({ clientId: 'saved-id' });
     assert.equal(await missing.getConfiguredDropbox(), null);

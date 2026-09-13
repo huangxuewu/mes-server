@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const db = require('../../models');
 const { getActiveSessionUser, getSessionUserId } = require('../session');
-const { getDropbox, normalizePathPart } = require('../../utils/documentStorage');
+const { getConfiguredDropbox, normalizePathPart } = require('../../utils/documentStorage');
 const { id, objectId, requestId, fields, text, member, hash } = require('../../utils/messagePolicy');
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -41,7 +41,7 @@ module.exports = (socket, io) => {
         return file;
     };
     const storage = () => {
-        const dropbox = getDropbox();
+        const dropbox = await getConfiguredDropbox();
         if (!dropbox) throw new Error('Message file storage is not configured');
         return dropbox;
     };

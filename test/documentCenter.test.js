@@ -87,7 +87,8 @@ test("document files share the id folder regardless of document number", async (
         } }),
     };
     vm.runInNewContext(fs.readFileSync(require.resolve("../utils/documentStorage"), "utf8"), context);
-    const upload = context.module.exports.uploadDocumentFile;
+    const dropbox = context.module.exports.getDropbox({ config: { 'integration.dropbox.clientId': 'id', 'integration.dropbox.clientSecret': 'secret', 'integration.dropbox.refreshToken': 'token' } });
+    const upload = input => context.module.exports.uploadDocumentFile({ ...input, dropbox });
     await upload({ documentId: "abc123", documentNumber: "SOP-001", revision: 1, fileName: "cover.png", contents: Buffer.from("image"), category: "thumbnail" });
     await upload({ documentId: "abc123", documentNumber: "SOP-999", revision: 2, fileName: "record.pdf", contents: Buffer.from("pdf") });
     assert.deepEqual(uploads, [

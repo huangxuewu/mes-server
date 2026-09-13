@@ -79,16 +79,16 @@ test('settings reject whitespace and non-text tokens, and support clearing crede
     assert.equal(f.requests.length, 1);
 });
 
-test('environment token is used when the saved token is empty', async () => {
+test('missing and cleared tokens never fall back to runtime values', async () => {
     const f = fixture({ SHARING_IPINFO_TOKEN: 'env-key' });
-    await f.locate(f.socket);
-    assert.equal(f.requests[0].options.headers.Authorization, 'Bearer env-key');
+    assert.equal(await f.locate(f.socket), null);
+    assert.equal(f.requests.length, 0);
     await f.save('token', 'saved');
     await f.locate(f.socket);
-    assert.equal(f.requests[1].options.headers.Authorization, 'Bearer saved');
+    assert.equal(f.requests[0].options.headers.Authorization, 'Bearer saved');
     await f.save('token', '');
-    await f.locate(f.socket);
-    assert.equal(f.requests[2].options.headers.Authorization, 'Bearer env-key');
+    assert.equal(await f.locate(f.socket), null);
+    assert.equal(f.requests.length, 1);
 });
 
 test('only active, effective global configuration is used', async () => {
@@ -122,14 +122,15 @@ test('private addresses and untrusted forwarding headers are not geolocated', as
         assert.equal(await f.locate({ handshake: { address, headers: { 'x-forwarded-for': '8.8.8.8' } } }), null);
     }
     assert.equal(f.queries.length, 0);
-    const trusted = fixture({ DYNO: 'web.1', SHARING_IPINFO_TOKEN: 'key' });
+    const trusted = fixture({ DYNO: 'web.1' });
+    await trusted.save('token', 'key');
     await trusted.locate({ handshake: { address: '10.1.2.3', headers: { 'x-forwarded-for': '1.1.1.1, 8.8.8.8' } } });
     assert.ok(trusted.requests[0].url.endsWith('/8.8.8.8'));
 });
 
 test('already-connected peers acquire a region after settings are saved without leaking credentials', async () => {
     const f = fixture();
-    const service = createSharing({ io: {}, now: f.now, authorize: async () => ({ _id: 'user', displayName: 'User' }), locatePeer: f.locate });
+    const service = createSharing({ db: { config: { find: () => ({ maxTimeMS: () => ({ lean: async () => [] }) }) } }, io: {}, now: f.now, authorize: async () => ({ _id: 'user', displayName: 'User' }), locatePeer: f.locate });
     assert.equal((await service.register(f.socket)).peers[0].region, null);
     await f.save('token', 'private-license');
     const result = await service.register(f.socket);
@@ -141,6 +142,7 @@ test('already-connected peers acquire a region after settings are saved without 
 
 test('IPv6 requests use country labels and incomplete or bogon results fall back to MES', async () => {
     const f = fixture({ SHARING_IPINFO_TOKEN: 'key' });
+    await f.save('token', 'key');
     f.socket.handshake.address = '2001:4860:4860::8888';
     f.response({ country_code: 'CA', country: 'Canada' });
     assert.deepEqual(await f.locate(f.socket), { key: 'CA', label: 'Canada' });

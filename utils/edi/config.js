@@ -30,14 +30,11 @@ const resolveEdiConfig = (docs = []) => {
     const configMap = toConfigMap(docs);
 
     return {
-        baseUrl: normalizeValue(process.env.EDI_API_BASE_URL)
-            || normalizeValue(configMap[EDI_CONFIG_KEYS.baseUrl])
+        baseUrl: normalizeValue(configMap[EDI_CONFIG_KEYS.baseUrl])
             || DEFAULTS.baseUrl,
-        authToken: normalizeValue(process.env.EDI_API_AUTH_TOKEN)
-            || normalizeValue(configMap[EDI_CONFIG_KEYS.authToken])
+        authToken: normalizeValue(configMap[EDI_CONFIG_KEYS.authToken])
             || "",
-        webBaseUrl: normalizeValue(process.env.EDI_WEB_BASE_URL)
-            || normalizeValue(configMap[EDI_CONFIG_KEYS.webBaseUrl])
+        webBaseUrl: normalizeValue(configMap[EDI_CONFIG_KEYS.webBaseUrl])
             || DEFAULTS.webBaseUrl,
         customHeaders: Object.fromEntries(
             (Array.isArray(configMap[EDI_CONFIG_KEYS.customFields]) ? configMap[EDI_CONFIG_KEYS.customFields] : [])

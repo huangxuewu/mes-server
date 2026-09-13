@@ -1,3 +1,4 @@
+const { readRuntimeConfig } = require('./runtimeConfig');
 const { randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 
@@ -19,14 +20,14 @@ class GmailDeferred extends Error {
     }
 }
 
-const quotaSettings = (env = process.env) => {
+const quotaSettings = (config = {}) => {
     const limit = (key, baseline) => {
-        const value = Number(env[key] ?? baseline);
+        const value = Number(config[key] ?? baseline);
         if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid ${key}`);
         return Math.floor(Math.min(value, baseline) * 0.8);
     };
-    const userBudget = limit('GMAIL_USER_QUOTA_LIMIT', 6000);
-    const projectBudget = limit('GMAIL_PROJECT_QUOTA_LIMIT', 1200000);
+    const userBudget = limit('integration.gmail.userQuotaLimit', 6000);
+    const projectBudget = limit('integration.gmail.projectQuotaLimit', 1200000);
     if (Math.min(userBudget, projectBudget) < 100) throw new Error('Gmail quota budget must allow a send request');
     return { userBudget, projectBudget };
 };
@@ -87,13 +88,14 @@ const admission = (state, { mailbox, cost, urgent = false }, now, { userBudget, 
     return { entries, next, used: own.reduce((sum, entry) => sum + entry.cost, 0) };
 };
 
-function createGmailQuota({ connection, settings = quotaSettings(), logger = console }) {
+function createGmailQuota({ connection, settings, logger = console }) {
     const states = () => connection.db.collection('gmailQuota');
     const read = async project => {
         await connection.asPromise();
+        const budgets = settings || quotaSettings(await readRuntimeConfig({ connection }));
         try {
             await states().updateOne({ _id: project }, { $setOnInsert: { version: 0, entries: [] },
-                $min: { userBudget: settings.userBudget, projectBudget: settings.projectBudget } },
+                $set: { userBudget: budgets.userBudget, projectBudget: budgets.projectBudget } },
                 { upsert: true, writeConcern: { w: 'majority' } });
         } catch (error) { if (error.code !== 11000) throw error; }
         return states().aggregate([{ $match: { _id: project } }, { $set: { serverNow: '$$NOW' } }],
@@ -106,8 +108,7 @@ function createGmailQuota({ connection, settings = quotaSettings(), logger = con
             const started = performance.now();
             const state = await read(project);
             const now = +state.serverNow;
-            const budgets = { userBudget: Math.min(settings.userBudget, state.userBudget),
-                projectBudget: Math.min(settings.projectBudget, state.projectBudget) };
+            const budgets = { userBudget: state.userBudget, projectBudget: state.projectBudget };
             const result = admission(state, { mailbox, cost, urgent }, now, budgets);
             if (result.next > now) throw new GmailDeferred(result.next, 'quota', result.next - now);
             const id = randomUUID();

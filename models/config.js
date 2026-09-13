@@ -83,7 +83,8 @@ Config.watch([], { fullDocument: "updateLookup" })
             case "insert":
             case "update":
             case "replace":
-                io.emit("config:update", change.fullDocument);
+                io.emit("config:update", change.fullDocument?.key === 'integration.stationLive.turnCredential'
+                    ? { key: change.fullDocument.key } : change.fullDocument);
                 break;
 
             case "delete":

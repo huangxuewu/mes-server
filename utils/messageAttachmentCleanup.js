@@ -27,7 +27,7 @@ const startMessageAttachmentCleanup = () => {
         if (pending) return;
         pending = true;
         try {
-            await cleanupMessageAttachments({ db: require('../models'), dropbox: require('./documentStorage').getDropbox() });
+            await cleanupMessageAttachments({ db: require('../models'), dropbox: await require('./documentStorage').getConfiguredDropbox() });
         } catch (error) { console.error('Message attachment cleanup failed:', error.message); }
         finally { pending = false; }
     };

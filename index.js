@@ -47,6 +47,7 @@ app.use('/api', apiRoutes);
 app.use('/station-updates', require('./routes/stationUpdates'));
 app.use(oauthRouter);
 app.use('/addon/labelMaker/finishProduct', finishProductLabelRouter);
+app.use('/sharing', require('./routes/sharing')(require('./socket/sharing').getSharing(io).phone));
 
 // Socket.IO connection
 io.on("connection", (socket) => socketHandler(socket, io));

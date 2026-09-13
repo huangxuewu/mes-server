@@ -1,3 +1,4 @@
+const { readRuntimeConfig } = require('./runtimeConfig');
 const { randomUUID } = require('node:crypto');
 const { classifyError, GmailDeferred } = require('./gmailQuota');
 
@@ -49,9 +50,10 @@ function createAppointmentRefreshCoordinator({ connection, executeStep, notify =
     };
     const leaseFilter = () => ({ _id: id, owner, $expr: { $gt: ['$leaseUntil', '$$NOW'] } });
     const tick = async () => {
-        if (running || stopped || process.env.GMAIL_SYNC_PAUSED === 'true') return;
+        if (running || stopped) return;
         running = (async () => {
             await initialize();
+            if ((await readRuntimeConfig({ connection }))['integration.gmail.syncPaused']) return;
             const state = await states().findOneAndUpdate({ _id: id,
                 syncStatus: { $in: ['queued', 'syncing', 'waiting'] },
                 $expr: { $and: [{ $lte: ['$leaseUntil', '$$NOW'] }, { $lte: ['$nextRetryAt', '$$NOW'] }] } },

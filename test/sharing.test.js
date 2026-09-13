@@ -7,7 +7,7 @@ const fixture = options => {
     const messages = [];
     const socket = (id, userId = id) => ({ id, connected: true, user: { _id: userId, displayName: userId, password: 'private' },
         data: { sessionGeneration: 1, expiresAt: 999999 }, emit: (event, data) => messages.push({ id, event, data }) });
-    const service = createSharing({ io: {}, now: () => time, authorize: async socket => { if (!socket.user) throw new Error('unauthenticated'); return socket.user; },
+    const service = createSharing({ db: { config: { find: () => ({ maxTimeMS: () => ({ lean: async () => [] }) }) } }, io: {}, now: () => time, authorize: async socket => { if (!socket.user) throw new Error('unauthenticated'); return socket.user; },
         locatePeer: async () => ({ key: 'city', label: 'City, State' }), ...options });
     return { service, socket, messages, advance: ms => { time += ms; } };
 };

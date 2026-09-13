@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const db = require("../../models");
 const { getSessionUserId, hasPermission, resolveUserPermissions } = require("../session");
 const { createFormPdf } = require("../../utils/formPdf");
-const { getDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
+const { getConfiguredDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { protectDocumentSocket, protectedDocumentEmitter, safeDocument } = require('../../utils/documentAccess');
 
 const USER_SELECT = "username displayName firstName lastName portrait";
@@ -105,7 +105,7 @@ module.exports = (rawSocket, rawIo) => {
 
     const storeSubmissionPdf = async (document, revision, submission) => {
         revision = await safeDocument(revision, await require('../session').getActiveSessionUser(rawSocket), rawSocket);
-        if (!getDropbox()) throw new Error("Dropbox storage is required to submit a form entry");
+        if (!(await getConfiguredDropbox())) throw new Error("Dropbox storage is required to submit a form entry");
         const buffer = await createFormPdf({
             document: revision,
             revision: revision.revision,
@@ -135,7 +135,7 @@ module.exports = (rawSocket, rawIo) => {
                 return callback({ status: "error", message: "A valid form id is required" });
             const document = await db.document.findOne({ _id: documentId, type: "form", isTemplate: false }).lean();
             if (!document) return callback({ status: "error", message: "Form not found" });
-            if (!getDropbox())
+            if (!(await getConfiguredDropbox()))
                 return callback({ status: "error", message: "Dropbox storage is required to generate a form" });
 
             const hasRequestedRevision = requestedRevision !== undefined && requestedRevision !== null;

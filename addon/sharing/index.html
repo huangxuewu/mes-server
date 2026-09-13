@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MES · Connect & share</title>
+    <link rel="stylesheet" href="/sharing/phone.css">
+    <script src="/socket/socket.io.js" defer></script>
+    <script type="module" src="/sharing/phone.mjs"></script>
+</head>
+<body>
+    <main>
+        <p class="brand">MES · Connect & share</p>
+        <h1 data-label="title">Send to your desktop</h1>
+        <p id="desktop"></p>
+        <p id="session-status" role="status" data-label="connecting">Connecting…</p>
+        <p data-label="instructions">Select images or files. Your desktop operator accepts and chooses where to save.</p>
+        <div class="choices">
+            <button id="images" disabled><span aria-hidden="true">▧</span><span data-label="images">Upload image</span></button>
+            <button id="files" disabled><span aria-hidden="true">↥</span><span data-label="files">Upload file</span></button>
+        </div>
+        <input id="image-picker" type="file" accept="image/*" multiple hidden>
+        <input id="file-picker" type="file" multiple hidden>
+        <section id="selection" hidden>
+            <ul id="file-list"></ul>
+            <button id="send" class="primary" data-label="send">Send request</button>
+        </section>
+        <section id="transfer" hidden aria-live="polite">
+            <strong id="transfer-name"></strong>
+            <p id="transfer-status"></p>
+            <div class="progress"><progress id="progress" max="100" value="0" aria-label="Transfer progress"></progress><span id="percentage">0%</span></div>
+            <button id="cancel" data-label="cancel">Cancel transfer</button>
+        </section>
+        <p id="error" role="alert"></p>
+        <footer><p data-label="expiry">Expires after 10 minutes without activity, and always within 24 hours. Keep this page open while sending.</p><p id="expires"></p></footer>
+    </main>
+</body>
+</html>

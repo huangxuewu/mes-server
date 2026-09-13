@@ -9,7 +9,7 @@ const {
 } = require("../../utils/documentSeed");
 const { createDocumentDocx } = require("../../utils/documentDocx");
 const { createFormPdf } = require("../../utils/formPdf");
-const { getDropbox, getConfiguredDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
+const { getConfiguredDropbox, normalizePathPart, uploadDocumentFile } = require("../../utils/documentStorage");
 const { createDocumentThumbnail } = require("../../utils/documentThumbnail");
 const { cleanupDocumentResources } = require("../../utils/documentResources");
 const { cleanDocumentPage } = require("../../utils/documentPage");
@@ -543,7 +543,7 @@ module.exports = (rawSocket, rawIo) => {
                 return callback({ status: "error", message: "Add at least one field before publishing the form" });
             if (document.type !== "form" && !document.plainText.trim())
                 return callback({ status: "error", message: "Add document content before publishing" });
-            if (document.type === "form" && !getDropbox())
+            if (document.type === "form" && !(await getConfiguredDropbox()))
                 return callback({ status: "error", message: "Dropbox storage is required to publish a form" });
 
             const now = new Date();

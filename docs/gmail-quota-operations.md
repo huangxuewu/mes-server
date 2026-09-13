@@ -4,13 +4,13 @@ MES now accounts for every Gmail data request in MongoDB before dispatch. The de
 
 ## Configuration and rollout
 
-| Server environment variable | Default | Purpose |
+| MES configuration key | Default | Purpose |
 | --- | --- | --- |
-| `GMAIL_QUOTA_PROJECT` | Numeric prefix of OAuth client ID | Set explicitly to `502079953904` after confirming the configured OAuth client belongs to this project. |
-| `GMAIL_USER_QUOTA_LIMIT` | `6000` | Verified per-user/project minute limit. MES allocates 80%, capped at 4,800. Lower this to allocate capacity to other consumers. |
-| `GMAIL_PROJECT_QUOTA_LIMIT` | `1200000` | Verified project minute limit. MES allocates 80%, capped at 960,000. |
-| `GMAIL_SYNC_PAUSED` | unset | `true` pauses background sync dispatch. Sending still uses the quota gate. |
-| `GMAIL_INCREMENTAL_SYNC` | unset | `false` uses paced baseline scans for new cycles instead of history-based incremental sync. |
+| `integration.gmail.quotaProject` | Numeric prefix of OAuth client ID | Set explicitly to `502079953904` after confirming the configured OAuth client belongs to this project. |
+| `integration.gmail.userQuotaLimit` | `6000` | Verified per-user/project minute limit. MES allocates 80%, capped at 4,800. Lower this to allocate capacity to other consumers. |
+| `integration.gmail.projectQuotaLimit` | `1200000` | Verified project minute limit. MES allocates 80%, capped at 960,000. |
+| `integration.gmail.syncPaused` | `false` | `true` pauses background sync dispatch. Sending still uses the quota gate. |
+| `integration.gmail.incrementalSync` | `true` | `false` uses paced baseline scans for new cycles instead of history-based incremental sync. |
 
 All MES processes using the same Gmail credentials must share the coordination database. Development environments with a separate database should use separate Gmail credentials, disable Gmail activity, or have explicitly partitioned quota allocations. The gate cannot account for unrelated applications using the same mailbox/project.
 
@@ -20,7 +20,7 @@ Deploy the server and client changes together. Retire old server workers before 
 
 The first sync or send associates legacy `emailThread` records without a mailbox with the currently configured, authenticated mailbox. Keep the original mailbox connected for this upgrade. The upgrade first creates a unique `(mailbox, threadId)` index, preserves records, and removes only the old unique single-field `threadId` index. If a legacy thread already has a mailbox-scoped copy, a transaction merges messages by message ID and associations by load number, retains the scoped record's ID and current values, and removes the legacy copy only with the successful merge. Subsequent mailbox changes preserve separately scoped records. Configuration-test requests do not perform this migration. Reverting to an older application version after migration requires a compatibility review; pause sync instead for operational rollback.
 
-The persisted quota uses the smallest allocation any worker has reported. Reducing environment limits applies automatically. Raising them later requires a coordinated, reviewed update to the matching `gmailQuota` document's `userBudget`/`projectBudget`, while retaining its reservations and cooldowns. Do not change limits on only one worker.
+Manage these settings in **System Configuration → Integration → Gmail**. Workers read the active global database settings before quota admission and sync dispatch. Changes take effect without a restart; quota changes retain reservations and cooldowns. Limits remain capped at the verified maximum with the 80% allocation. Retire older server workers before deployment because they still use runtime variables.
 
 ## Sync and retries
 

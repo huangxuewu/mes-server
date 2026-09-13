@@ -2,7 +2,7 @@ const { randomUUID, createHash } = require('node:crypto');
 const services = new WeakMap();
 const STATION_FIELDS = '_id stationId screenshotsEnabled status screenshotGeneration';
 
-const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], refreshScreenshot = async () => {}, now = Date.now }) => {
+const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], getIceServers = async () => iceServers, refreshScreenshot = async () => {}, now = Date.now }) => {
     const sessions = new Map();
     const isSelf = (viewer, station, target) => viewer === target || viewer.id === target?.id
         || [viewer.data.stationConnection, viewer.data.stationPresence].some(binding => binding
@@ -71,6 +71,7 @@ const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], 
             idleFrames: 0, commands: [], points: 0, chat: false, messages: 0, imageBytes: 0, images: 0 };
         sessions.set(session.id, session);
         try {
+            session.iceServers = await getIceServers();
             await valid(session);
             const response = await command(session, 'start', { operator: String(operator?.displayName || operator?.username || '').slice(0, 100),
                 ...(options.displayId !== undefined ? { displayId: options.displayId } : {}) });
@@ -82,7 +83,7 @@ const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], 
             session.started = true;
             await valid(session);
             return { sessionId: session.id, frameProtocol: 2, chatImages: session.chatImages, fileTransfer: session.fileTransfer,
-                ...(session.videoSupported ? { videoProtocol: 1, iceServers } : {}) };
+                ...(session.videoSupported ? { videoProtocol: 1, iceServers: session.iceServers } : {}) };
         } catch (error) { end(session, error.message); throw error; }
     };
     const video = async (viewer, input) => {
@@ -104,7 +105,7 @@ const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], 
             session.videoHeartbeatAt = now();
         }
         const response = await command(session, 'video', { operation: input.operation,
-            ...(input.operation === 'offer' ? { sdp: input.sdp, iceServers } : {}) });
+            ...(input.operation === 'offer' ? { sdp: input.sdp, iceServers: session.iceServers } : {}) });
         await valid(session);
         if (input.operation === 'offer') {
             if (session.videoStopped) throw new Error('ended');
@@ -287,13 +288,8 @@ const createStationLive = ({ io, db, authorize, validateImage, iceServers = [], 
 const getStationLive = io => {
     if (services.has(io)) return services.get(io);
     const { getActiveSessionUser, hasPermission, onSessionEnded, onPermissionsChanged } = require('../socket/session');
-    const urls = (process.env.SHARING_STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map(value => value.trim()).filter(value => /^stuns?:[^\s]+$/.test(value));
-    const iceServers = urls.length ? [{ urls }] : [];
-    const turn = (process.env.STATION_LIVE_TURN_URLS || '').split(',').map(value => value.trim()).filter(value => /^turns?:[^\s]+$/.test(value));
-    if (turn.length && process.env.STATION_LIVE_TURN_USERNAME && process.env.STATION_LIVE_TURN_CREDENTIAL)
-        iceServers.push({ urls: turn, username: process.env.STATION_LIVE_TURN_USERNAME, credential: process.env.STATION_LIVE_TURN_CREDENTIAL });
     const service = createStationLive({ io, db: require('../models'), validateImage: require('./stationScreenshots').validateImage,
-        iceServers,
+        getIceServers: () => require('./runtimeConfig').getIceServers({ relay: true }),
         refreshScreenshot: request => require('./stationScreenshots').getStationScreenshots(io).refreshAfterLive(request),
         authorize: async socket => {
             const user = await getActiveSessionUser(socket);

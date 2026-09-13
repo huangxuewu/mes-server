@@ -93,7 +93,7 @@ if (require.main === module) {
         await mongoose.connection.asPromise();
         const client = await getClient();
         const config = await db.config.findOne({ key: 'integration.edi.orderfulApiKey', status: 'Active' }).lean();
-        const key = process.env.ORDERFUL_API_KEY || config?.value;
+        const key = config?.value;
         if (!key) throw new Error('Configure the MES Orderful API token first');
         const selected = args.filter(arg => arg.startsWith('--po=')).map(arg => arg.slice(5));
         if (selected.some(po => !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(po))) throw new Error('Invalid full PO number');

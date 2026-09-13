@@ -41,7 +41,7 @@ const createOrderfulReader = ({ getJson }) => async ({ id, type, businessNumber,
 
 const createOrderfulClient = ({ db, fetchImpl = fetch }) => createOrderfulReader({ getJson: async (id, suffix = '') => {
     const config = await db.config.findOne({ key: 'integration.edi.orderfulApiKey', status: 'Active' }).lean();
-    const key = process.env.ORDERFUL_API_KEY || config?.value;
+    const key = config?.value;
     if (!key) throw new Error('Configure the MES Orderful API key to verify EDI status');
     const response = await fetchImpl(`https://api.orderful.com/v3/transactions/${id}${suffix}`, {
         headers: { accept: 'application/json', 'orderful-api-key': key }, signal: AbortSignal.timeout(30000), redirect: 'error',

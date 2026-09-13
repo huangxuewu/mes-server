@@ -74,9 +74,9 @@ test("file import marks the original as an attachment before publishing its docu
     vm.runInNewContext(handlerSource, {
         socket: { on: (_, callback) => { handler = callback; } },
         safeCallback: callback => callback, requireUser: async () => ({ _id: "operator" }), requireAccess: () => true,
-        getDropbox: () => ({}), Buffer, ArrayBuffer,
+        getConfiguredDropbox: async () => ({}), Buffer, ArrayBuffer,
         mongoose: { Types: { ObjectId: function () { return { toString: () => "doc1" }; } } },
-        normalizePathPart: value => value, DOCUMENT_POPULATE: [], serializeDocument: value => value,
+        normalizeDocumentCategory: value => value, normalizePathPart: value => value, DOCUMENT_POPULATE: [], serializeDocument: value => value,
         uploadDocumentFile: async input => {
             assert.equal(input.category, "original");
             return { storagePath, url: asset.url };

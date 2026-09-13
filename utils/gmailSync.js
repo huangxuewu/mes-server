@@ -16,7 +16,7 @@ function createGmailSyncStep({ connection, getClient, getCandidates, prepareThre
         const progress = state.progress;
         if (!progress || state.identityKey !== client.identityKey) {
             const sameMailbox = state.mailbox === client.context.mailbox;
-            const cursor = sameMailbox && process.env.GMAIL_INCREMENTAL_SYNC !== 'false' ? state.cursor : null;
+            const cursor = sameMailbox && client.incrementalSync !== false ? state.cursor : null;
             const added = cursor ? references.filter(reference => !(state.references || []).includes(reference)) : references;
             return { apply: progress ? session => seen().deleteMany({ generation: progress.generation }, { session }) : undefined,
                 patch: { identityKey: client.identityKey, mailbox: client.context.mailbox,

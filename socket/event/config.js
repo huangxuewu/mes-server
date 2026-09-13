@@ -1,5 +1,7 @@
 const db = require("../../models");
 const mongoose = require("mongoose");
+const { normalizePhoneSharingUrl } = require('../phoneSharing');
+const { defaults: runtimeDefaults, normalizeRuntimeSetting } = require('../../utils/runtimeConfig');
 const { getActiveSessionUser, hasPermission } = require('../session');
 const { getStationScreenshots } = require('../../utils/stationScreenshots');
 const { getStationLive } = require('../../utils/stationLive');
@@ -78,6 +80,11 @@ const normalizeStation = value => {
 };
 
 module.exports = (socket, io) => {
+    const canReadRelayCredential = async () => {
+        try { return hasPermission(await getActiveSessionUser(socket), 'access', 'configuration.page.access'); }
+        catch { return false; }
+    };
+    const relayCredentialKey = 'integration.stationLive.turnCredential';
     const screenshots = getStationScreenshots(io);
     const live = getStationLive(io);
     const roster = getStationRoster(io);
@@ -93,6 +100,8 @@ module.exports = (socket, io) => {
 
     socket.on("config:create", async (data, callback) => {
         try {
+            if (data.key === relayCredentialKey && !await canReadRelayCredential()) throw new Error('accessDenied');
+            if (runtimeDefaults && Object.hasOwn(runtimeDefaults, data.key)) data.value = normalizeRuntimeSetting(data.key, data.value);
             const config = await db.config.create(data);
             callback({ status: "success", message: "Config created successfully", payload: config });
         } catch (error) {
@@ -103,6 +112,24 @@ module.exports = (socket, io) => {
     socket.on("config:update", async (data, callback) => {
         try {
             const { key, ...update } = data;
+            if (key === relayCredentialKey && !await canReadRelayCredential()) throw new Error('accessDenied');
+            if (runtimeDefaults && Object.hasOwn(runtimeDefaults, key)) {
+                const value = normalizeRuntimeSetting(key, update.value);
+                const type = { string: 'String', boolean: 'Boolean', number: 'Number' }[typeof value];
+                const config = await db.config.findOneAndUpdate({ key, scope: 'Global' }, {
+                    $set: { value },
+                    $setOnInsert: { _id: `cfg.${key}`, type, scope: 'Global', status: 'Active', effective: { from: new Date() }, version: 1 },
+                }, { new: true, upsert: true, runValidators: true });
+                return callback({ status: 'success', message: 'Config updated successfully', payload: config });
+            }
+            if (key === 'integration.sharing.publicUrl') {
+                const value = normalizePhoneSharingUrl(update.value);
+                const config = await db.config.findOneAndUpdate({ key, scope: 'Global' }, {
+                    $set: { value },
+                    $setOnInsert: { _id: `cfg.${key}`, type: 'String', scope: 'Global', status: 'Active', effective: { from: new Date() }, version: 1 },
+                }, { new: true, upsert: true, runValidators: true });
+                return callback({ status: 'success', message: 'Config updated successfully', payload: config });
+            }
             if (key === 'integration.edi.orderfulApiKey') {
                 if (typeof update.value !== 'string') throw new Error('Orderful API key must be text');
                 const config = await db.config.findOneAndUpdate({ key }, {
@@ -130,6 +157,8 @@ module.exports = (socket, io) => {
 
     socket.on("config:delete", async (data, callback) => {
         try {
+            const record = await db.config.findById(data._id).lean();
+            if (record?.key === relayCredentialKey && !await canReadRelayCredential()) throw new Error('accessDenied');
             await db.config.findByIdAndDelete(data._id);
             callback({ status: "success", message: "Config deleted successfully" });
         } catch (error) {
@@ -139,7 +168,8 @@ module.exports = (socket, io) => {
 
     socket.on("config:get", async (data, callback) => {
         try {
-            const config = await db.config.findOne(data);
+            const query = await canReadRelayCredential() ? data : { $and: [data, { key: { $ne: relayCredentialKey } }] };
+            const config = await db.config.findOne(query);
             callback({ status: "success", message: "Config fetched successfully", payload: config });
         } catch (error) {
             callback({ status: "error", message: error.message });
@@ -148,7 +178,8 @@ module.exports = (socket, io) => {
 
     socket.on("config:fetch", async (query, callback) => {
         try {
-            const config = await db.config.find(query);
+            const filter = await canReadRelayCredential() ? query : { $and: [query, { key: { $ne: relayCredentialKey } }] };
+            const config = await db.config.find(filter);
             callback({ status: "success", message: "Config fetched successfully", payload: config });
         } catch (error) {
             callback({ status: "error", message: error.message });
