@@ -25,17 +25,18 @@ module.exports = (socket, io) => {
             if (data.buyers?.length) {
                 const currentOrder = await db.order.findById(_id).lean();
                 if (currentOrder?.buyers?.length) {
-                    const storedItemsByPoNumber = new Map(
-                        currentOrder.buyers.map(buyer => [buyer.poNumber, buyer.items || []])
+                    const storedBuyersByPoNumber = new Map(
+                        currentOrder.buyers.map(buyer => [buyer.poNumber, buyer])
                     );
 
                     data.buyers = data.buyers.map((buyer) => {
-                        if (!buyer || Object.prototype.hasOwnProperty.call(buyer, 'items')) return buyer;
-                        if (!storedItemsByPoNumber.has(buyer.poNumber)) return buyer;
+                        const stored = storedBuyersByPoNumber.get(buyer?.poNumber);
+                        if (!stored) return buyer;
 
                         return {
+                            ...stored,
                             ...buyer,
-                            items: storedItemsByPoNumber.get(buyer.poNumber)
+                            items: Object.prototype.hasOwnProperty.call(buyer, 'items') ? buyer.items : (stored.items || [])
                         };
                     });
                 }
@@ -55,6 +56,12 @@ module.exports = (socket, io) => {
             const { _id, buyers, items, poDate, cancelDate, shipWindow, client, shipIqSnapshot } = payload;
             if (!_id) throw new Error('Missing order _id');
             if (!Array.isArray(buyers) || !buyers.length) throw new Error('Missing buyers from PO export');
+            for (const buyer of buyers) {
+                const missingFields = ['address', 'city', 'state', 'zip', 'country']
+                    .filter(field => !String(buyer?.[field] ?? '').trim());
+                if (missingFields.length)
+                    throw new Error(`PO ${buyer?.poNumber || 'unknown'} has an incomplete DC address (${missingFields.join(', ')}). PO update was stopped to protect the saved address.`);
+            }
 
             const existing = await db.order.findById(_id).lean();
             if (!existing) throw new Error('Order not found');

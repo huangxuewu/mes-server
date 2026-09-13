@@ -14,6 +14,10 @@ No new business-change journal entries appeared during this initial observation 
 
 ## Findings and changes
 
+### Overnight observations
+
+- **01:32 Eastern:** `/health` remained HTTP 200. Capture retained fence 150, a valid lease, no error, and approximately 2.5 seconds of source/heartbeat age. There were still no post-release business-change journal entries and no import/approval timing samples in the retrieved logs. Memory rose from approximately 350 MB to 450 MB at 01:25 and was approximately 455 MB at 01:31; swap remained zero and no R14/R15 or capture failures appeared. This reduces available headroom but is not evidence of a memory leak by itself. Both invoice and ASN monitors run every five minutes, making periodic background work a candidate for investigation; attribution is unproven without heap or per-job memory measurements. Timestamped read-only snapshots are under workspace `tmp/performance-monitor/20260913-0532/`. No further production change was made.
+
 ### Socket timeout and shipment imports
 
 `Socket timeout (120000ms)` means the client did not receive an acknowledgement within two minutes. The original toast alone does not identify the request. `load:sync` is the strongest match in the inspected toast paths; invoice requests also use this timeout but normally display errors inline. An event name and timestamp from an actual failure are still needed to attribute the original incident conclusively.

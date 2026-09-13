@@ -258,6 +258,32 @@ test('approved review fields are the exact fields submitted to ERP, with server-
     assert.equal(state.records[0].invoiceDate, review.invoiceDate);
 });
 
+test('a restricted review submits server-owned prices and totals and still rejects changed defaults', async () => {
+    const { invoiceVisibility } = require('../utils/edi/invoiceVisibility');
+    const state = flowFixture();
+    const safe = invoiceVisibility(await state.flow.get(state.input), false);
+    assert.equal(safe.preview.items[0].unitPrice, undefined);
+    await state.flow.submit({ ...state.input, review: safe.review, reviewFingerprint: safe.reviewFingerprint }, 'restricted-operator');
+    const invoice = state.calls.find(call => call.query === CREATE_INVOICE).variables.input.message.transactionSets[0];
+    assert.equal(invoice.IT1_loop[0].baselineItemDataInvoice[0].unitPrice, '10.125');
+    assert.equal(invoice.totalMonetaryValueSummary[0].amount, '12150');
+    const changed = flowFixture();
+    const old = invoiceVisibility(await changed.flow.get(changed.input), false);
+    changed.po.load_shipments[0].shipment_notice.bol = 'CHANGED';
+    await assert.rejects(changed.flow.submit({ ...changed.input, review: old.review, reviewFingerprint: old.reviewFingerprint }, 'operator'), /defaults changed/);
+    assert.equal(changed.posts(), 0);
+});
+
+test('submission rechecks authorization after the durable claim and before the ERP write', async () => {
+    const state = flowFixture();
+    let checks = 0;
+    await assert.rejects(state.flow.submit(state.input, 'operator', async () => {
+        if (++checks === 2) throw new Error('Permission revoked');
+    }), /Permission revoked/);
+    assert.equal(checks, 2);
+    assert.equal(state.posts(), 0);
+});
+
 test('changed ERP defaults invalidate an approval before claiming or submitting', async () => {
     const state = flowFixture();
     const detail = await state.flow.get(state.input);

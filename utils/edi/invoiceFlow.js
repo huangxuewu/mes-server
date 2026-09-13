@@ -230,6 +230,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         }, { new: true });
         if (!claimed) throw new Error('An invoice submission already exists. Refresh its status; do not send again.');
         // Keep the durable claim even when ERP times out. A later refresh reconciles the result.
+        await authorize();
         const result = await ctx.client.graphql(CREATE_INVOICE, { input: { account_code: 'Domestic', stream: 'LIVE', type: 'INVOICE_810', message } });
         const transactionId = result?.createTransaction?.id;
         if (!transactionId) throw new Error('ERP returned no transaction ID. Refresh or review ERP before retrying.');
