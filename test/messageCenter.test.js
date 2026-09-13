@@ -140,6 +140,31 @@ test('attachment upload acknowledges bytes, supports retry and requires membersh
     assert.equal((await b.call('messageAttachment:open', { _id: stage._id })).status, 'error');
 });
 
+test('missing or failed storage configuration rejects staging without writes and leaves messaging available', async () => {
+    for (const [getConfiguredDropbox, message] of [
+        [async () => null, 'Message file storage is not configured'],
+        [async () => { throw new Error('Configuration unavailable'); }, 'Configuration unavailable'],
+    ]) {
+        const { connect, ids, db } = fixture({ getConfiguredDropbox });
+        const actor = connect(ids.a);
+        const result = await actor.call('messageAttachment:stage', { topicId: ids.topic, clientRequestId: randomUUID(), filename: 'evidence.txt', mime: 'text/plain', size: 6 });
+        assert.equal(result.status, 'error');
+        assert.equal(result.message, message);
+        assert.equal(db.messageAttachment.writes.length, 0);
+        success(await actor.call('message:create', send(ids.topic)));
+    }
+});
+
+test('removing an uploaded attachment waits for configured storage and deletes the file', async () => {
+    const { connect, ids, files } = fixture();
+    const actor = connect(ids.a);
+    const stage = success(await actor.call('messageAttachment:stage', { topicId: ids.topic, clientRequestId: randomUUID(), filename: 'evidence.txt', mime: 'text/plain', size: 6 }));
+    success(await actor.call('messageAttachment:chunk', { _id: stage._id, offset: 0, contents: Buffer.from('abcdef') }));
+    assert.equal(files.size, 1);
+    success(await actor.call('messageAttachment:remove', { _id: stage._id }));
+    assert.equal(files.size, 0);
+});
+
 test('content validation rejects unknown keys, duplicate options and invalid cursors', () => {
     assert.throws(() => policy.cleanContent('Poll', { kind: 'poll', question: 'Shift?', options: [{ id: randomUUID(), text: 'Same' }, { id: randomUUID(), text: 'same' }], multiple: false }, []), /Duplicate/);
     assert.throws(() => policy.cursorFilter('not-json'), /cursor/);

@@ -74,7 +74,7 @@ class Collection {
     async deleteOne(query) { const index = this.rows.findIndex(row => matches(row, query)); if (index >= 0) this.rows.splice(index, 1); this.writes.push({ delete: clone(query) }); }
 }
 const ids = { a: 'aaaaaaaaaaaaaaaaaaaaaaaa', b: 'bbbbbbbbbbbbbbbbbbbbbbbb', outsider: 'cccccccccccccccccccccccc', topic: 'dddddddddddddddddddddddd' };
-const fixture = () => {
+const fixture = ({ getConfiguredDropbox } = {}) => {
     const db = { user: new Collection(Object.entries(ids).filter(([key]) => key !== 'topic').map(([key, _id]) => ({ _id, displayName: key, role: 'User', status: 'Active' }))),
         topic: new Collection([{ _id: ids.topic, creator: ids.a, editors: [ids.a], participants: [ids.a, ids.b], pinned: [], archived: [], revision: 0, title: 'Inspection', description: 'Guard inspection', createdAt: new Date('2026-01-01') }], { revision: 0, pinned: [], archived: [], isDeleted: false }),
         message: new Collection([], { status: 'Active', revision: 0, attachments: [], history: [] }), messageRead: new Collection(),
@@ -108,7 +108,7 @@ const fixture = () => {
                 if (name.endsWith('/models')) return db;
                 if (name.endsWith('/session') || name === './session') return sessions;
                 if (name.endsWith('/messageDelivery')) return load('socket/messageDelivery.js');
-                if (name.endsWith('/documentStorage')) return { getDropbox: () => dropbox, normalizePathPart: value => value.replace(/[^a-z\d.]/gi, '-') };
+                if (name.endsWith('/documentStorage')) return { getConfiguredDropbox: getConfiguredDropbox || (async () => dropbox), normalizePathPart: value => value.replace(/[^a-z\d.]/gi, '-') };
                 if (name in extra) return extra[name];
                 return require(name.startsWith('.') ? path.resolve(path.dirname(filename), name) : name);
             } }, { filename });

@@ -40,7 +40,7 @@ module.exports = (socket, io) => {
         await topicAccess(id(file.topicId), user);
         return file;
     };
-    const storage = () => {
+    const storage = async () => {
         const dropbox = await getConfiguredDropbox();
         if (!dropbox) throw new Error('Message file storage is not configured');
         return dropbox;
@@ -53,7 +53,7 @@ module.exports = (socket, io) => {
         if (!TYPES[input.mime] || !EXTENSIONS[input.mime].includes(filename.split('.').pop().toLowerCase()) || !Number.isSafeInteger(input.size) || input.size < 1 || input.size > MAX_FILE_SIZE) throw new Error('Choose a supported image or document up to 25 MB');
         const clientRequestId = requestId(input.clientRequestId);
         const requestHash = hash({ topicId: input.topicId, filename, mime: input.mime, size: input.size });
-        storage();
+        await storage();
         assertSession();
         const key = { ownerId: user._id, clientRequestId };
         let file;
@@ -83,7 +83,7 @@ module.exports = (socket, io) => {
             throw new Error('Upload position changed. Retry the upload.');
         }
         if (input.offset !== file.offset || (file.pendingOffset === input.offset && file.pendingHash && file.pendingHash !== digest)) throw new Error('Upload chunk changed');
-        const dropbox = storage();
+        const dropbox = await storage();
         const folder = `/DH MES/message/${id(file.topicId)}`;
         const storagePath = `${folder}/${id(file)}-${normalizePathPart(file.filename)}`;
         if (!file.uploadSessionId) {
@@ -139,7 +139,7 @@ module.exports = (socket, io) => {
         assertSession();
         const removed = file.status === 'Removed' ? file : await db.messageAttachment.findOneAndUpdate({ _id: file._id, status: { $in: ['Staged', 'Ready'] }, messageRequestId: { $exists: false } }, { $set: { status: 'Removed' } }, { new: true }).lean();
         if (!removed) throw new Error('Attachment changed');
-        if (file.storagePath) await storage().filesDeleteV2({ path: file.storagePath }).catch(error => {
+        if (file.storagePath) await (await storage()).filesDeleteV2({ path: file.storagePath }).catch(error => {
             if (!String(error?.error?.error_summary || '').startsWith('path_lookup/not_found')) throw error;
         });
         return { _id: id(file) };
@@ -152,7 +152,7 @@ module.exports = (socket, io) => {
         const message = await db.message.findOne({ _id: file.messageId, status: { $nin: ['Retracted', 'Deleted'] }, 'attachments.attachmentId': file._id }).lean();
         if (!message) throw new Error('Attachment unavailable');
         assertSession();
-        const result = await storage().filesGetTemporaryLink({ path: file.storagePath });
+        const result = await (await storage()).filesGetTemporaryLink({ path: file.storagePath });
         await topicAccess(id(file.topicId), user);
         assertSession();
         return { url: result.result.link, filename: file.filename, mime: file.mime };
