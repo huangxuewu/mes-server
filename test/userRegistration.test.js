@@ -35,7 +35,7 @@ const fixture = async t => {
         config: new Records([{ _id: 'manufacturer', key: 'manufacturer.name', scope: 'Global', status: 'Active', value: 'Down Home Manufacturing', effective: { from: new Date('2020-01-01'), to: null }, version: 1 }]),
         user: new Records([{ _id: ids.a, username: 'admin', password: 'legacy-secret', role: 'Admin', status: 'Active' }, { _id: ids.b, username: 'worker', password: 'worker-secret', role: 'User', status: 'Active' }]),
         userRegistration: new Records([], { status: 'Open' }),
-        permissionCategory: new Records([{ _id: ids.topic, name: 'Office', permission: { view: ['production.run'] } }]),
+        permissionRule: new Records([{ _id: ids.topic, name: 'Office', permission: { view: ['production.run'] } }]),
     };
     let transaction = Promise.resolve();
     db.user.db = { startSession: async () => ({ endSession: async () => {}, withTransaction: async action => {
@@ -130,10 +130,10 @@ test('single-use invitation submits a sanitized photo and provisions only after 
     assert.ok(admin.events.some(item => item.event === 'userRegistrations:changed'));
     assert.equal(worker.events.some(item => item.event === 'userRegistrations:changed'), false);
     assert.equal((await post('submit', { ...profile, token: invitation.token })).code, 409);
-    const result = await admin.call('userRegistration:approve', { _id: pending._id, role: 'User', permissionCategoryId: ids.topic });
+    const result = await admin.call('userRegistration:approve', { _id: pending._id, role: 'User', permissionRuleId: ids.topic });
     assert.equal(result.status, 'success');
     assert.equal(db.user.rows.length, 3);
-    assert.equal(db.user.rows[2].permissionCategoryId, ids.topic);
+    assert.equal(db.user.rows[2].permissionRuleId, ids.topic);
     assert.equal(db.userRegistration.rows[0].password, undefined);
     assert.equal(db.userRegistration.rows[0].token, undefined);
     assert.equal((await admin.call('userRegistrations:get')).payload.length, 0);
@@ -172,9 +172,9 @@ test('registration rejects injected permissions, bad images, duplicates and non-
     assert.equal((await post('submit', { ...profile, token, username: 'ADMIN' })).code, 409);
     assert.equal((await post('submit', { ...profile, token })).code, 200);
     const pending = db.userRegistration.rows[0];
-    assert.equal((await worker.call('userRegistration:approve', { _id: pending._id, role: 'Admin', permissionCategoryId: '' })).status, 'error');
-    assert.equal((await admin.call('userRegistration:approve', { _id: pending._id, role: 'System', permissionCategoryId: '' })).status, 'error');
-    assert.equal((await admin.call('userRegistration:approve', { _id: pending._id, role: 'User', permissionCategoryId: ids.outsider })).status, 'error');
+    assert.equal((await worker.call('userRegistration:approve', { _id: pending._id, role: 'Admin', permissionRuleId: '' })).status, 'error');
+    assert.equal((await admin.call('userRegistration:approve', { _id: pending._id, role: 'System', permissionRuleId: '' })).status, 'error');
+    assert.equal((await admin.call('userRegistration:approve', { _id: pending._id, role: 'User', permissionRuleId: ids.outsider })).status, 'error');
     const bypass = await fetch(`${origin}/api/login/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...profile, role: 'Admin' }) });
     assert.equal(bypass.status, 410);
     assert.equal(db.user.rows.length, 2);
@@ -186,7 +186,7 @@ test('duplicate approval is atomic; rejection clears credentials without creatin
     const first = await invite(admin);
     await post('submit', { ...profile, token: first.token });
     const pending = db.userRegistration.rows[0];
-    const payload = { _id: pending._id, role: 'User', permissionCategoryId: '' };
+    const payload = { _id: pending._id, role: 'User', permissionRuleId: '' };
     const results = await Promise.all([admin.call('userRegistration:approve', payload), secondAdmin.call('userRegistration:approve', payload)]);
     assert.deepEqual(results.map(result => result.status).sort(), ['error', 'success']);
     assert.equal(db.user.rows.filter(user => user.username === profile.username).length, 1);
@@ -210,7 +210,7 @@ test('provisioning failure rolls back both records and a submitted application c
     db.userRegistration.rows[0].expiresAt = new Date(Date.now() - 1);
     const update = db.userRegistration.updateOne.bind(db.userRegistration);
     db.userRegistration.updateOne = async () => { throw new Error('Database temporarily unavailable'); };
-    const payload = { _id: id, role: 'User', permissionCategoryId: '' };
+    const payload = { _id: id, role: 'User', permissionRuleId: '' };
     assert.equal((await admin.call('userRegistration:approve', payload)).status, 'error');
     assert.equal(db.user.rows.length, 2);
     assert.equal(db.userRegistration.rows[0].status, 'Submitted');

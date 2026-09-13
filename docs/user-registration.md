@@ -15,6 +15,6 @@ Deploy the backend and updated MES client together. Share production links over 
 Validation:
 
 - Server: `node --test test/userRegistration.test.js test/messageSession.test.js`
-- Client: `node --test test/registration.test.cjs test/permissionCategory.test.cjs`
+- Client: `node --test test/registration.test.cjs test/permissionRule.test.cjs`
 - Browser behavior: `node_modules/.bin/electron test/registrationPage.electron.cjs`
 - Client build: `npx --no-install electron-vite build`

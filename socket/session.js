@@ -21,11 +21,22 @@ const userRoom = (userId) => `user:${String(userId)}`;
 
 const getSessionUserId = (socket) => socket.data?.userId ?? null;
 
+const permissionRuleIdOf = user => user?.permissionRuleId || user?.permissionCategoryId || '';
+const takePermissionRuleId = payload => {
+    if (!payload || 'permissionRuleId' in payload) return payload;
+    if ('permissionCategoryId' in payload) {
+        payload.permissionRuleId = payload.permissionCategoryId;
+        delete payload.permissionCategoryId;
+    }
+    return payload;
+};
+
 const resolveUserPermissions = async user => {
-    if (!user?.permissionCategoryId) return user;
-    const category = /^[a-f0-9]{24}$/i.test(user.permissionCategoryId)
-        ? await require('../models').permissionCategory.findById(user.permissionCategoryId).lean() : null;
-    return { ...(user.toObject ? user.toObject() : user), permission: category?.permission || {}, permissionCategoryName: category?.name || '' };
+    const permissionRuleId = permissionRuleIdOf(user);
+    if (!permissionRuleId) return user;
+    const rule = /^[a-f0-9]{24}$/i.test(permissionRuleId)
+        ? await require('../models').permissionRule.findById(permissionRuleId).lean() : null;
+    return { ...(user.toObject ? user.toObject() : user), permissionRuleId, permission: rule?.permission || {}, permissionRuleName: rule?.name || '' };
 };
 
 const hasPermission = (user, action, resource) => {
@@ -37,7 +48,7 @@ const hasPermission = (user, action, resource) => {
 };
 
 const sessionSignature = user => createHash('sha256').update(JSON.stringify({
-    permissionCategoryId: user.permissionCategoryId || '', permissionCategoryName: user.permissionCategoryName || '',
+    permissionRuleId: permissionRuleIdOf(user), permissionRuleName: user.permissionRuleName || '',
     username: user.username || '', password: user.password || '', role: user.role || '', status: user.status || '',
     permission: Object.fromEntries(['module', 'access', 'create', 'view', 'update', 'modify', 'edit', 'delete', 'approve', 'override', 'export', 'audit']
         .map(action => [action, [...(user.permission?.[action] || [])].sort()])),
@@ -135,4 +146,6 @@ module.exports = {
     isBoundDocumentSession,
     publicUser,
     privateUser,
+    permissionRuleIdOf,
+    takePermissionRuleId,
 };

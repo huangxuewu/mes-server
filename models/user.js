@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
     },
     defaultSignatureId: { type: String, default: '' },
     role: String,
-    permissionCategoryId: { type: String, default: '', index: true },
+    permissionRuleId: { type: String, default: '', index: true },
     status: {
         type: String,
         enum: ["Active", "Inactive", "Disabled", "Deleted"],

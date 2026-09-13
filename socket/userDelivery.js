@@ -21,12 +21,12 @@ const deliverUserChange = async (io, event, record) => {
     }));
 };
 
-const refreshPermissionCategories = async io => {
+const refreshPermissionRules = async io => {
     await Promise.all([...io.sockets.sockets.values()].map(async socket => {
         if (!getSessionUserId(socket)) return;
         try {
             const actor = await getActiveSessionUser(socket);
-            if (canAdministerAccounts(actor)) socket.emit('permissionCategories:changed');
+            if (canAdministerAccounts(actor)) socket.emit('permissionRules:changed');
         } catch {
             // Expired sessions must not receive configuration updates.
         }
@@ -44,4 +44,4 @@ const notifyRegistrationsChanged = async io => {
     }));
 };
 
-module.exports = { deliverUserChange, refreshPermissionCategories, notifyRegistrationsChanged };
+module.exports = { deliverUserChange, refreshPermissionRules, notifyRegistrationsChanged };
