@@ -12,7 +12,7 @@ const PermissionCategory = database.model('PermissionCategory', permissionCatego
 
 PermissionCategory.watch().on('change', () => {
     const { refreshPermissionCategories } = require('../socket/userDelivery');
-    refreshPermissionCategories(io).catch(error => console.error('Permission category delivery failed:', error.message));
+    refreshPermissionCategories(io).catch(error => console.error('Permission rule delivery failed:', error.message));
 });
 
 module.exports = PermissionCategory;
