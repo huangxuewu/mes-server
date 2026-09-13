@@ -170,26 +170,16 @@ const timecardPunchesHandler = {
         };
     },
 
-    apply: async ({ referenceId, beforeValue, afterValue, reason, submittedBy }) => {
+    apply: async ({ referenceId, beforeValue, afterValue, reason, submittedBy, live }) => {
         const punches = markManualWhereChanged(beforeValue || [], afterValue || []);
         const changes = buildAuditChanges(beforeValue || [], punches);
-        const timecard = await db.timecard.findByIdAndUpdate(
-            referenceId,
-            {
-                $set: { punches },
-                $push: {
-                    auditLog: {
-                        action: "update",
-                        changes,
-                        reason: reason || "",
-                        createdAt: new Date(),
-                        createdBy: submittedBy,
-                    },
-                },
-            },
-            { new: true, runValidators: true, context: "query" }
-        );
+        const timecard = live || await db.timecard.findById(referenceId);
         if (!timecard) throw new Error("Timecard not found");
+        timecard.punches = punches;
+        timecard.auditLog.push({ action: 'update', changes, reason: reason || '',
+            createdAt: new Date(), createdBy: submittedBy });
+        // The save hook computes totals and the hash together, before the single database write.
+        await timecard.save();
         return timecard;
     },
 };

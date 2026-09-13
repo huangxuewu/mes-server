@@ -5,6 +5,12 @@ const { getHandler } = require("../../utils/changeRequestHandlers");
 const USER_SELECT = "username displayName firstName lastName";
 
 const actorId = (user) => String(user._id);
+const verdictPayload = async (request, user) => {
+    await request.populate('submittedBy', USER_SELECT);
+    const payload = request.toObject();
+    payload.verdictBy = Object.fromEntries(['_id', ...USER_SELECT.split(' ')].filter(key => user[key] !== undefined).map(key => [key, user[key]]));
+    return payload;
+};
 
 module.exports = (socket) => {
     const requireUser = async (callback) => {
@@ -109,6 +115,8 @@ module.exports = (socket) => {
     });
 
     socket.on("changeRequest:approve", async (data = {}, callback) => {
+        const startedAt = Date.now();
+        let phase = 'authorize';
         try {
             const user = await requireUser(callback);
             if (!user) return;
@@ -127,7 +135,8 @@ module.exports = (socket) => {
             if (!requirePerm(user, handler.approvePermission, callback, "You do not have permission to approve this change"))
                 return;
 
-            const { conflict, liveHash, liveValue } = await handler.checkConflict(
+            phase = 'conflict';
+            const { conflict, liveHash, liveValue, live } = await handler.checkConflict(
                 request.referenceId,
                 request.baseHash,
                 request.beforeValue,
@@ -152,14 +161,17 @@ module.exports = (socket) => {
             if (!handler.hasMeaningfulDiff(request.beforeValue, review.afterValue))
                 return callback({ status: "error", message: "Reject the request when all row changes are rejected" });
 
+            phase = 'apply';
             await handler.apply({
                 referenceId: request.referenceId,
                 beforeValue: request.beforeValue,
                 afterValue: review.afterValue,
                 reason: request.reason,
                 submittedBy: request.submittedBy,
+                live,
             });
 
+            phase = 'verdict';
             request.status = "Approved";
             request.rejectedChanges = review.rejectedChanges;
             request.verdictBy = user._id;
@@ -167,13 +179,12 @@ module.exports = (socket) => {
             request.verdictNote = String(verdictNote || "").trim();
             await request.save();
 
-            const payload = await db.changeRequest.findById(request._id)
-                .populate("submittedBy", USER_SELECT)
-                .populate("verdictBy", USER_SELECT)
-                .lean();
+            const payload = await verdictPayload(request, user);
 
+            console.info('[changeRequest:approve] completed', { elapsedMs: Date.now() - startedAt });
             callback({ status: "success", message: "Change request approved", payload });
         } catch (error) {
+            console.error('[changeRequest:approve] failed', { phase, elapsedMs: Date.now() - startedAt }, error);
             callback({ status: "error", message: error.message });
         }
     });
@@ -205,10 +216,7 @@ module.exports = (socket) => {
             request.verdictNote = String(verdictNote).trim();
             await request.save();
 
-            const payload = await db.changeRequest.findById(request._id)
-                .populate("submittedBy", USER_SELECT)
-                .populate("verdictBy", USER_SELECT)
-                .lean();
+            const payload = await verdictPayload(request, user);
 
             callback({ status: "success", message: "Change request rejected", payload });
         } catch (error) {
@@ -237,10 +245,7 @@ module.exports = (socket) => {
             request.verdictNote = "Cancelled by submitter";
             await request.save();
 
-            const payload = await db.changeRequest.findById(request._id)
-                .populate("submittedBy", USER_SELECT)
-                .populate("verdictBy", USER_SELECT)
-                .lean();
+            const payload = await verdictPayload(request, user);
 
             callback({ status: "success", message: "Change request cancelled", payload });
         } catch (error) {

@@ -79,6 +79,7 @@ const orderSchema = new mongoose.Schema({
 });
 
 orderSchema.index({ cancelDate: 1 });
+orderSchema.index({ 'buyers.poNumber': 1 });
 
 // check if order po number already exists
 orderSchema.methods.checkDuplication = async function () {
@@ -88,35 +89,28 @@ orderSchema.methods.checkDuplication = async function () {
 }
 
 orderSchema.statics.updateShipmentStatus = async function (shipment) {
-    const poNumber = shipment?.poNumber;
-    const loads = shipment?.loads ?? [];
-    if (!poNumber) return;
-    if (!loads.some(load => ["Picked Up", "Completed"].includes(load.status))) return;
+    const shipments = Array.isArray(shipment) ? shipment : [shipment];
+    const poNumbers = [...new Set(shipments.filter(record => record?.poNumber
+        && record.loads?.some(load => ['Picked Up', 'Completed'].includes(load.status))).map(record => record.poNumber))];
+    if (!poNumbers.length) return;
 
-    const orders = await this.find({ "buyers.poNumber": poNumber });
-    for (const order of orders) {
-        let buyersChanged = false;
-        const buyers = order.buyers.map(buyer => {
-            if (buyer.poNumber !== poNumber || buyer.done) return buyer;
-            buyersChanged = true;
-            const plain = typeof buyer.toObject === 'function' ? buyer.toObject() : buyer;
-            return { ...plain, done: true };
-        });
-
-        if (!buyersChanged) {
-            await checkAndUpdateOrderStatus(order._id, this);
-            continue;
-        }
-
-        const allDone = buyers.every(buyer => buyer.done);
-        const update = { buyers };
-        if (allDone && order.orderStatus !== "Completed") {
-            update.orderStatus = "Completed";
-            update.fulfilledAt = order.fulfilledAt || new Date();
-        }
-
-        await this.findByIdAndUpdate(order._id, { $set: update }, { new: true });
-    }
+    // Evaluate every buyer against the current document in MongoDB, including concurrent completions.
+    const allDone = { $allElementsTrue: [{ $map: { input: '$buyers', as: 'buyer', in: { $eq: ['$$buyer.done', true] } } }] };
+    const complete = { $and: [allDone, { $ne: ['$orderStatus', 'Completed'] }] };
+    return this.updateMany({
+        'buyers.poNumber': { $in: poNumbers },
+        $or: [
+            { buyers: { $elemMatch: { poNumber: { $in: poNumbers }, done: { $ne: true } } } },
+            { orderStatus: { $ne: 'Completed' }, buyers: { $not: { $elemMatch: { done: { $ne: true } } } } },
+        ],
+    }, [
+        { $set: { buyers: { $map: { input: '$buyers', as: 'buyer', in: {
+            $cond: [{ $in: ['$$buyer.poNumber', { $literal: poNumbers }] },
+                { $mergeObjects: ['$$buyer', { done: true }] }, '$$buyer'],
+        } } } } },
+        { $set: { orderStatus: { $cond: [complete, 'Completed', '$orderStatus'] },
+            fulfilledAt: { $cond: [complete, { $ifNull: ['$fulfilledAt', '$$NOW'] }, '$fulfilledAt'] } } },
+    ]);
 }
 
 // Helper function to check and update order status

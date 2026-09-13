@@ -16,6 +16,7 @@ const DEPENDENCIES = { workSchedule: 'schedules', workScheduleTemplate: 'schedul
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const PAGE_SIZE = 500;
 const MAX_BYTES = 4 * 1024 * 1024;
+const CAPTURE_BATCH_SIZE = 100;
 // Isolated metadata lets older servers finish their v1 capture during a rolling deployment.
 const STATE_ID = 'application-data-v2';
 const JOURNAL = 'syncJournalV2';
@@ -41,6 +42,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
     let stream;
     let lease;
     let lastPrune = 0;
+    let pruneIndex = 0;
     let wake;
     let observedHeads = '';
     let sourceClockOffset = 0;
@@ -96,42 +98,49 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         if (!result.matchedCount) throw new SyncError('LEASE_LOST', 'Sync consumer lease expired before commit');
     };
 
-    const record = change => transaction(async (state, session) => {
-        const tokenId = createHash('sha256').update(JSON.stringify(change._id)).digest('hex');
-        if (await journal().findOne({ _id: tokenId }, { session })) return;
-        const dataset = DATASETS.find(name => COLLECTIONS[name] === change.ns?.coll);
-        const documentChange = ['insert', 'update', 'replace', 'delete'].includes(change.operationType);
-        const patch = { checkpoint: change._id, lastEventAt: new Date(), error: null };
-        const dependencies = ['dropDatabase', 'invalidate'].includes(change.operationType)
-            ? Object.values(DEPENDENCIES) : [DEPENDENCIES[change.ns?.coll], DEPENDENCIES[change.to?.coll]].filter(Boolean);
-        for (const name of dependencies) patch[`dependencies.${name}`] = randomUUID();
-        if (dataset && documentChange) {
-            const next = state.datasets[dataset].head + 1;
-            if (!Number.isSafeInteger(next)) throw new SyncError('SEQUENCE_EXHAUSTED', 'Sync sequence exhausted');
-            await journal().insertOne({ _id: tokenId, dataset, generation: state.datasets[dataset].generation,
-                sequence: next, recordId: change.documentKey._id, sourceToken: change._id,
-                clusterTime: change.clusterTime, capturedAt: new Date() }, { session });
-            patch[`datasets.${dataset}.head`] = next;
-            patch[`datasets.${dataset}.clusterTime`] = change.clusterTime;
-        } else if (!documentChange) {
-            const affected = ['dropDatabase', 'invalidate'].includes(change.operationType) ? DATASETS
-                : DATASETS.filter(name => [change.ns?.coll, change.to?.coll].includes(COLLECTIONS[name]));
-            for (const name of affected) patch[`datasets.${name}`] = {
-                generation: randomUUID(), head: 0, retainedAfter: 0, clusterTime: change.clusterTime,
-            };
-            logger.warn('[DataSync] Dataset generation reset', { reason: change.operationType, datasets: affected });
+    const record = changes => transaction(async (state, session) => {
+        const tokens = changes.map(change => createHash('sha256').update(JSON.stringify(change._id)).digest('hex'));
+        const existing = await journal().find({ _id: { $in: tokens } }, { session, projection: { _id: 1 } }).toArray();
+        const seen = new Set(existing.map(entry => entry._id));
+        const entries = [];
+        for (const [index, change] of changes.entries()) {
+            const tokenId = tokens[index];
+            if (seen.has(tokenId)) continue;
+            seen.add(tokenId);
+            const dataset = DATASETS.find(name => COLLECTIONS[name] === change.ns?.coll);
+            const documentChange = ['insert', 'update', 'replace', 'delete'].includes(change.operationType);
+            const dependencies = ['dropDatabase', 'invalidate'].includes(change.operationType)
+                ? Object.values(DEPENDENCIES) : [DEPENDENCIES[change.ns?.coll], DEPENDENCIES[change.to?.coll]].filter(Boolean);
+            for (const name of dependencies) state.dependencies[name] = randomUUID();
+            if (dataset && documentChange) {
+                const info = state.datasets[dataset];
+                if (!Number.isSafeInteger(info.head + 1)) throw new SyncError('SEQUENCE_EXHAUSTED', 'Sync sequence exhausted');
+                entries.push({ _id: tokenId, dataset, generation: info.generation,
+                    sequence: ++info.head, recordId: change.documentKey._id, sourceToken: change._id,
+                    clusterTime: change.clusterTime, capturedAt: new Date() });
+                info.clusterTime = change.clusterTime;
+            } else if (!documentChange) {
+                const affected = ['dropDatabase', 'invalidate'].includes(change.operationType) ? DATASETS
+                    : DATASETS.filter(name => [change.ns?.coll, change.to?.coll].includes(COLLECTIONS[name]));
+                for (const name of affected) state.datasets[name] = {
+                    generation: randomUUID(), head: 0, retainedAfter: 0, clusterTime: change.clusterTime,
+                };
+                logger.warn('[DataSync] Dataset generation reset', { reason: change.operationType, datasets: affected });
+            }
+            const userProjectionChanged = dependencies.includes('users') && (change.operationType !== 'update'
+                || [...Object.keys(change.updateDescription?.updatedFields || {}), ...(change.updateDescription?.removedFields || [])]
+                    .some(field => ['displayName', 'username'].includes(field)));
+            if (userProjectionChanged) {
+                const business = await getBusinessContext();
+                const referenced = await connection.db.collection(COLLECTIONS.timecards).findOne({ date: business.businessDate,
+                    'overtime.approvedBy': change.documentKey?._id || { $exists: true, $ne: null },
+                }, { session, projection: { _id: 1 } });
+                if (referenced) state.datasets.timecards = { generation: randomUUID(), head: 0, retainedAfter: 0, clusterTime: change.clusterTime };
+            }
         }
-        const userProjectionChanged = dependencies.includes('users') && (change.operationType !== 'update'
-            || [...Object.keys(change.updateDescription?.updatedFields || {}), ...(change.updateDescription?.removedFields || [])]
-                .some(field => ['displayName', 'username'].includes(field)));
-        if (userProjectionChanged) {
-            const business = await getBusinessContext();
-            const referenced = await connection.db.collection(COLLECTIONS.timecards).findOne({ date: business.businessDate,
-                'overtime.approvedBy': change.documentKey?._id || { $exists: true, $ne: null },
-            }, { session, projection: { _id: 1 } });
-            if (referenced) patch['datasets.timecards'] = { generation: randomUUID(), head: 0, retainedAfter: 0, clusterTime: change.clusterTime };
-        }
-        await writeState(patch, session);
+        if (entries.length) await journal().insertMany(entries, { session });
+        await writeState({ datasets: state.datasets, dependencies: state.dependencies,
+            checkpoint: changes.at(-1)._id, lastEventAt: new Date(), error: null }, session);
     });
 
     const resetHistory = () => transaction(async (state, session) => {
@@ -148,25 +157,32 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
 
     const prune = async () => {
         const cutoff = new Date(Date.now() - RETENTION_MS);
-        for (const dataset of DATASETS) await transaction(async (state, session) => {
-            const info = state.datasets[dataset];
-            const entries = await journal().find({ dataset, generation: info.generation,
-                sequence: { $gt: info.retainedAfter } }, { session }).sort({ sequence: 1 }).limit(PAGE_SIZE).toArray();
-            let boundary = info.retainedAfter;
-            for (const entry of entries) {
-                if (entry.capturedAt >= cutoff) break;
-                boundary = entry.sequence;
-            }
-            if (boundary === info.retainedAfter) return;
-            await writeState({ [`datasets.${dataset}.retainedAfter`]: boundary }, session);
-            await journal().deleteMany({ dataset, generation: info.generation, sequence: { $lte: boundary } }, { session });
-        });
+        if (pruneIndex < DATASETS.length) {
+            const dataset = DATASETS[pruneIndex];
+            await transaction(async (state, session) => {
+                const info = state.datasets[dataset];
+                const entries = await journal().find({ dataset, generation: info.generation,
+                    sequence: { $gt: info.retainedAfter } }, { session }).sort({ sequence: 1 }).limit(PAGE_SIZE).toArray();
+                let boundary = info.retainedAfter;
+                for (const entry of entries) {
+                    if (entry.capturedAt >= cutoff) break;
+                    boundary = entry.sequence;
+                }
+                if (boundary === info.retainedAfter) return;
+                await writeState({ [`datasets.${dataset}.retainedAfter`]: boundary }, session);
+                await journal().deleteMany({ dataset, generation: info.generation, sequence: { $lte: boundary } }, { session });
+            });
+            pruneIndex++;
+            return;
+        }
         // Old generations are never replayable; bounded cleanup does not change current boundaries.
         const state = await readState();
         const old = await journal().find({ capturedAt: { $lt: cutoff }, $nor: DATASETS.map(dataset => ({
             dataset, generation: state.datasets[dataset].generation,
         })) }).limit(PAGE_SIZE).project({ _id: 1 }).toArray();
         if (old.length) await journal().deleteMany({ _id: { $in: old.map(item => item._id) } });
+        pruneIndex = 0;
+        lastPrune = Date.now();
     };
 
     const wait = () => new Promise(resolve => {
@@ -193,7 +209,8 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                     stream = connection.db.watch([{ $match: { $or: [
                         { 'ns.coll': { $in: names } }, { 'to.coll': { $in: names } },
                         { operationType: { $in: ['dropDatabase', 'invalidate'] } },
-                    ] } }], { maxAwaitTimeMS: 1000, ...(lease.checkpoint
+                    ] } }, { $project: { fullDocument: 0, fullDocumentBeforeChange: 0 } }], {
+                        maxAwaitTimeMS: Math.min(250, Math.floor(leaseMs / 4)), batchSize: CAPTURE_BATCH_SIZE, ...(lease.checkpoint
                         ? { resumeAfter: lease.checkpoint } : { startAtOperationTime: lease.operationTime }) });
                 }
                 if (Date.now() - lastClockSample >= 1000) {
@@ -201,9 +218,16 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                     sourceClockOffset = hello.localTime ? hello.localTime.getTime() - Date.now() : 0;
                     lastClockSample = Date.now();
                 }
-                // tryNext and checkpoint persistence are deliberately sequential.
-                const change = await stream.tryNext();
-                if (change) await record(change);
+                // A bounded, ordered batch commits its journal entries and checkpoint atomically.
+                const batchStarted = Date.now();
+                const changes = [];
+                do {
+                    const change = await stream.tryNext();
+                    if (!change) break;
+                    changes.push(change);
+                } while (!stopped && changes.length < CAPTURE_BATCH_SIZE && Date.now() - batchStarted < 25);
+                if (changes.length) await record(changes);
+                const change = changes.at(-1);
                 const now = Date.now();
                 const sourceTime = change && (change.wallTime?.getTime() ?? change.clusterTime.getHighBitsUnsigned() * 1000);
                 const lagMs = change ? Math.max(0, now + sourceClockOffset - sourceTime) : 0;
@@ -213,7 +237,10 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                 const renewed = await states().updateOne(leaseFilter(), { $set: patch }, { writeConcern: { w: 'majority' } });
                 if (!renewed.matchedCount) throw new SyncError('LEASE_LOST', 'Sync consumer lease changed');
                 await observe();
-                if (Date.now() - lastPrune > 60000) { await prune(); lastPrune = Date.now(); }
+                if (changes.length && (now - batchStarted > 1000 || lagMs > leaseMs))
+                    logger.info('[DataSync] Capture batch', { events: changes.length, elapsedMs: now - batchStarted, lagMs });
+                // Interleave one bounded cleanup step with capture so a full retention sweep cannot starve the lease.
+                if (Date.now() - lastPrune > 60000) await prune();
             } catch (error) {
                 logger.error('[DataSync] Capture unavailable:', error.code, error.message);
                 if (lease) {
@@ -334,9 +361,12 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
             const ObjectId = connection.base.mongo.ObjectId;
             const records = await queryRecords(dataset, scope, afterId ? { _id: { $gt: new ObjectId(afterId) } } : {}, session, PAGE_SIZE + 1, business);
             const page = { dataset, baseline: cursor, upserts: [], afterId: null, hasMore: false };
+            let pageBytes = byteSize(page);
             for (const record of records.slice(0, PAGE_SIZE)) {
-                if (byteSize(record) + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
-                if (byteSize(page) + byteSize(record) + 256 > maxBytes) break;
+                const recordBytes = byteSize(record);
+                if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
+                if (pageBytes + recordBytes + 256 > maxBytes) break;
+                pageBytes += recordBytes + (page.upserts.length ? 1 : 0);
                 page.upserts.push(record);
             }
             page.hasMore = records.length > page.upserts.length;
@@ -363,16 +393,20 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
             const byId = new Map(records.map(record => [String(record._id), record]));
             const page = { dataset, fromCursor: cursor, nextCursor: cursor, targetCursor: target,
                 upserts: [], removes: [], hasMore: false };
+            let pageBytes = byteSize(page);
             const included = new Set();
             for (const entry of entries) {
                 const id = String(entry.recordId);
                 const record = byId.get(id);
                 if (!included.has(id)) {
-                    if (byteSize(record || id) + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
-                    if (byteSize(page) + byteSize(record || id) + 256 > maxBytes) break;
+                    const recordBytes = byteSize(record || id);
+                    if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
+                    if (pageBytes + recordBytes + 256 > maxBytes) break;
+                    pageBytes += recordBytes + ((record ? page.upserts : page.removes).length ? 1 : 0);
                     record ? page.upserts.push(record) : page.removes.push(id);
                     included.add(id);
                 }
+                pageBytes += String(entry.sequence).length - String(page.nextCursor.sequence).length;
                 page.nextCursor = { ...cursor, sequence: entry.sequence };
             }
             page.hasMore = page.nextCursor.sequence < target.sequence;
