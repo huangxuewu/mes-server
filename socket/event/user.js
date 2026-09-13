@@ -61,12 +61,12 @@ const normalizeUserPayload = (payload = {}) => {
 const validatePermissionCategory = async (payload, target) => {
     if ('permissionCategoryId' in payload) {
         const id = payload.permissionCategoryId;
-        if (id && (!ID_PATTERN.test(id) || !await db.permissionCategory.findById(id).lean())) throw new Error('Permission category not found');
-        if (id && 'permission' in payload) throw new Error('Configure permissions on the permission category');
+        if (id && (!ID_PATTERN.test(id) || !await db.permissionCategory.findById(id).lean())) throw new Error('Permission rule not found');
+        if (id && 'permission' in payload) throw new Error('Configure permissions on the permission rule');
         // Personal permissions must be explicitly supplied when leaving a category.
         if (id || !('permission' in payload)) payload.permission = {};
     } else if (target?.permissionCategoryId && 'permission' in payload) {
-        throw new Error('Configure permissions on the permission category');
+        throw new Error('Configure permissions on the permission rule');
     }
 };
 

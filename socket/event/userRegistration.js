@@ -39,8 +39,8 @@ module.exports = (socket, io) => {
                 if (Object.keys(payload).some(key => !['_id', 'role', 'permissionCategoryId'].includes(key))) throw new Error('Invalid provisioning fields');
                 if (!['Admin', 'Manager', 'User'].includes(payload.role)) throw new Error('Invalid account role');
                 const categoryId = payload.permissionCategoryId;
-                if (typeof categoryId !== 'string' || (categoryId && !/^[a-f\d]{24}$/i.test(categoryId))) throw new Error('Invalid permission category');
-                if (categoryId && !await db.permissionCategory.findById(categoryId).lean()) throw new Error('Permission category not found');
+                if (typeof categoryId !== 'string' || (categoryId && !/^[a-f\d]{24}$/i.test(categoryId))) throw new Error('Invalid permission rule');
+                if (categoryId && !await db.permissionCategory.findById(categoryId).lean()) throw new Error('Permission rule not found');
                 const session = await db.user.db.startSession();
                 let userId;
                 try {

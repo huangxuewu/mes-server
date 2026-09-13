@@ -18,8 +18,8 @@ module.exports = (socket, io) => {
                     return reply({ status: 'success', payload: categories });
                 }
                 if (!data || typeof data !== 'object' || Array.isArray(data)
-                    || Object.keys(data).some(key => !['name', 'permission', ...(event.endsWith(':update') ? ['_id'] : [])].includes(key))) throw new Error('Invalid permission category');
-                if (typeof data.name !== 'string' || !data.name.trim() || data.name.trim().length > 80) throw new Error('Permission category name is required (maximum 80 characters)');
+                    || Object.keys(data).some(key => !['name', 'permission', ...(event.endsWith(':update') ? ['_id'] : [])].includes(key))) throw new Error('Invalid permission rule');
+                if (typeof data.name !== 'string' || !data.name.trim() || data.name.trim().length > 80) throw new Error('Permission rule name is required (maximum 80 characters)');
                 if (!data.permission || typeof data.permission !== 'object' || Array.isArray(data.permission)) throw new Error('Invalid permissions');
                 for (const [action, resources] of Object.entries(data.permission)) {
                     if (!ACTIONS.includes(action) || !Array.isArray(resources) || resources.some(resource => typeof resource !== 'string' || !resource.trim())) throw new Error('Invalid permissions');
@@ -29,14 +29,14 @@ module.exports = (socket, io) => {
                 if (event === 'permissionCategory:create') {
                     category = await db.permissionCategory.create(update);
                 } else {
-                    if (typeof data._id !== 'string' || !/^[a-f0-9]{24}$/i.test(data._id)) throw new Error('Invalid permission category ID');
+                    if (typeof data._id !== 'string' || !/^[a-f0-9]{24}$/i.test(data._id)) throw new Error('Invalid permission rule ID');
                     category = await db.permissionCategory.findOneAndUpdate({ _id: data._id }, { $set: update }, { new: true, runValidators: true }).lean();
-                    if (!category) throw new Error('Permission category not found');
+                    if (!category) throw new Error('Permission rule not found');
                 }
                 await refreshPermissionCategories(io);
                 reply({ status: 'success', payload: category });
             } catch (error) {
-                reply({ status: 'error', message: error.code === 11000 ? 'A permission category with this name already exists' : error.message });
+                reply({ status: 'error', message: error.code === 11000 ? 'A permission rule with this name already exists' : error.message });
             }
         });
     }
