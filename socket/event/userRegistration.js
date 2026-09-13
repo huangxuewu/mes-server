@@ -1,6 +1,6 @@
 const { randomBytes, createHash } = require('node:crypto');
 const db = require('../../models');
-const { getActiveSessionUser, canAdministerAccounts } = require('../session');
+const { getActiveSessionUser, canAdministerAccounts, takePermissionRuleId } = require('../session');
 const { notifyRegistrationsChanged } = require('../userDelivery');
 const { claimUsername } = require('../../utils/userAccount');
 
@@ -36,11 +36,12 @@ module.exports = (socket, io) => {
                     await notifyRegistrationsChanged(io);
                     return reply({ status: 'success' });
                 }
-                if (Object.keys(payload).some(key => !['_id', 'role', 'permissionCategoryId'].includes(key))) throw new Error('Invalid provisioning fields');
+                takePermissionRuleId(payload);
+                if (Object.keys(payload).some(key => !['_id', 'role', 'permissionRuleId'].includes(key))) throw new Error('Invalid provisioning fields');
                 if (!['Admin', 'Manager', 'User'].includes(payload.role)) throw new Error('Invalid account role');
-                const categoryId = payload.permissionCategoryId;
-                if (typeof categoryId !== 'string' || (categoryId && !/^[a-f\d]{24}$/i.test(categoryId))) throw new Error('Invalid permission category');
-                if (categoryId && !await db.permissionCategory.findById(categoryId).lean()) throw new Error('Permission category not found');
+                const ruleId = payload.permissionRuleId;
+                if (typeof ruleId !== 'string' || (ruleId && !/^[a-f\d]{24}$/i.test(ruleId))) throw new Error('Invalid permission rule');
+                if (ruleId && !await db.permissionRule.findById(ruleId).lean()) throw new Error('Permission rule not found');
                 const session = await db.user.db.startSession();
                 let userId;
                 try {
@@ -51,7 +52,7 @@ module.exports = (socket, io) => {
                         const [user] = await db.user.create([{
                             ...username, displayName: registration.displayName, email: registration.email,
                             portrait: registration.portrait, password: registration.password,
-                            role: payload.role, permissionCategoryId: categoryId, permission: {}, status: 'Active',
+                            role: payload.role, permissionRuleId: ruleId, permission: {}, status: 'Active',
                         }], { session });
                         userId = user._id;
                         await db.userRegistration.updateOne({ _id: registration._id, status: 'Submitted' }, {

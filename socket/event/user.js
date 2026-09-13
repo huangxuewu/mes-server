@@ -1,7 +1,7 @@
 const md5 = require("md5");
 const db = require("../../models");
 const { claimUsername } = require('../../utils/userAccount');
-const { getActiveSessionUser, publicUser, privateUser, canAdministerAccounts, canManageAccount, resolveUserPermissions } = require('../session');
+const { getActiveSessionUser, publicUser, privateUser, canAdministerAccounts, canManageAccount, resolveUserPermissions, permissionRuleIdOf, takePermissionRuleId } = require('../session');
 
 // Password hashing salt (must match frontend)
 const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
@@ -9,7 +9,7 @@ const PASSWORD_SALT = 'MANUFACTURING_EXECUTION_SYSTEM';
 const MD5_PATTERN = /^[a-f0-9]{32}$/i;
 const ID_PATTERN = /^[a-f0-9]{24}$/i;
 const PROFILE_FIELDS = ['displayName', 'portrait', 'phone', 'email', 'signatures', 'defaultSignatureId'];
-const ACCOUNT_FIELDS = [...PROFILE_FIELDS, 'username', 'password', 'confirmPassword', 'role', 'status', 'permission', 'permissionCategoryId', 'group'];
+const ACCOUNT_FIELDS = [...PROFILE_FIELDS, 'username', 'password', 'confirmPassword', 'role', 'status', 'permission', 'permissionRuleId', 'group'];
 const PERMISSION_FIELDS = ['module', 'access', 'create', 'view', 'update', 'modify', 'edit', 'delete', 'approve', 'override', 'export', 'audit'];
 
 const validatePayload = (data, fields) => {
@@ -58,15 +58,15 @@ const normalizeUserPayload = (payload = {}) => {
     return normalizedPayload;
 };
 
-const validatePermissionCategory = async (payload, target) => {
-    if ('permissionCategoryId' in payload) {
-        const id = payload.permissionCategoryId;
-        if (id && (!ID_PATTERN.test(id) || !await db.permissionCategory.findById(id).lean())) throw new Error('Permission category not found');
-        if (id && 'permission' in payload) throw new Error('Configure permissions on the permission category');
-        // Personal permissions must be explicitly supplied when leaving a category.
+const validatePermissionRule = async (payload, target) => {
+    takePermissionRuleId(payload);
+    if ('permissionRuleId' in payload) {
+        const id = payload.permissionRuleId;
+        if (id && (!ID_PATTERN.test(id) || !await db.permissionRule.findById(id).lean())) throw new Error('Permission rule not found');
+        if (id && 'permission' in payload) throw new Error('Configure permissions on the permission rule');
         if (id || !('permission' in payload)) payload.permission = {};
-    } else if (target?.permissionCategoryId && 'permission' in payload) {
-        throw new Error('Configure permissions on the permission category');
+    } else if (permissionRuleIdOf(target) && 'permission' in payload) {
+        throw new Error('Configure permissions on the permission rule');
     }
 };
 
@@ -80,9 +80,10 @@ module.exports = (socket, io) => {
         try {
             const actor = await getActiveSessionUser(socket);
             if (!canAdministerAccounts(actor)) throw new Error('Account administration requires Admin access');
+            takePermissionRuleId(data);
             validatePayload(data, ACCOUNT_FIELDS);
             if (!data.username?.trim() || !data.password) throw new Error('Username and password are required');
-            await validatePermissionCategory(data);
+            await validatePermissionRule(data);
             const username = await claimUsername(db.user, data.username);
             await db.user.create({ ...normalizeUserPayload(data), ...username });
             callback({ status: "success", message: "User created successfully" });
@@ -96,12 +97,13 @@ module.exports = (socket, io) => {
             const actor = await getActiveSessionUser(socket);
             const isSelf = String(actor._id) === payload?._id;
             if (!canAdministerAccounts(actor) && !isSelf) throw new Error('Account administration requires Admin access');
+            takePermissionRuleId(payload);
             validatePayload(payload, ['_id', ...(canAdministerAccounts(actor) ? ACCOUNT_FIELDS : PROFILE_FIELDS)]);
             if (!ID_PATTERN.test(payload._id || '')) throw new Error('Invalid account ID');
             const target = await db.user.findById(payload._id).lean();
             if (!target) throw new Error('Account not found');
             if (target.role === 'System') throw new Error('System records are managed by MES');
-            await validatePermissionCategory(payload, target);
+            await validatePermissionRule(payload, target);
             const { _id, ...update } = payload;
             if ('username' in update) Object.assign(update, await claimUsername(db.user, update.username, _id));
             const filter = { _id, role: { $ne: 'System' } };
