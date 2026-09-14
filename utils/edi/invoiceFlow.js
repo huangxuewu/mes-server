@@ -104,7 +104,13 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         const message = state.ready ? buildInvoice(po, state, invoiceDate) : null;
         const preview = invoice || (state.transactionId ? null : { poNumber: state.poNumber, invoiceNumber: state.invoiceNumber,
             totalCents: state.totalCents, items: state.items, buyer: state.buyer, invoiceDate });
-        if (preview) preview.items = preview.items.map(item => ({ ...item, lineTotalCents: amountCents([item]) }));
+        if (preview) {
+            const descriptions = new Map((po.items || []).map(item => [String(item.external_id || '').replace(/[^0-9A-Za-z]/g, ''), item.item_description]));
+            preview.items = preview.items.map(item => ({ ...item,
+                description: item.description?.trim() || descriptions.get(String(item.externalId || '').replace(/[^0-9A-Za-z]/g, '')) || '',
+                lineTotalCents: amountCents([item]),
+            }));
+        }
         return { ...state, invoice: state.invoice ? { id: state.invoice.id, validation: state.invoice.validation_status,
             delivery: state.invoice.delivery_status, acknowledgment: state.invoice.acknowledgment_status } : null,
             preview, json, bolUrls: bolUrls(mes), timeline: timeline(po, mes), inQueue: state.ready || Boolean(state.transactionId || record.submissionStartedAt),

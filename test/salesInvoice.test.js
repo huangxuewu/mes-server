@@ -197,6 +197,37 @@ test('ERP review exposes source defaults without changing the submission fingerp
     assert.equal(state.calls[0].query, INVOICE_QUERY);
 });
 
+test('sent invoice previews fill missing product names from the PO by DPCI on get and refresh', async () => {
+    const state = flowFixture();
+    const set = state.invoice.document.json_data.transactionSets[0];
+    const secondLine = structuredClone(set.IT1_loop[0]);
+    Object.assign(secondLine.baselineItemDataInvoice[0], { assignedIdentification: '2', productServiceID1: '062010002', quantityInvoiced: '3', unitPrice: '2.50' });
+    set.IT1_loop.push(secondLine);
+    set.totalMonetaryValueSummary[0].amount = '12900';
+    state.po.items.unshift({ external_id: '062-01-0002', item_description: 'Woven pillow' });
+    state.po.edi_transaction.push(state.invoice);
+    const originalJson = structuredClone(state.invoice.document.json_data);
+    for (const action of ['get', 'refresh']) {
+        const result = await state.flow[action](state.input);
+        assert.deepEqual(result.preview.items.map(item => item.description), ['Cotton bedding set', 'Woven pillow']);
+        assert.deepEqual(result.preview.items.map(item => item.lineTotalCents), [12150, 750]);
+        assert.equal(result.preview.totalCents, 12900);
+        assert.deepEqual(result.json, originalJson);
+    }
+    assert.equal(state.posts(), 0);
+});
+
+test('sent invoice descriptions take precedence and unmatched products do not borrow a PO name', async () => {
+    const state = flowFixture();
+    const line = state.invoice.document.json_data.transactionSets[0].IT1_loop[0];
+    line.PID_loop = [{ productItemDescription: [{ description: 'Invoice product description' }] }];
+    state.po.edi_transaction.push(state.invoice);
+    assert.equal((await state.flow.get(state.input)).preview.items[0].description, 'Invoice product description');
+    delete line.PID_loop;
+    line.baselineItemDataInvoice[0].productServiceID1 = '062019999';
+    assert.equal((await state.flow.get(state.input)).preview.items[0].description, '');
+});
+
 test('concurrent submissions claim the PO once; a later retry reuses the ERP invoice', async () => {
     const state = flowFixture();
     await Promise.allSettled([state.flow.submit(state.input, 'user1'), state.flow.submit(state.input, 'user2')]);
