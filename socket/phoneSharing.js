@@ -23,7 +23,7 @@ const createPhoneSharing = ({ getOwner, active, publish, now = Date.now,
     renderQr = url => require('qrcode').toDataURL(url, { width: 320, margin: 4, errorCorrectionLevel: 'M' }) }) => {
     const sessions = new Map();
     const byOwner = new Map();
-    const state = session => ({ id: session.id, status: session.status, peerId: session.peerId,
+    const state = session => ({ id: session.id, status: session.status, peerId: session.peerId, deviceName: session.deviceName || '',
         createdAt: session.createdAt, expiresAt: session.expiresAt, idleExpiresAt: session.idleExpiresAt });
     const notify = session => {
         session.owner.socket.emit('sharing:phone', state(session));
@@ -103,6 +103,10 @@ const createPhoneSharing = ({ getOwner, active, publish, now = Date.now,
         if (input.id && !session.key) throw new Error('phoneExpired');
         if (session.socket?.connected && session.socket !== socket) throw new Error('phoneInUse');
         const first = !session.key;
+        if (first) {
+            const userAgent = String(socket.handshake?.headers?.['user-agent'] || '').slice(0, 1024);
+            session.deviceName = [/iPad/i, /iPhone/i, /Android/i].find(pattern => pattern.test(userAgent))?.source || '';
+        }
         session.key = input.key; session.socket = socket; session.status = 'connected';
         socket.data.phoneSessionId = session.id;
         if (first) session.idleExpiresAt = Math.min(session.expiresAt, now() + IDLE_MS);
@@ -124,7 +128,7 @@ const createPhoneSharing = ({ getOwner, active, publish, now = Date.now,
         const session = sessions.get(byOwner.get(socket.id));
         if (!session || !session.socket?.connected || !sessions.has(session.id)) return null;
         return { id: session.peerId, userId: session.peerId, deviceId: session.id, name: session.owner.user.displayName || session.owner.user.username,
-            device: 'Phone', phone: true, region: session.owner.region, network: session.owner.socket.id };
+            device: session.deviceName || 'Phone', phone: true, region: session.owner.region, network: session.owner.socket.id };
     };
     const validateSignal = (session, input, side) => {
         if (!['request', 'offer', 'answer', 'candidate', 'close'].includes(input?.type) || JSON.stringify(input).length > 65536) throw new Error('Invalid signal');

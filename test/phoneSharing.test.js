@@ -17,6 +17,21 @@ const fixture = options => {
     return { phone, desktop, owner, owners, socket, messages, publications, create, claim, advance: ms => { time += ms; } };
 };
 
+test('pairing publishes the browser device family and retains it on reconnect', async () => {
+    for (const [agent, expected] of [['Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X)', 'iPhone'], ['Mozilla/5.0 (Linux; Android 10; K)', 'Android'], ['Mozilla/5.0 (iPad; CPU OS 18_6)', 'iPad'], ['', '']]) {
+        const env = fixture(), link = await env.create(), guest = env.socket('guest');
+        guest.handshake = { headers: { 'user-agent': agent } };
+        env.phone.claim(guest, { invite: new URL(link.url).hash.slice(1), key: 'a'.repeat(64) });
+        env.phone.connected(guest);
+        assert.equal(env.messages.findLast(message => message.event === 'sharing:phone').data.deviceName, expected);
+        assert.equal(env.phone.peer(env.desktop).device, expected || 'Phone');
+        guest.connected = false; env.phone.disconnected(guest);
+        const resumed = env.socket('resumed');
+        env.phone.claim(resumed, { id: link.id, key: 'a'.repeat(64) }); env.phone.connected(resumed);
+        assert.equal(env.phone.peer(env.desktop).device, expected || 'Phone');
+    }
+});
+
 test('creation requires active sharing and configured HTTPS; reopening reuses the QR including concurrent creation', async () => {
     const env = fixture();
     await assert.rejects(env.phone.create(env.socket('outsider')), /phoneUnavailable/);
