@@ -171,3 +171,38 @@ test('a partially missing merged BOL remains unready instead of signing a remain
     const t = setup(); t.records()[1].loads[0].bol.rawData = null;
     await assert.rejects(t.lookup(), /bolNotReady/); assert.equal(t.writes(), 0);
 });
+
+test('explicit deletion releases signed merged BOLs so a replacement can be signed', async () => {
+    const t = setup();
+    const found = await t.lookup();
+    await t.access.sign(t.device, await t.input(found.grant));
+    for (const record of t.records()) {
+        record.loads[0].status = 'Completed';
+        Object.assign(record.loads[0].bol, { url: 'saved.pdf', uploadedAt: '2026-09-14' });
+    }
+    await saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': null, 'bol.url': null });
+    for (const record of t.records()) {
+        assert.deepEqual(record.loads[0].bol, { number, rawData: null, url: null, uploadedAt: null });
+        assert.equal(record.loads[0].status, 'Picked Up');
+    }
+    await assert.rejects(t.lookup(), /bolNotFound/);
+    const replacement = { ...t.raw, shipper_signature: '', carrier_name: 'Replacement carrier' };
+    await saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': replacement });
+    const next = await t.lookup();
+    await t.access.sign(t.device, await t.input(next.grant));
+    assert.ok(t.records().every(record => record.loads[0].bol.rawData.driver_signature));
+});
+
+test('single BOL deletion preserves other shipments and failed merged deletion rolls back', async () => {
+    const t = setup();
+    const found = await t.lookup();
+    await t.access.sign(t.device, await t.input(found.grant));
+    const before = structuredClone(t.records());
+    t.failWrite(t.writes() + 2);
+    await assert.rejects(saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': null, 'bol.url': null }), /simulated/);
+    assert.deepEqual(t.records(), before);
+    await saveBolDraft(t.models.outbound, { shipmentId: 'shipment-1' }, { 'bol.rawData': null, 'bol.url': null });
+    assert.equal(t.records()[0].loads[0].bol.rawData, null);
+    assert.equal(t.records()[0].loads[0].status, 'Loading');
+    assert.deepEqual(t.records()[1], before[1]);
+});

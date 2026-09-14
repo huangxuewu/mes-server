@@ -10,12 +10,19 @@ module.exports = async (model, selector, data) => {
                 .map(load => ({ id: record._id, load })));
             if (!targets.length) throw new Error('signaturePad.bolChanged');
             const draft = (Object.hasOwn(data, 'bol') ? data.bol?.rawData : data['bol.rawData']) || {};
+            const deleting = !Object.hasOwn(data, 'bol') && data['bol.rawData'] === null && data['bol.url'] === null;
             for (const { id, load } of targets) {
                 const previous = load.bol?.rawData || {};
-                if (previous.driver_signature && previous.driver_signature !== draft.driver_signature) throw new Error('signaturePad.alreadySigned');
-                if (load.status === 'Completed' && (previous.driver_signature || '') !== (draft.driver_signature || '')) throw new Error('signaturePad.bolCompleted');
-                if ((previous.driver_signature_submission_id || '') !== (draft.driver_signature_submission_id || '')) throw new Error('signaturePad.bolChanged');
+                if (!deleting) {
+                    if (previous.driver_signature && previous.driver_signature !== draft.driver_signature) throw new Error('signaturePad.alreadySigned');
+                    if (load.status === 'Completed' && (previous.driver_signature || '') !== (draft.driver_signature || '')) throw new Error('signaturePad.bolCompleted');
+                    if ((previous.driver_signature_submission_id || '') !== (draft.driver_signature_submission_id || '')) throw new Error('signaturePad.bolChanged');
+                }
                 const update = Object.fromEntries(Object.entries(data).map(([key, value]) => [`loads.$[target].${key}`, value]));
+                if (deleting) {
+                    update['loads.$[target].bol.uploadedAt'] = null;
+                    if (load.status === 'Completed') update['loads.$[target].status'] = 'Picked Up';
+                }
                 saved = await model.findOneAndUpdate({ _id: id }, { $set: update },
                     { arrayFilters: [{ 'target.shipmentId': load.shipmentId }], session, new: true });
             }
