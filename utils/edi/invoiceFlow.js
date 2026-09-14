@@ -3,11 +3,38 @@ const { CREATE_INVOICE, domestic, isPoLoaded, inspectInvoice, invoiceReview, bui
 const { createOrderfulClient, readOrderfulPo } = require('./orderful');
 const { readInvoice, createSalesInvoicePdf } = require('../salesInvoicePdf');
 
-const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction = createOrderfulClient({ db }) }) => {
-    const isPending = (invoice, record = {}) => Boolean((invoice?.id || record.transactionId || record.submissionStartedAt)
-        && (record.statusSource !== 'orderful' && !invoice || !['ACCEPTED', 'REJECTED', 'ACCEPTEDWITHERRORS'].includes(invoice?.acknowledgment_status || record.acknowledgmentStatus)
-        && (invoice?.validation_status || record.validationStatus) !== 'INVALID'
-        && (invoice?.delivery_status || record.deliveryStatus) !== 'FAILED'));
+const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction = createOrderfulClient({ db }),
+    getTimeZone = () => require('../dayjs').getFactoryTimeZone() }) => {
+    const retainPoGroups = async rows => {
+        if (!rows.length) return rows;
+        const groups = new Map();
+        for (const row of rows) {
+            const master = row.poNumber.split('-')[0];
+            if (!groups.has(master)) groups.set(master, new Map());
+            groups.get(master).set(row.poNumber, row);
+        }
+        // Compare MES calendar dates so the full following day includes DST changes.
+        const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: await getTimeZone() });
+        const yesterday = new Date(`${localDate.format(new Date())}T00:00:00Z`);
+        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+        const cutoff = yesterday.toISOString().slice(0, 10);
+        const expired = new Set();
+        for (const [master, group] of groups) {
+            const completed = [...group.values()].every(row => row?.acknowledgment === 'ACCEPTED' && !row.error
+                && row.timeline?.invoiceAcceptedAt && Number.isFinite(+new Date(row.timeline.invoiceAcceptedAt))
+                && localDate.format(new Date(row.timeline.invoiceAcceptedAt)) < cutoff);
+            if (completed) expired.add(master);
+        }
+        if (!expired.size) return rows;
+        const siblings = await db.outbound.find({ client: 'Target', poNumber: { $in: [...expired]
+            .map(master => new RegExp(`^${master.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-|$)`)) } }, { poNumber: 1, 'loads.status': 1 }).lean();
+        for (const sibling of siblings) {
+            if (sibling.loads?.length && sibling.loads.every(load => ['Cancelled', 'Canceled'].includes(load.status))) continue;
+            const master = sibling.poNumber.split('-')[0];
+            if (groups.has(master) && !groups.get(master).has(sibling.poNumber)) expired.delete(master);
+        }
+        return rows.filter(row => !expired.has(row.poNumber.split('-')[0]));
+    };
     const bolUrls = mes => Object.fromEntries((mes.loads || []).filter(load => load.loadNumber && load.bol?.url)
         .map(load => [load.loadNumber, load.bol.url]));
     const latestTime = values => {
@@ -77,7 +104,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         if (preview) preview.items = preview.items.map(item => ({ ...item, lineTotalCents: amountCents([item]) }));
         return { ...state, invoice: state.invoice ? { id: state.invoice.id, validation: state.invoice.validation_status,
             delivery: state.invoice.delivery_status, acknowledgment: state.invoice.acknowledgment_status } : null,
-            preview, json, bolUrls: bolUrls(mes), timeline: timeline(po, mes), inQueue: state.ready || isPending(state.invoice, record),
+            preview, json, bolUrls: bolUrls(mes), timeline: timeline(po, mes), inQueue: state.ready || Boolean(state.transactionId || record.submissionStartedAt),
             invoiceDate, fingerprint: message ? invoiceFingerprint(message) : '',
             erpUrl: `${client.config.webBaseUrl.replace(/\/$/, '')}/shipping/invoice/${state.transactionId ? 'detail' : 'send'}/${encodeURIComponent(po.po_number)}`,
             orderfulUrl: state.transactionId ? `https://ui.orderful.com/transactions/${encodeURIComponent(state.transactionId)}` : '',
@@ -104,11 +131,15 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         const client = suppliedClient || await getClient();
         const integrationKey = createHash('sha256').update(`${client.config.baseUrl}:${client.headers['x-tenant-id'] || ''}:OFDHTGTDMS`).digest('hex');
         const records = await db.salesInvoice.find({ integrationKey }, { poNumber: 1, transactionId: 1, submissionStartedAt: 1,
-            invoiceNumber: 1, validationStatus: 1, deliveryStatus: 1, acknowledgmentStatus: 1, statusSource: 1, pdfPath: 1 }).lean();
+            invoiceNumber: 1, validationStatus: 1, deliveryStatus: 1, acknowledgmentStatus: 1, statusSource: 1, acceptedAt: 1, pdfPath: 1 }).lean();
         const submitted = records.filter(record => record.transactionId || record.submissionStartedAt);
+        const submittedMasters = new Set(submitted.map(record => record.poNumber.split('-')[0]));
+        const retained = await retainPoGroups(submitted.map(record => ({ poNumber: record.poNumber,
+            acknowledgment: record.statusSource === 'orderful' ? record.acknowledgmentStatus : '',
+            timeline: { invoiceAcceptedAt: record.acceptedAt } })));
         const query = { client: 'Target', loads: { $elemMatch: { status: 'Completed', 'checklist.noticed': { $exists: true } } },
             $or: [
-                { poNumber: { $in: submitted.filter(record => isPending(null, record)).map(record => record.poNumber) } },
+                { poNumber: { $in: retained.map(record => record.poNumber) } },
                 { poNumber: { $nin: submitted.map(record => record.poNumber) }, loads: { $not: { $elemMatch: {
                     status: { $nin: ['Completed', 'Cancelled', 'Canceled'] },
                 } } } },
@@ -133,20 +164,21 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
                     const matches = ordersByNumber.get(mes.poNumber) || [];
                     if (matches.length !== 1) throw new Error('ERP purchase order was not found uniquely');
                     // ERP invoice presence identifies pre-feature history; it is not used as an acknowledgment.
-                    if (!record.transactionId && !record.submissionStartedAt && (matches[0].edi_transaction || []).some(transaction => domestic(transaction) && transaction.transaction_type === '810')) return null;
+                    if (!record.transactionId && !record.submissionStartedAt && !submittedMasters.has(mes.poNumber.split('-')[0])
+                        && (matches[0].edi_transaction || []).some(transaction => domestic(transaction) && transaction.transaction_type === '810')) return null;
                     const po = await readOrderfulPo(matches[0], mes, record, getOrderfulTransaction).catch(error => { verificationErrors.push(error); throw error; });
                     const state = inspectInvoice(po, mes, record);
-                    if (!state.ready && !isPending(state.invoice, record)) return null;
+                    if (!state.ready && !state.transactionId && !record.submissionStartedAt) return null;
                     return { poNumber: state.poNumber, invoiceNumber: state.invoiceNumber, totalCents: state.totalCents, ready: state.ready,
                         asnAccepted: state.asnAccepted, reasons: state.reasons, pdfPath: state.pdfPath, transactionId: state.transactionId,
                         acknowledgment: state.invoice?.acknowledgment_status || '', timeline: timeline(po, mes), ...shipment };
-                } catch (error) { return isPending(null, record) ? { poNumber: mes.poNumber, ...shipment, ready: false,
+                } catch (error) { return record.transactionId || record.submissionStartedAt ? { poNumber: mes.poNumber, ...shipment, ready: false,
                     transactionId: record.transactionId, invoiceNumber: record.invoiceNumber, pdfPath: record.pdfPath,
                     acknowledgment: '', timeline: timeline(null, mes), error: error.message } : null; }
             })));
         }
         if (verificationErrors.length) throw new Error(`Orderful verification failed: ${verificationErrors[0].message}`);
-        return { rows: rows.filter(Boolean) };
+        return { rows: await retainPoGroups(rows.filter(Boolean)) };
     };
 
     const syncList = async () => {
@@ -182,7 +214,6 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
             const row = record.queueRow;
             if (!row || !record.queueCheckedAt) continue;
             const submitted = record.transactionId || record.submissionStartedAt;
-            if (submitted && !isPending(null, record)) continue;
             const verified = record.statusSource === 'orderful';
             rows.push({ ...row, checkedAt: record.queueCheckedAt,
                 ready: row.ready && !submitted,
@@ -194,7 +225,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
                         invoiceAcceptedAt: verified ? record.acceptedAt : null } } : {}),
             });
         }
-        return { rows };
+        return { rows: await retainPoGroups(rows) };
     };
 
     const submit = async ({ poNumber, invoiceDate, fingerprint, review, reviewFingerprint }, actor, authorize = async () => {}) => {

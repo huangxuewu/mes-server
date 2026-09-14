@@ -1,7 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { inspectInvoice, buildInvoice, invoiceFingerprint, amountCents, INVOICE_QUERY, CREATE_INVOICE } = require('../utils/edi/invoice');
-const { createInvoiceFlow } = require('../utils/edi/invoiceFlow');
+const { createInvoiceFlow: createFlow } = require('../utils/edi/invoiceFlow');
+const createInvoiceFlow = options => createFlow({ getTimeZone: async () => 'America/New_York', ...options });
 const { readInvoice, createSalesInvoicePdf } = require('../utils/salesInvoicePdf');
 
 const fixture = () => {
@@ -198,6 +199,7 @@ test('invoice list filters completed Target orders with a noticed field before E
     const chain = { sort: () => chain, lean: async () => [] };
     const flow = createInvoiceFlow({ db: { outbound: { find: (query, projection) => {
         assert.equal(query.client, 'Target');
+        if (query.poNumber) return chain;
         assert.deepEqual(query.loads, { $elemMatch: { status: 'Completed', 'checklist.noticed': { $exists: true } } });
         assert.deepEqual(query.$or[0].poNumber.$in, ['PENDING']);
         assert.deepEqual(query.$or[1].poNumber.$nin, ['PENDING', 'FINISHED']);
@@ -209,7 +211,7 @@ test('invoice list filters completed Target orders with a noticed field before E
         assert.equal(projection.submittedMessage, undefined);
         return { lean: async () => [
             { poNumber: 'PENDING', transactionId: '10', acknowledgmentStatus: 'NOT_ACKNOWLEDGED' },
-            { poNumber: 'FINISHED', transactionId: '11', acknowledgmentStatus: 'ACCEPTED', statusSource: 'orderful' },
+            { poNumber: 'FINISHED', transactionId: '11', acknowledgmentStatus: 'ACCEPTED', statusSource: 'orderful', acceptedAt: '2000-01-01T12:00:00Z' },
         ] };
     } } }, getClient: async () => ({ config: { baseUrl: 'https://erp.example' }, headers: {},
         graphql: async () => { throw new Error('No ERP lookup needed'); } }) });
@@ -406,7 +408,8 @@ test('an eight-line invoice fits one page without footer-created blank pages', a
     assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length, 1);
 });
 
-test('invoice queue includes ready orders and unresolved submissions, and excludes other history', async () => {
+test('invoice queue retains submitted, accepted and failed invoices for follow-up', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-13T18:00:00Z') });
     for (const scenario of ['ready', 'asnPending', 'quantityMismatch', 'pendingInvoice', 'savedPendingInvoice', 'accepted', 'rejected', 'invalid', 'failed', 'unknownSubmission']) {
         const { po, mes, invoice } = fixture();
         mes.loads[0].checklist.noticed = { status: true };
@@ -432,7 +435,7 @@ test('invoice queue includes ready orders and unresolved submissions, and exclud
             getClient: async () => ({ config: { baseUrl: 'https://erp.example', webBaseUrl: 'https://erp.example' }, headers: {},
                 graphql: async () => ({ po: { edges: [{ node: po }], pageInfo: { hasNextPage: false } } }) }),
         });
-        const expected = ['ready', 'pendingInvoice', 'savedPendingInvoice', 'unknownSubmission'].includes(scenario);
+        const expected = !['asnPending', 'quantityMismatch'].includes(scenario);
         assert.equal((await flow.verifyQueue()).rows.length, Number(expected), scenario);
         assert.equal((await flow.get({ poNumber: po.po_number, invoiceDate: '2026-09-12' })).inQueue, expected, scenario);
     }
@@ -627,10 +630,10 @@ test('cached list makes no ERP or Orderful calls and durable submissions overrid
     }));
     Object.assign(records[1], { transactionId: '100', statusSource: 'orderful', acknowledgmentStatus: 'NOT_ACKNOWLEDGED', submittedAt: '2026-09-12T11:00:00Z' });
     Object.assign(records[2], { submissionStartedAt: new Date(), acknowledgmentStatus: 'ACCEPTED' });
-    Object.assign(records[3], { transactionId: '101', statusSource: 'orderful', acknowledgmentStatus: 'ACCEPTED' });
+    Object.assign(records[3], { transactionId: '101', statusSource: 'orderful', acknowledgmentStatus: 'ACCEPTED', acceptedAt: '2000-01-01T12:00:00Z' });
     Object.assign(records[4], { transactionId: '102', statusSource: 'orderful', acknowledgmentStatus: 'REJECTED' });
     const chain = { sort: () => chain, lean: async () => records };
-    const flow = createInvoiceFlow({ db: { salesInvoice: { find: (query, projection) => {
+    const flow = createInvoiceFlow({ db: { outbound: { find: () => ({ lean: async () => [] }) }, salesInvoice: { find: (query, projection) => {
         assert.equal(query.integrationKey.length, 64);
         assert.equal(projection.transactionJson, undefined);
         return chain;
@@ -638,13 +641,99 @@ test('cached list makes no ERP or Orderful calls and durable submissions overrid
         graphql: () => { throw new Error('List must not call ERP'); } }),
         getOrderfulTransaction: () => { throw new Error('List must not call Orderful'); } });
     const result = await flow.list();
-    assert.deepEqual(result.rows.map(row => row.poNumber), ['READY', 'PENDING', 'UNKNOWN']);
+    assert.deepEqual(result.rows.map(row => row.poNumber), ['READY', 'PENDING', 'UNKNOWN', 'REJECTED']);
     assert.equal(result.rows[0].ready, true);
     assert.equal(result.rows[1].ready, false);
     assert.equal(result.rows[1].timeline.invoicedAt, records[1].submittedAt);
     assert.equal(result.rows[2].ready, false);
     assert.equal(result.rows[2].acknowledgment, '');
     assert.equal(result.rows[2].timeline.invoicedAt, null);
+});
+
+test('cached list expires master POs together after the full day following their last acceptance', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-14T04:59:59Z') });
+    let timeZone = 'America/New_York';
+    const records = ['10001234567-0551', '10001234567-0554'].map((poNumber, index) => ({
+        poNumber, transactionId: String(200 + index), statusSource: 'orderful', acknowledgmentStatus: 'ACCEPTED',
+        acceptedAt: index ? '2026-09-13T23:00:00Z' : '2026-09-10T12:00:00Z', queueCheckedAt: new Date(),
+        queueRow: { poNumber, ready: false, timeline: {}, acknowledgment: 'NOT_ACKNOWLEDGED' },
+    }));
+    const siblings = records.map(record => ({ poNumber: record.poNumber, loads: [{ status: 'Completed' }] }));
+    const chain = { sort: () => chain, lean: async () => records };
+    const flow = createInvoiceFlow({ getTimeZone: async () => timeZone, db: { salesInvoice: { find: () => chain },
+        outbound: { find: query => {
+            assert.equal(query.client, 'Target');
+            assert.equal(query.poNumber.$in[0].test('10001234567-9999'), true);
+            assert.equal(query.poNumber.$in[0].test('100012345678-9999'), false);
+            return { lean: async () => siblings };
+        } } }, getClient: async () => ({ config: { baseUrl: 'https://erp.example' }, headers: {} }) });
+    assert.equal((await flow.list()).rows.length, 2);
+    t.mock.timers.setTime(+new Date('2026-09-15T03:59:59Z'));
+    assert.equal((await flow.list()).rows.length, 2, 'keep through September 14 in the MES time zone');
+    t.mock.timers.setTime(+new Date('2026-09-15T04:00:00Z'));
+    assert.equal((await flow.list()).rows.length, 0, 'expire together at midnight September 15');
+
+    for (const status of ['NOT_ACKNOWLEDGED', 'REJECTED', 'ACCEPTEDWITHERRORS', '']) {
+        records[1].acknowledgmentStatus = status;
+        assert.equal((await flow.list()).rows.length, 2, status || 'unknown');
+    }
+    records[1].acknowledgmentStatus = 'ACCEPTED';
+    for (const acceptedAt of [null, 'invalid']) {
+        records[1].acceptedAt = acceptedAt;
+        assert.equal((await flow.list()).rows.length, 2, 'missing acceptance evidence cannot expire a group');
+    }
+    records[1].acceptedAt = '2026-09-13T23:00:00Z';
+    records[1].statusSource = 'erp';
+    assert.equal((await flow.list()).rows.length, 2, 'only Orderful acceptance counts');
+    records[1].statusSource = 'orderful';
+    siblings.push({ poNumber: '10001234567-3806', loads: [{ status: 'Loading' }] });
+    assert.equal((await flow.list()).rows.length, 2, 'an unsubmitted destination outside the queue keeps accepted siblings');
+    siblings[2].loads[0].status = 'Cancelled';
+    assert.equal((await flow.list()).rows.length, 0, 'cancelled loads do not require an invoice');
+
+    siblings.pop();
+    for (const [zone, acceptedAt, cutoff] of [
+        ['America/New_York', '2026-09-13T03:59:00Z', '2026-09-14T04:00:00Z'],
+        ['America/New_York', '2026-03-08T06:30:00Z', '2026-03-10T04:00:00Z'],
+        ['America/New_York', '2026-11-01T05:30:00Z', '2026-11-03T05:00:00Z'],
+        ['America/Los_Angeles', '2026-09-13T06:59:00Z', '2026-09-14T07:00:00Z'],
+        ['Asia/Tokyo', '2026-09-13T23:00:00Z', '2026-09-15T15:00:00Z'],
+        ['Asia/Kathmandu', '2026-09-13T23:00:00Z', '2026-09-15T18:15:00Z'],
+    ]) {
+        timeZone = zone;
+        for (const record of records) record.acceptedAt = acceptedAt;
+        t.mock.timers.setTime(+new Date(cutoff) - 1);
+        assert.equal((await flow.list()).rows.length, 2, `retain before ${cutoff}`);
+        t.mock.timers.setTime(+new Date(cutoff));
+        assert.equal((await flow.list()).rows.length, 0, `expire at ${cutoff}`);
+    }
+});
+
+test('queue verification retains earlier accepted destinations and expires the master using live acceptance times', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-14T18:00:00Z') });
+    const data = [fixture(), fixture()];
+    data[1].po.po_number = data[1].mes.poNumber = '10001234567-0554';
+    for (const [index, entry] of data.entries()) {
+        entry.mes.loads[0].checklist.noticed = { status: true };
+        entry.invoice.accepted_at = index ? '2026-09-13T23:00:00Z' : '2026-09-10T12:00:00Z';
+        entry.po.edi_transaction.push(entry.invoice);
+    }
+    const records = data.map(entry => ({ poNumber: entry.po.po_number, transactionId: entry.invoice.id,
+        statusSource: 'orderful', acknowledgmentStatus: 'NOT_ACKNOWLEDGED' }));
+    const documents = data.map(entry => entry.mes);
+    const chain = { sort: () => chain, lean: async () => documents };
+    const flow = createInvoiceFlow({ db: { outbound: { find: () => chain },
+        salesInvoice: { find: () => ({ lean: async () => records }) } },
+        getClient: async () => ({ config: { baseUrl: 'https://erp.example' }, headers: {},
+            graphql: async () => ({ po: { edges: data.map(entry => ({ node: entry.po })), pageInfo: { hasNextPage: false } } }) }),
+        getOrderfulTransaction: input => orderfulFixture(data.find(entry => entry.po.po_number === input.poNumber).po)(input) });
+    assert.equal((await flow.verifyQueue()).rows.length, 2);
+    t.mock.timers.setTime(+new Date('2026-09-15T04:00:00Z'));
+    assert.equal((await flow.verifyQueue()).rows.length, 0);
+    data[1].invoice.acknowledgment_status = 'NOT_ACKNOWLEDGED';
+    assert.equal((await flow.verifyQueue()).rows.length, 2, 'one pending destination retains the entire group');
+    records.pop();
+    assert.equal((await flow.verifyQueue()).rows.length, 2, 'an ERP invoice belonging to an active master is included');
 });
 
 test('background queue sync preserves last verified rows on outage and removes finalized rows only after a successful scan', async () => {
