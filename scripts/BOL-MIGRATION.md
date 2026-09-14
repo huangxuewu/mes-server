@@ -14,11 +14,11 @@ node scripts/migrate-bol-documents.js --apply --resolve-conservatively --report 
 node scripts/migrate-bol-documents.js --verify --report <verification.json>
 ```
 
-Quiesce server writers for the apply/cutover window. The script rescans the database and writes an exclusive, fsynced Extended JSON backup beside the report before any database mutation. Use a new report filename for each apply attempt so an earlier backup cannot be overwritten.
+Quiesce server writers for the apply/cutover window. The script rescans the database and writes exclusive, fsynced Extended JSON and raw BSON backups beside the report before any database mutation. Raw BSON preserves duplicate legacy field names, including historical duplicate upload timestamps. Use a new report filename for each apply attempt so an earlier backup cannot be overwritten.
 
 Conflicts select a whole source copy by signature presence, consensus excluding upload time, PDF presence, draft presence, latest upload time, and deterministic source ID. The user authorized this conservative rule after reviewing the conflict report. The script never combines signatures from different copies. Explicit source selections can instead be supplied with `--resolutions <json>` as `{ "loadNumber": { "outboundId": "...", "shipmentId": "..." } }`.
 
-Each load migrates in a transaction. A compare-and-set check prevents overwriting a changed legacy BOL. The transaction creates the shared document, assigns references, removes embedded fields, and archives every original copy in `bolMigrationSource`. `bolMigrationAudit` records the selected source and its fingerprint. Empty BOL fields are also archived and removed transactionally.
+Each load migrates in a transaction. Source fingerprints are checked against a fresh read inside the transaction; MongoDB write conflicts prevent overwriting changes made after that read. This accepts equivalent content with different BSON field order or duplicate legacy timestamps. The transaction creates the shared document, assigns references, removes embedded fields, and archives every original copy in `bolMigrationSource`. `bolMigrationAudit` records the selected source and its fingerprint. Empty BOL fields are also archived and removed transactionally.
 
 A failure rolls back the current load; earlier completed loads remain migrated. Rerun inspection and apply with a new report/backup path to resume. Keep the new server behind maintenance until verification passes.
 

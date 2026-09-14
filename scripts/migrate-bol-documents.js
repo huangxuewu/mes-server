@@ -83,6 +83,13 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
         fs.fsyncSync(backup);
     } finally { fs.closeSync(backup); }
     const database = connection.db, ObjectId = connection.base.Types.ObjectId;
+    const rawBackup = fs.openSync(backupPath.replace(/\.jsonl$/, '') + '.bson', 'wx');
+    try {
+        const ids = [...new Set([...groups.values()].flat().concat(empty).map(source => source.outboundId))].map(id => new ObjectId(id));
+        // Raw BSON preserves duplicate legacy field names that JavaScript objects cannot represent.
+        for await (const record of database.collection('outbound').find({ _id: { $in: ids } }, { raw: true }).batchSize(100)) fs.writeSync(rawBackup, record);
+        fs.fsyncSync(rawBackup);
+    } finally { fs.closeSync(rawBackup); }
     await database.collection('bolDocument').createIndex({ loadNumber: 1 }, { unique: true, partialFilterExpression: { loadNumber: { $gt: '' } } });
     await database.collection('bolDocument').createIndex({ shipmentId: 1 }, { unique: true, partialFilterExpression: { loadNumber: '', shipmentId: { $gt: '' } } });
     for (const [loadNumber, sources] of groups) {
@@ -93,12 +100,20 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
                 const identity = selected.loadNumber ? { loadNumber: selected.loadNumber } : { loadNumber: '', shipmentId: selected.shipmentId };
                 const existing = await database.collection('bolDocument').findOne(identity, { session });
                 if (existing) throw new Error(`Load ${loadNumber} already has a document; rerun inspection before resuming`);
+                const currentRecords = await database.collection('outbound').find({ _id: { $in: sources.map(source => new ObjectId(source.outboundId)) } },
+                    { session, projection: { loads: 1 } }).toArray();
+                for (const source of sources) {
+                    const current = currentRecords.find(record => String(record._id) === source.outboundId)?.loads
+                        .find(load => load.shipmentId === source.shipmentId && (load.loadNumber || '') === source.loadNumber);
+                    if (!current || current.bolId || fingerprint(current.bol) !== fingerprint(source.bol))
+                        throw new Error(`Load ${loadNumber} changed after inspection; transaction rolled back`);
+                }
                 const id = new ObjectId();
                 await database.collection('bolDocument').insertOne({ ...selected.bol, _id: id, ...identity, revision: 1,
                     createdAt: new Date(), updatedAt: new Date(), migrationKey: loadNumber }, { session });
                 for (const source of sources) {
                     const changed = await database.collection('outbound').updateOne({ _id: new ObjectId(source.outboundId),
-                        loads: { $elemMatch: { shipmentId: source.shipmentId, loadNumber: source.loadNumber || { $in: ['', null] }, bol: source.bol, bolId: { $in: [null] } } } },
+                        loads: { $elemMatch: { shipmentId: source.shipmentId, loadNumber: source.loadNumber || { $in: ['', null] }, bolId: { $in: [null] } } } },
                     { $set: { 'loads.$.bolId': id }, $unset: { 'loads.$.bol': '' } }, { session });
                     if (changed.matchedCount !== 1) throw new Error(`Load ${loadNumber} changed after inspection; transaction rolled back`);
                 }

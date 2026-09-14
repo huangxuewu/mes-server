@@ -484,8 +484,10 @@ test('operational working sets recover direct writes, load removals and changes 
     assert.ok(client.records.has(String(c)), 'missing BOL remains in the working set');
     await outbound.updateOne({ _id: a }, { $pull: { loads: { loadNumber: 'open' } } });
     await outbound.updateOne({ _id: c }, { $set: { loads: [{loadNumber:'old',status:'Completed',bolId:oldBol,pickupDate:'2026-09-06'}] } });
-    await f.catchUp('outbound', 5);
-    const pages = await client.recover();
+    const pages = await waitFor(async () => {
+        const updates = await client.recover();
+        return updates.some(page => page.removes.includes(String(c))) && updates;
+    });
     assert.deepEqual(client.records.get(String(a)).loads.map(load => load.loadNumber), ['today']);
     assert.ok(pages.flatMap(page => page.removes).includes(String(c)));
     await inbound.insertMany([{ _id: a, status: 'Receiving' },
@@ -504,6 +506,27 @@ test('operational working sets recover direct writes, load removals and changes 
     await assert.rejects(client.recover(), { code: 'RESET_REQUIRED' });
     const next = await f.client('outbound');
     assert.equal(next.records.size, 0);
+});
+
+test('shared BOL edits refresh every referenced outbound PO without embedding drafts', { skip: !uri }, async t => {
+    const f = await fixture(t);
+    const id = new mongoose.Types.ObjectId();
+    await f.connection.db.collection('bolDocument').insertOne({ _id: id, loadNumber: 'shared', number: 'OLD', rawData: { shipper_signature: 'private-image' }, revision: 1 });
+    await f.connection.db.collection('outbound').insertMany(['PO1', 'PO2'].map(poNumber => ({ poNumber, loads: [{ loadNumber: 'shared', status: 'Scheduled', bolId: id }] })));
+    await f.catchUp('outbound', 2);
+    const client = await f.client('outbound');
+    assert.equal(client.records.size, 2);
+    await f.connection.db.collection('bolDocument').updateOne({ _id: id }, { $set: { number: 'NEW' }, $inc: { revision: 1 } });
+    await waitFor(async () => {
+        await client.recover();
+        return [...client.records.values()].every(row => row.loads[0].bolSummary.number === 'NEW');
+    });
+    for (const row of client.records.values()) {
+        assert.equal(row.loads[0].bolSummary.revision, 2);
+        assert.equal(row.loads[0].bolSummary.hasRawData, true);
+        assert.equal(JSON.stringify(row).includes('private-image'), false);
+        assert.equal(Object.hasOwn(row.loads[0], 'bol'), false);
+    }
 });
 
 test('order snapshots and deltas use the existing list projection and exclude production logs', { skip: !uri }, async t => {

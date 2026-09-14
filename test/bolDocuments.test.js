@@ -170,7 +170,45 @@ test('migration detects a concurrent edit and rolls back document creation and a
     assert.equal(await f.db.outbound.collection.countDocuments({ 'loads.bol': { $exists: true } }), 2);
 });
 
- test('missing and empty historical BOLs remain optional and create no placeholder documents', integration, async t=>{
+test('migration compares source content independently of BSON field order', integration, async t => {
+    const f = await fixture(t, 1);
+    const bol = { number: raw.bill_of_lading_number, rawData: raw, uploadedAt: new Date('2025-01-01') };
+    await f.db.outbound.collection.updateMany({}, { $set: { 'loads.0.bol': bol } });
+    const inspection = await inspectBolMigration(f.connection.db);
+    await f.db.outbound.collection.updateMany({}, { $set: { 'loads.0.bol': { uploadedAt: bol.uploadedAt, rawData: raw, number: bol.number } } });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bol-bson-order-'));
+    t.after(() => fs.rmSync(dir, { recursive: true }));
+    await migrateBolDocuments({ connection: f.connection, inspection, apply: true, backupPath: path.join(dir, 'backup.jsonl') });
+    assert.equal((await verifyBolMigration(f.connection.db)).ok, true);
+    assert.deepEqual((await f.service.get({ loadNumber: '77925000' })).rawData, raw);
+});
+
+test('migration detects a write after its transactional source read and rolls back', integration, async t => {
+    const f = await fixture(t, 2);
+    await f.db.outbound.collection.updateMany({}, { $set: { 'loads.0.bol': { number: raw.bill_of_lading_number, rawData: raw } } });
+    const inspection = await inspectBolMigration(f.connection.db);
+    const collection = f.connection.db.collection.bind(f.connection.db);
+    const outbound = collection('outbound'), updateOne = outbound.updateOne.bind(outbound);
+    let changed = false;
+    outbound.updateOne = async (...args) => {
+        if (!changed) {
+            changed = true;
+            await updateOne({ poNumber: 'PO-0' }, { $set: { 'loads.0.bol.rawData.note': 'concurrent writer' } });
+        }
+        return updateOne(...args);
+    };
+    f.connection.db.collection = name => name === 'outbound' ? outbound : collection(name);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bol-write-conflict-'));
+    t.after(() => fs.rmSync(dir, { recursive: true }));
+    try {
+        await assert.rejects(migrateBolDocuments({ connection: f.connection, inspection, apply: true, backupPath: path.join(dir, 'backup.jsonl') }), /changed after inspection/);
+    } finally { f.connection.db.collection = collection; }
+    assert.equal(await f.db.bolDocument.countDocuments(), 0);
+    assert.equal(await f.db.outbound.collection.countDocuments({ 'loads.bolId': { $ne: null } }), 0);
+    assert.equal((await f.db.outbound.findOne({ poNumber: 'PO-0' }).lean()).loads[0].bol.rawData.note, 'concurrent writer');
+});
+
+test('missing and empty historical BOLs remain optional and create no placeholder documents', integration, async t=>{
     const f=await fixture(t,3);
     await f.db.outbound.collection.updateOne({poNumber:'PO-0'},{$set:{'loads.0.bol':null}});
     await f.db.outbound.collection.updateOne({poNumber:'PO-1'},{$set:{'loads.0.bol':{number:''}}});
