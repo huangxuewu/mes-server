@@ -26,7 +26,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
         const records = await query.lean();
         const targets = records.flatMap(record => (record.loads || []).filter(load => load.bol?.number === number || load.bol?.rawData?.bill_of_lading_number === number)
             .map(load => ({ outboundId: String(record._id), shipmentId: load.shipmentId, loadNumber: load.loadNumber, status: load.status, raw: load.bol?.rawData, number: load.bol?.number })));
-        if (!targets.length) throw new Error('signaturePad.bolNotFound');
+        if (!targets.length || targets.every(target => !target.raw)) throw new Error('signaturePad.bolNotFound');
         if (targets.some(target => !target.raw || target.number !== number || target.raw.bill_of_lading_number !== number || !target.shipmentId || !target.loadNumber)) throw new Error('signaturePad.bolNotReady');
         if (new Set(targets.map(target => target.loadNumber)).size !== 1 || new Set(targets.map(target => `${target.outboundId}:${target.shipmentId}`)).size !== targets.length) throw new Error('signaturePad.ambiguousBol');
         const drafts = targets.map(target => {

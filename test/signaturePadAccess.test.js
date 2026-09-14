@@ -20,7 +20,7 @@ const setup = () => {
     let writes = 0, failAt = 0, ended = 0;
     const outbound = {
         find(query) {
-            const selected = () => records.filter(record => query.$or ? record.loads.some(load => load.bol.number === number || load.bol.rawData?.bill_of_lading_number === number) : matches(record, query));
+            const selected = () => records.filter(record => query.$or ? record.loads.some(load => load.bol?.number === number || load.bol?.rawData?.bill_of_lading_number === number) : matches(record, query));
             return { session() { return this; }, lean: async () => structuredClone(selected()) };
         },
         startSession: async () => ({
@@ -155,4 +155,19 @@ test('printing returns only the matching saved scan and rejects unsigned, stale 
     t.records()[1].loads[0].bol.rawData.driver_signature = input.image;
     await t.access.revoke(t.user, t.device._id);
     await assert.rejects(t.access.printData(t.user, request), /deviceUnauthorized/);
+});
+
+test('a deleted printed BOL is not found even when its number remains on the shipment', async () => {
+    const t = setup(); const found = await t.lookup();
+    await saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': null, 'bol.url': null });
+    assert.ok(t.records().every(record => record.loads[0].bol.number === number));
+    await assert.rejects(t.lookup(), /bolNotFound/);
+    await assert.rejects(t.access.sign(t.device, await t.input(found.grant)), /bolNotFound/);
+    for (const record of t.records()) delete record.loads[0].bol;
+    await assert.rejects(t.lookup(), /bolNotFound/);
+});
+
+test('a partially missing merged BOL remains unready instead of signing a remaining copy', async () => {
+    const t = setup(); t.records()[1].loads[0].bol.rawData = null;
+    await assert.rejects(t.lookup(), /bolNotReady/); assert.equal(t.writes(), 0);
 });
