@@ -15,7 +15,7 @@ const fixture = () => {
     const calls = [];
     const order = { _id: 'order-1', poNumber: '100', orderStatus: 'Fulfilled', buyers: [buyer] };
     const loads = [{ loadNumber: 'LOAD-1', status: 'Picked Up', items: buyer.items,
-        bol: { number: 'BOL-1' } }];
+        bolId: 'shared-document-id' }];
     const db = {
         order: {
             findById: () => ({ lean: async () => order }),
@@ -84,5 +84,5 @@ test('complete address changes update order and outbound headers without replaci
     assert.equal(header.address, 'Updated street');
     assert.equal(header.items[0].quantity, 12);
     assert.ok(!Object.hasOwn(header, 'loads'));
-    assert.equal(f.loads[0].bol.number, 'BOL-1');
+    assert.equal(f.loads[0].bolId, 'shared-document-id');
 });

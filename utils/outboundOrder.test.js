@@ -58,7 +58,8 @@ test("detects work that makes a load allocation immutable", () => {
     assert.equal(hasPhysicalProgress({ status: "Carrier Accepted, Awaiting Pickup", checklist: {} }), false);
     assert.equal(hasPhysicalProgress({ status: "Picked Up" }), true);
     assert.equal(hasPhysicalProgress({ checklist: { printed: { status: true } } }), true);
-    assert.equal(hasPhysicalProgress({ bol: { number: "BOL-1" } }), true);
+    assert.equal(hasPhysicalProgress({ bolId: 'shared-document-id' }), true);
+    assert.equal(hasPhysicalProgress({ bolId: null }), false);
 });
 
 test("repairs an unstarted single load when its cartons match the ERP quantity", () => {
