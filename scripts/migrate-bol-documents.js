@@ -85,9 +85,8 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
     const database = connection.db, ObjectId = connection.base.Types.ObjectId;
     const rawBackup = fs.openSync(backupPath.replace(/\.jsonl$/, '') + '.bson', 'wx');
     try {
-        const ids = [...new Set([...groups.values()].flat().concat(empty).map(source => source.outboundId))].map(id => new ObjectId(id));
         // Raw BSON preserves duplicate legacy field names that JavaScript objects cannot represent.
-        for await (const record of database.collection('outbound').find({ _id: { $in: ids } }, { raw: true }).batchSize(100)) fs.writeSync(rawBackup, record);
+        for await (const record of database.collection('outbound').find({ 'loads.bol': { $exists: true } }, { raw: true }).batchSize(100)) fs.writeSync(rawBackup, record);
         fs.fsyncSync(rawBackup);
     } finally { fs.closeSync(rawBackup); }
     await database.collection('bolDocument').createIndex({ loadNumber: 1 }, { unique: true, partialFilterExpression: { loadNumber: { $gt: '' } } });
