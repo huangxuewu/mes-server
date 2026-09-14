@@ -33,6 +33,7 @@ app.use((req, res, next) => {
     next();
 });
 app.use('/register', require('./routes/userRegistration'));
+app.use('/signature-pad', require('./routes/signaturePad')());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({

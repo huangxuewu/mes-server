@@ -6,6 +6,7 @@ const { performance } = require('node:perf_hooks');
 const { shouldMarkCompleted, requiresBol } = require("../../utils/outboundScac");
 const { prepareShipmentDocuments } = require("../../utils/outboundOrder");
 const { submitAsns } = require("../../utils/edi/asn");
+const saveBolDraft = require('../../utils/saveBolDraft');
 
 module.exports = (socket, io) => {
 
@@ -288,7 +289,7 @@ module.exports = (socket, io) => {
                 }
             }
 
-            const shipment = await db.outbound.findOneAndUpdate(
+            const shipment = (Object.hasOwn(data, 'bol.rawData') || Object.hasOwn(data, 'bol')) ? await saveBolDraft(db.outbound, { shipmentId }, data) : await db.outbound.findOneAndUpdate(
                 { 'loads.shipmentId': shipmentId },
                 { $set: update },
                 { arrayFilters: [{ 'target.shipmentId': shipmentId }], new: true }
@@ -326,8 +327,8 @@ module.exports = (socket, io) => {
                 Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
                 , {});
 
-            // ignore if shipment is completed
-            const shipment = await db.outbound.findOneAndUpdate(
+            // Whole-load edits must preserve a signature saved from the phone.
+            const shipment = Object.hasOwn(load, 'bol') ? await saveBolDraft(db.outbound, { shipmentId: load.shipmentId }, load) : await db.outbound.findOneAndUpdate(
                 { _id },
                 { $set: update },
                 { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
@@ -584,7 +585,8 @@ module.exports = (socket, io) => {
             // note?.length
             //     ? await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
-            await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            if (Object.hasOwn(data, 'bol.rawData') || Object.hasOwn(data, 'bol')) await saveBolDraft(db.outbound, { loadNumber }, data);
+            else await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             if (['Picked Up', 'Completed'].includes(data.status)) {
                 const shipments = await db.outbound.find({ 'loads.loadNumber': loadNumber });

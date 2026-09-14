@@ -76,6 +76,7 @@ const stationSchema = new mongoose.Schema({
         },
     },
     config: {
+        shipmentPrinter: { type: String, default: '', maxlength: 256 },
         boardType: {
             type: String,
             enum: ['loadboard', 'bulletin'],
