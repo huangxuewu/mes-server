@@ -98,7 +98,7 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
                     createdAt: new Date(), updatedAt: new Date(), migrationKey: loadNumber }, { session });
                 for (const source of sources) {
                     const changed = await database.collection('outbound').updateOne({ _id: new ObjectId(source.outboundId),
-                        loads: { $elemMatch: { shipmentId: source.shipmentId, bol: source.bol, bolId: { $in: [null] } } } },
+                        loads: { $elemMatch: { shipmentId: source.shipmentId, loadNumber: source.loadNumber || { $in: ['', null] }, bol: source.bol, bolId: { $in: [null] } } } },
                     { $set: { 'loads.$.bolId': id }, $unset: { 'loads.$.bol': '' } }, { session });
                     if (changed.matchedCount !== 1) throw new Error(`Load ${loadNumber} changed after inspection; transaction rolled back`);
                 }
@@ -115,7 +115,7 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
         try {
             await session.withTransaction(async () => {
                 const changed = await database.collection('outbound').updateOne({ _id: new ObjectId(source.outboundId),
-                    loads: { $elemMatch: { shipmentId: source.shipmentId, bol: source.bol } } },
+                    loads: { $elemMatch: { shipmentId: source.shipmentId, loadNumber: source.loadNumber || { $in: ['', null] }, bol: source.bol } } },
                 { $set: { 'loads.$.bolId': source.bolId || null }, $unset: { 'loads.$.bol': '' } }, { session });
                 if (changed.matchedCount !== 1) throw new Error(`Empty BOL ${source.shipmentId} changed after inspection`);
                 await database.collection('bolMigrationSource').insertOne({ ...source, documentId: source.bolId || null, migratedAt: new Date() }, { session });

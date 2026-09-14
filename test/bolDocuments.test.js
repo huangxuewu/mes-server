@@ -45,6 +45,27 @@ test('stale revisions and signed drafts cannot overwrite the shared BOL', integr
     assert.deepEqual((await f.service.get({ loadNumber: '77925000' })).rawData, signed);
 });
 
+test('a failed reference assignment rolls back the new document and all shipments', integration, async t => {
+    const f = await fixture(t);
+    const update = f.db.outbound.updateMany;
+    f.db.outbound.updateMany = () => { throw new Error('Reference assignment failed'); };
+    await assert.rejects(f.service.save({ loadNumber: '77925000', rawData: raw }), /Reference assignment failed/);
+    f.db.outbound.updateMany = update;
+    assert.equal(await f.db.bolDocument.countDocuments(), 0);
+    assert.equal(await f.db.outbound.countDocuments({ 'loads.bolId': { $ne: null } }), 0);
+    assert.ok(await f.service.save({ loadNumber: '77925000', rawData: raw }));
+});
+
+test('concurrent document edits with the same revision produce one winner', integration, async t => {
+    const f = await fixture(t);
+    const created = await f.service.save({ loadNumber: '77925000', rawData: raw });
+    const results = await Promise.allSettled(['first', 'second'].map(note => f.service.save({loadNumber:'77925000', rawData:{...raw,note},revision:created.revision})));
+    assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+    assert.equal(results.filter(result=>result.status==='rejected').length,1);
+    assert.match(results.find(result=>result.status==='rejected').reason.message,/bolChanged/);
+    assert.equal((await f.service.get({loadNumber:'77925000'})).revision,created.revision+1);
+});
+
 test('PDF linking completes selected shipments and leaves unshipped POs detached', integration, async t => {
     const f = await fixture(t, 3);
     await f.service.save({ loadNumber: '77925000', rawData: raw });
