@@ -568,21 +568,21 @@ test('invoice list returns every available row beyond the former 25-row limit', 
     assert.deepEqual(result.rows[30].loadNumbers, ['LOAD30']);
 });
 
-test('invoice rows retain PO-specific BOL links, including when ERP matching fails', async () => {
+test('invoice rows resolve shared BOL links, including when ERP matching fails', async () => {
     const { po, mes } = fixture();
-    mes.loads[0].bol = { url: 'https://files.example/load1.pdf' };
+    mes.loads[0].bolId = 'BOL1';
     mes.loads[0].checklist = { noticed: { status: false } };
     mes.loads.push({ loadNumber: 'LOAD1', status: 'Completed' }, { loadNumber: 'LOAD2', status: 'Completed' });
-    const missing = { client: 'Target', poNumber: 'OTHER', loads: [{ loadNumber: 'LOAD1', status: 'Completed', checklist: { noticed: { status: true } }, bol: { url: 'https://files.example/other.pdf' } }] };
+    const missing = { client: 'Target', poNumber: 'OTHER', loads: [{ loadNumber: 'LOAD1', status: 'Completed', checklist: { noticed: { status: true } }, bolId: 'BOL1' }] };
     for (const document of [mes, missing]) document.loads.push(
-        { loadNumber: 'LEGACY', status: 'Completed', bol: { url: 'https://files.example/legacy.pdf' } },
-        { loadNumber: 'PENDING', status: 'Loading', checklist: { noticed: { status: true } }, bol: { url: 'https://files.example/pending.pdf' } },
+        { loadNumber: 'LEGACY', status: 'Completed', bolId: 'LEGACY' },
+        { loadNumber: 'PENDING', status: 'Loading', checklist: { noticed: { status: true } }, bolId: 'PENDING' },
         { loadNumber: 'CANCELLED', status: 'Cancelled', checklist: { noticed: { status: false } } },
     );
     const chain = { sort: () => chain, lean: async () => [mes, missing] };
     const flow = createInvoiceFlow({
         getOrderfulTransaction: orderfulFixture(po),
-        db: { outbound: { find: () => chain, findOne: () => ({ lean: async () => mes }) },
+        db: { bolDocument:{aggregate:()=>({session:async()=>[{_id:'BOL1',number:'123',url:'https://files.example/load1.pdf',hasRawData:false},{_id:'LEGACY',url:'https://files.example/legacy.pdf'},{_id:'PENDING',url:'https://files.example/pending.pdf'}]})}, outbound: { find: () => chain, findOne: () => ({ lean: async () => mes }) },
             salesInvoice: { find: () => ({ lean: async () => [mes, missing].map(document => ({ poNumber: document.poNumber, submissionStartedAt: new Date() })) }), findOne: () => ({ lean: async () => null }) } },
         getClient: async () => ({ config: { baseUrl: 'https://erp.example', webBaseUrl: 'https://erp.example' }, headers: {},
             graphql: async () => ({ po: { edges: [{ node: po }], pageInfo: { hasNextPage: false } } }) }),
@@ -590,7 +590,7 @@ test('invoice rows retain PO-specific BOL links, including when ERP matching fai
     const { rows } = await flow.verifyQueue();
     assert.deepEqual(rows.map(row => row.loadNumbers), [['LOAD1'], ['LOAD1']]);
     assert.deepEqual(rows[0].bolUrls, { LOAD1: 'https://files.example/load1.pdf' });
-    assert.deepEqual(rows[1].bolUrls, { LOAD1: 'https://files.example/other.pdf' });
+    assert.deepEqual(rows[1].bolUrls, { LOAD1: 'https://files.example/load1.pdf' });
     assert.ok(rows[1].error);
     assert.equal((await flow.get({ poNumber: po.po_number })).bolUrls.LOAD1, rows[0].bolUrls.LOAD1);
 });

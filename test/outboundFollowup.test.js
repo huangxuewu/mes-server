@@ -9,7 +9,7 @@ const { EventEmitter } = require('node:events');
 test('outbound schema retains follow-up flags and defaults them to incomplete', () => {
     let schema;
     const dependencies = {
-        mongoose, '../socket/io': { io: {} }, '../utils/outboundScac': {},
+        '../utils/bolDocuments':require('../utils/bolDocuments'), mongoose, '../socket/io': { io: {} }, '../utils/outboundScac': {},
         '../config/database': { model: (_name, definition) => { schema = definition; return { watch: () => new EventEmitter(), createIndexes() {}, hooks: { pre() {} } }; } },
     };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../models/outbound.js'), 'utf8'), {
@@ -26,7 +26,7 @@ const fixture = (db, submitAsns) => {
     const handlers = {};
     const events = [];
     const dependencies = {
-        '../../utils/dayjs': () => {}, '../../models': db, mongoose,
+        '../../utils/bolDocuments':require('../utils/bolDocuments'), '../../utils/bolDocumentService':require('../utils/bolDocumentService'), '../../utils/dayjs': () => {}, '../../models': db, mongoose,
         'node:perf_hooks': { performance: {} }, '../../utils/outboundScac': { requiresBol: () => true },
         '../../utils/outboundOrder': {}, '../../utils/edi/asn': { submitAsns },
     };

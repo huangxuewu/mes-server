@@ -32,12 +32,17 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
         return device;
     };
     const findTargets = async (number, session) => {
-        let query = models.outbound.find({ $or: [{ 'loads.bol.number': number }, { 'loads.bol.rawData.bill_of_lading_number': number }] },
+        let documentQuery = models.bolDocument.find({ $or: [{ number }, { 'rawData.bill_of_lading_number': number }] });
+        if (session) documentQuery = documentQuery.session(session);
+        const documents = await documentQuery.lean();
+        const byId = new Map(documents.map(document => [String(document._id), document]));
+        let query = models.outbound.find({ 'loads.bolId': { $in: documents.map(document => document._id) } },
             { loads: 1, poNumber: 1, name: 1, address: 1, city: 1, state: 1, zip: 1 });
         if (session) query = query.session(session);
         const records = await query.lean();
-        const targets = records.flatMap(record => (record.loads || []).filter(load => load.bol?.number === number || load.bol?.rawData?.bill_of_lading_number === number)
-            .map(load => ({ record, load, outboundId: String(record._id), shipmentId: load.shipmentId, loadNumber: load.loadNumber, status: load.status, raw: load.bol?.rawData, number: load.bol?.number })));
+        const targets = records.flatMap(record => (record.loads || []).filter(load => byId.has(String(load.bolId)))
+            .map(load => ({ record, load, bolDocument: byId.get(String(load.bolId)), outboundId: String(record._id), shipmentId: load.shipmentId,
+                loadNumber: load.loadNumber, status: load.status, raw: byId.get(String(load.bolId)).rawData, number: byId.get(String(load.bolId)).number })));
         if (!targets.length) throw new Error('signaturePad.bolNotFound');
         if (targets.some(target => target.number !== number || !target.shipmentId || !target.loadNumber)) throw new Error('signaturePad.bolNotReady');
         if (new Set(targets.map(target => target.loadNumber)).size !== 1 || new Set(targets.map(target => `${target.outboundId}:${target.shipmentId}`)).size !== targets.length) throw new Error('signaturePad.ambiguousBol');
@@ -104,12 +109,10 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                         if (fresh.targets.some(target => target.raw.driver_signature || ['Completed', 'Cancelled'].includes(target.status))) return;
                         const details = await gateDetails(fresh.targets[0].raw, fresh.targets[0].loadNumber, session);
                         if (!Object.keys(details).length) return;
-                        const fields = Object.fromEntries(Object.entries(details).map(([key, value]) => [`loads.$[target].bol.rawData.${key}`, value]));
-                        for (const target of fresh.targets) {
-                            const updated = await models.outbound.updateOne({ _id: target.outboundId, loads: { $elemMatch: { shipmentId: target.shipmentId, 'bol.number': number } } },
-                                { $set: fields }, { arrayFilters: [{ 'target.shipmentId': target.shipmentId, 'target.bol.number': number }], session });
-                            if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
-                        }
+                        const fields = Object.fromEntries(Object.entries(details).map(([key, value]) => [`rawData.${key}`, value]));
+                        const updated = await models.bolDocument.updateOne({ _id: fresh.targets[0].bolDocument._id },
+                            { $set: fields, $inc: { revision: 1 } }, { session });
+                        if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
                     });
                 } finally { await session.endSession(); }
                 ({ targets, revision, dualRevision, printRevision } = await findBol(number));
@@ -144,12 +147,9 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                     }
                     const raw = buildOutboundBol(targets, number);
                     Object.assign(raw, await gateDetails(raw, targets[0].loadNumber, session));
-                    for (const target of targets) {
-                        const updated = await models.outbound.updateOne({ _id: target.outboundId, loads: { $elemMatch: { shipmentId: target.shipmentId, 'bol.number': number } } },
-                            { $set: { 'loads.$[target].bol.rawData': raw } },
-                            { arrayFilters: [{ 'target.shipmentId': target.shipmentId, 'target.bol.number': number }], session });
-                        if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
-                    }
+                    const updated = await models.bolDocument.updateOne({ _id: targets[0].bolDocument._id },
+                        { $set: { rawData: raw }, $inc: { revision: 1 } }, { session });
+                    if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
                 });
             } finally { await session.endSession(); }
             return this.lookup(device, input.barcode, true);
@@ -213,15 +213,13 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                     if (targets.some(target => target.status === 'Completed')) throw new Error('signaturePad.bolCompleted');
                     if (targets.some(target => target.status === 'Cancelled')) throw new Error('signaturePad.bolNotReady');
                     savedAt = new Date().toISOString();
-                    for (const target of targets) {
-                        const updated = await models.outbound.updateOne({ _id: target.outboundId, loads: { $elemMatch: { shipmentId: target.shipmentId, 'bol.number': grant.number } } },
-                            { $set: { 'loads.$[target].bol.rawData.driver_signature': image, 'loads.$[target].bol.rawData.driver_signature_date': savedAt,
-                                'loads.$[target].bol.rawData.driver_signature_submission_id': input.submissionId, 'loads.$[target].bol.rawData.driver_signature_device_id': device._id,
-                                ...(requiresShipper ? { 'loads.$[target].bol.rawData.shipper_signature': input.shipperImage, 'loads.$[target].bol.rawData.shipper_signature_date': savedAt,
-                                    'loads.$[target].bol.rawData.shipper_signature_submission_id': input.submissionId, 'loads.$[target].bol.rawData.shipper_signature_device_id': device._id } : {}) } },
-                            { arrayFilters: [{ 'target.shipmentId': target.shipmentId, 'target.bol.number': grant.number }], session });
-                        if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
-                    }
+                    const updated = await models.bolDocument.updateOne({ _id: targets[0].bolDocument._id },
+                        { $set: { 'rawData.driver_signature': image, 'rawData.driver_signature_date': savedAt,
+                            'rawData.driver_signature_submission_id': input.submissionId, 'rawData.driver_signature_device_id': device._id,
+                            ...(requiresShipper ? { 'rawData.shipper_signature': input.shipperImage, 'rawData.shipper_signature_date': savedAt,
+                                'rawData.shipper_signature_submission_id': input.submissionId, 'rawData.shipper_signature_device_id': device._id } : {}) },
+                            $inc: { revision: 1 } }, { session });
+                    if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
                 });
             } finally { await session.endSession(); }
             return { documentId: grant.documentId, submissionId: input.submissionId, savedAt };

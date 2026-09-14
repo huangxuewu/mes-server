@@ -1,4 +1,5 @@
 const { randomUUID, createHash } = require('node:crypto');
+const { outboundBolPipeline } = require('./bolDocuments');
 const dayjs = require('dayjs');
 dayjs.extend(require('dayjs/plugin/utc'));
 dayjs.extend(require('dayjs/plugin/timezone'));
@@ -12,14 +13,14 @@ const COLLECTIONS = {
 };
 const DATASETS = Object.keys(COLLECTIONS);
 const DEPENDENCIES = { workSchedule: 'schedules', workScheduleTemplate: 'schedules', config: 'configuration',
-    user: 'users', calendarEvent: 'calendar', calendarTask: 'calendar', topic: 'messages', message: 'messages', passcode: 'passcodes' };
+    user: 'users', calendarEvent: 'calendar', calendarTask: 'calendar', topic: 'messages', message: 'messages', passcode: 'passcodes', bolDocument: 'bolDocuments' };
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const PAGE_SIZE = 500;
 const MAX_BYTES = 4 * 1024 * 1024;
 const CAPTURE_BATCH_SIZE = 100;
 // Isolated metadata lets older servers finish their v1 capture during a rolling deployment.
-const STATE_ID = 'application-data-v2';
-const JOURNAL = 'syncJournalV2';
+const STATE_ID = 'application-data-v3';
+const JOURNAL = 'syncJournalV3';
 const DATE_SCOPED = new Set(['timecards', 'inbound', 'outbound', 'haulers']);
 
 class SyncError extends Error {
@@ -112,6 +113,14 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
             const dependencies = ['dropDatabase', 'invalidate'].includes(change.operationType)
                 ? Object.values(DEPENDENCIES) : [DEPENDENCIES[change.ns?.coll], DEPENDENCIES[change.to?.coll]].filter(Boolean);
             for (const name of dependencies) state.dependencies[name] = randomUUID();
+            if (change.ns?.coll === 'bolDocument' && documentChange) {
+                const references = await connection.db.collection('outbound').find({ 'loads.bolId': change.documentKey._id }, { session, projection: { _id: 1 } }).toArray();
+                const info = state.datasets.outbound;
+                if (!Number.isSafeInteger(info.head + references.length)) throw new SyncError('SEQUENCE_EXHAUSTED', 'Sync sequence exhausted');
+                for (const [referenceIndex, reference] of references.entries()) entries.push({ _id: referenceIndex ? `${tokenId}:${reference._id}` : tokenId, dataset: 'outbound', generation: info.generation,
+                    sequence: ++info.head, recordId: reference._id, sourceToken: change._id, clusterTime: change.clusterTime, capturedAt: new Date() });
+                info.clusterTime = change.clusterTime;
+            }
             if (dataset && documentChange) {
                 const info = state.datasets[dataset];
                 if (!Number.isSafeInteger(info.head + 1)) throw new SyncError('SEQUENCE_EXHAUSTED', 'Sync sequence exhausted');
@@ -320,12 +329,13 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         const collection = connection.db.collection(COLLECTIONS[dataset]);
         let records = dataset === 'outbound' ? await collection.aggregate([
             { $match: query },
+            ...outboundBolPipeline(),
             { $set: { loads: { $filter: {
                 input: { $cond: [{ $gt: [{ $size: { $ifNull: ['$loads', []] } }, 0] }, '$loads', [{}]] },
                 as: 'load', cond: { $let: { vars: { row: { $mergeObjects: ['$$ROOT', '$$load'] } }, in: { $or: [
                     { $ne: ['$$row.status', 'Completed'] }, { $gte: ['$$row.pickupDate', scope] },
                     { $gte: ['$$row.schedulePickupAt', dayStart] },
-                    { $and: [{ $in: [{ $ifNull: ['$$row.bol.url', ''] }, ['', null]] },
+                    { $and: [{ $in: [{ $ifNull: ['$$row.bolSummary.url', ''] }, ['', null]] },
                         ...['carrierSCAC', 'executingSCAC', 'assignedSCAC'].map(key => ({ $ne: [`$$row.${key}`, 'DMSP'] }))] },
                 ] } } },
             } } } },

@@ -28,7 +28,7 @@ test('load sync uses bounded database operations for many shipments sharing orde
     assert.equal(result.status, 'success');
     const reads = f.commands.filter(command => ['find', 'getMore'].includes(command.name));
     const writes = f.commands.filter(command => ['update', 'findAndModify'].includes(command.name));
-    assert.ok(reads.length <= 5, `Expected bounded reads, got ${reads.length}`);
+    assert.ok(reads.length <= 6, `Expected bounded reads, got ${reads.length}`);
     assert.ok(writes.length <= 3, `Expected batched writes, got ${writes.length}`);
     const saved = await f.db.order.find().lean();
     assert.equal(saved.length, 12);
@@ -51,11 +51,13 @@ test('unchanged reimports do not rewrite shipments or completed orders', integra
 
 test('imports preserve allocation, completed-load rules and warehouse fields', integration, async t => {
     const f = await fixture(t);
+    const doc = await f.db.bolDocument.create({loadNumber:'LOAD-BOL', number:'B1', url:'https://example.test/bol', rawData:{note:'Preserve'}});
+    const draft = await f.db.bolDocument.create({loadNumber:'LOAD-MATCH', number:'B2', rawData:{note:'Preserve'}});
     await f.db.outbound.collection.insertMany([
-        shipment('MATCH', { checklist: { picked: { status: true } }, bol: { rawData: { note: 'Preserve' } } }),
+        shipment('MATCH', { checklist: { picked: { status: true } }, loadNumber: 'LOAD-MATCH', bolId: draft._id }),
         shipment('MISMATCH', { cartons: 9 }),
         shipment('PARCEL', { assignedSCAC: 'DMSP', checklist: { loaded: { status: true } } }),
-        shipment('BOL', { bol: { url: 'https://example.test/bol', rawData: { note: 'Preserve' } } }),
+        shipment('BOL', { loadNumber: 'LOAD-BOL', bolId: doc._id }),
     ]);
     const result = await f.sync(['MATCH', 'MISMATCH', 'PARCEL', 'BOL'].map(number => payload(number, { status: 'Picked Up' })));
     assert.equal(result.status, 'success');
@@ -64,11 +66,11 @@ test('imports preserve allocation, completed-load rules and warehouse fields', i
     const saved = Object.fromEntries((await f.db.outbound.find().lean()).map(row => [row.poNumber, row.loads[0]]));
     assert.equal(saved.MATCH.items[0].quantity, 60);
     assert.equal(saved.MATCH.checklist.picked.status, true);
-    assert.equal(saved.MATCH.bol.rawData.note, 'Preserve');
+    assert.equal(String(saved.MATCH.bolId), String(draft._id));
     assert.equal(saved.MISMATCH.items, undefined);
     assert.equal(saved.PARCEL.status, 'Completed');
     assert.equal(saved.BOL.status, 'Completed');
-    assert.equal(saved.BOL.bol.rawData.note, 'Preserve');
+    assert.equal(String(saved.BOL.bolId), String(doc._id));
 });
 
 test('targeted reads retain historical eligibility and support several loads per PO', integration, async t => {

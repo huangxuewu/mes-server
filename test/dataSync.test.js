@@ -74,6 +74,28 @@ test('dataset names are a fixed allowlist', () => {
     assert.equal(new Set(DATASETS).size, DATASETS.length);
 });
 
+test('editing one shared BOL refreshes every referenced PO without synchronizing the draft', { skip: !uri }, async t => {
+    const f = await fixture(t);
+    const id = new mongoose.Types.ObjectId();
+    const docs = f.connection.db.collection('bolDocument');
+    await docs.insertOne({ _id: id, loadNumber: 'SHARED', number: 'B1', rawData: { note: 'private-draft' }, revision: 1 });
+    await f.connection.db.collection('outbound').insertMany(['PO1', 'PO2'].map(poNumber => ({ poNumber,
+        loads: [{ loadNumber: 'SHARED', shipmentId: poNumber, status: 'Loading', bolId: id }] })));
+    await f.catchUp('outbound', 2);
+    const client = await f.client('outbound');
+    await docs.updateOne({ _id: id }, { $set: { number: 'B2' }, $inc: { revision: 1 } });
+    await f.catchUp('outbound', client.cursor.sequence + 2);
+    await client.recover();
+    assert.equal(client.records.size, 2);
+    for (const row of client.records.values()) {
+        assert.equal(row.loads[0].bolSummary.number, 'B2');
+        assert.equal(row.loads[0].bolSummary.revision, 2);
+        assert.equal(row.loads[0].bolSummary.hasRawData, true);
+        assert.equal(JSON.stringify(row).includes('private-draft'), false);
+        assert.equal(row.loads[0].bol, undefined);
+    }
+});
+
 test('offline punch commands commit once, use capture date, and retain receipts after deletion', { skip: !uri }, async t => {
     const f = await fixture(t);
     const dayjs = require('dayjs');
@@ -278,7 +300,7 @@ test('consumer restart, duplicate source delivery and competing leases retain or
     await coll.insertOne({ name: 'Before restart' });
     await f.catchUp('departments', 1);
     const cursor = await f.current('departments');
-    const firstEntry = await f.connection.db.collection('syncJournalV2').findOne({ dataset: 'departments', sequence: 1 });
+    const firstEntry = await f.connection.db.collection('syncJournalV3').findOne({ dataset: 'departments', sequence: 1 });
     await coll.insertOne({ name: 'Second' });
     await f.catchUp('departments', 2);
     await f.sync.stop();
@@ -293,8 +315,8 @@ test('consumer restart, duplicate source delivery and competing leases retain or
     });
     const page = await competitor.pull({ dataset: 'departments', scope: 'all', cursor });
     assert.equal(page.upserts.length, 2);
-    assert.equal(await f.connection.db.collection('syncJournalV2').countDocuments({ dataset: 'departments' }), 3);
-    const seq = await f.connection.db.collection('syncJournalV2').find({ dataset: 'departments' }).sort({ sequence: 1 }).toArray();
+    assert.equal(await f.connection.db.collection('syncJournalV3').countDocuments({ dataset: 'departments' }), 3);
+    const seq = await f.connection.db.collection('syncJournalV3').find({ dataset: 'departments' }).sort({ sequence: 1 }).toArray();
     assert.deepEqual(seq.map(entry => entry.sequence), [1, 2, 3]);
 });
 
@@ -305,7 +327,7 @@ test('retention expiry, holes, collection drop and bad scopes request explicit r
     await coll.insertOne({ name: 'Old entry' });
     await f.catchUp('employees', 1);
     await f.sync.stop();
-    await f.connection.db.collection('syncJournalV2').updateMany({}, { $set: { capturedAt: new Date(Date.now() - RETENTION_MS - 10000) } });
+    await f.connection.db.collection('syncJournalV3').updateMany({}, { $set: { capturedAt: new Date(Date.now() - RETENTION_MS - 10000) } });
     const next = f.start();
     await waitFor(async () => {
         const status = await next.status();
@@ -315,7 +337,7 @@ test('retention expiry, holes, collection drop and bad scopes request explicit r
     const retained = (await next.status()).datasets.employees;
     await coll.insertOne({ name: 'New entry' });
     await waitFor(async () => (await next.status()).datasets.employees.sequence === 2);
-    await f.connection.db.collection('syncJournalV2').deleteOne({ dataset: 'employees', sequence: 2 });
+    await f.connection.db.collection('syncJournalV3').deleteOne({ dataset: 'employees', sequence: 2 });
     await assert.rejects(next.pull({ dataset: 'employees', scope: 'all', cursor: retained }), { code: 'RESET_REQUIRED' });
     await coll.drop();
     await waitFor(async () => (await next.status()).datasets.employees.generation !== retained.generation);
@@ -347,10 +369,10 @@ test('capture transaction rolls back a staged journal entry when the checkpoint 
         };
         await original('employee').insertOne({ name: 'Recover atomically' });
         await failed;
-        assert.equal(await original('syncJournalV2').countDocuments({ dataset: 'employees' }), 0);
+        assert.equal(await original('syncJournalV3').countDocuments({ dataset: 'employees' }), 0);
         assert.equal((await original('syncState').findOne({})).datasets.employees.head, 0);
         await f.catchUp('employees', 1);
-        assert.equal(await original('syncJournalV2').countDocuments({ dataset: 'employees' }), 1);
+        assert.equal(await original('syncJournalV3').countDocuments({ dataset: 'employees' }), 1);
     });
 });
 
@@ -446,12 +468,14 @@ test('operational working sets recover direct writes, load removals and changes 
     const inbound = f.connection.db.collection('inbound');
     const haulers = f.connection.db.collection('hauler');
     const [a, b, c] = Array.from({ length: 3 }, () => new mongoose.Types.ObjectId());
+    const oldBol = new mongoose.Types.ObjectId(), todayBol = new mongoose.Types.ObjectId();
+    await f.connection.db.collection('bolDocument').insertMany([{_id:oldBol,loadNumber:'old',url:'signed'}, {_id:todayBol,loadNumber:'today',url:'signed'}]);
     await outbound.insertMany([
         { _id: a, poNumber: 'active-parent', loads: [{ loadNumber: 'open', status: 'Scheduled' },
-            { loadNumber: 'old', status: 'Completed', bol: { url: 'signed' }, pickupDate: '2026-09-06' },
-            { loadNumber: 'today', status: 'Completed', bol: { url: 'signed' }, pickupDate: '2026-09-07' }] },
+            { loadNumber: 'old', status: 'Completed', bolId: oldBol, pickupDate: '2026-09-06' },
+            { loadNumber: 'today', status: 'Completed', bolId: todayBol, pickupDate: '2026-09-07' }] },
         { _id: b, status: 'Completed', carrierSCAC: 'DMSP', pickupDate: '2026-09-06', loads: [] },
-        { _id: c, status: 'Completed', carrierSCAC: 'TRUCK', pickupDate: '2026-09-06', loads: [] },
+        { _id: c, loads: [{loadNumber:'missing', status:'Completed', carrierSCAC:'TRUCK',pickupDate:'2026-09-06'}] },
     ]);
     await f.catchUp('outbound', 3);
     const client = await f.client('outbound');
@@ -459,7 +483,7 @@ test('operational working sets recover direct writes, load removals and changes 
     assert.deepEqual(client.records.get(String(a)).loads.map(load => load.loadNumber), ['open', 'today']);
     assert.ok(client.records.has(String(c)), 'missing BOL remains in the working set');
     await outbound.updateOne({ _id: a }, { $pull: { loads: { loadNumber: 'open' } } });
-    await outbound.updateOne({ _id: c }, { $set: { bol: { url: 'signed' } } });
+    await outbound.updateOne({ _id: c }, { $set: { loads: [{loadNumber:'old',status:'Completed',bolId:oldBol,pickupDate:'2026-09-06'}] } });
     await f.catchUp('outbound', 5);
     const pages = await client.recover();
     assert.deepEqual(client.records.get(String(a)).loads.map(load => load.loadNumber), ['today']);
@@ -499,7 +523,7 @@ test('order snapshots and deltas use the existing list projection and exclude pr
     assert.equal(client.records.get(String(id)).productionLogs, undefined);
 });
 
-test('working-set v2 metadata coexists with v1 state during server rollout', { skip: !uri }, async t => {
+test('working-set v3 metadata coexists with v1 state during server rollout', { skip: !uri }, async t => {
     const f = await fixture(t);
     const state = f.connection.db.collection('syncState');
     await state.insertOne({ _id: 'employee-data-v1', sentinel: 'old-server' });
@@ -510,7 +534,7 @@ test('working-set v2 metadata coexists with v1 state during server rollout', { s
     assert.equal(client.records.get(String(id)).styleCode, 'new');
     assert.equal((await state.findOne({ _id: 'employee-data-v1' })).sentinel, 'old-server');
     assert.equal(await f.connection.db.collection('syncJournal').countDocuments(), 0);
-    assert.equal(await f.connection.db.collection('syncJournalV2').countDocuments({ dataset: 'products' }), 1);
+    assert.equal(await f.connection.db.collection('syncJournalV3').countDocuments({ dataset: 'products' }), 1);
 });
 
 
@@ -518,16 +542,16 @@ test('scheduled configuration expiry changes status without a new source write',
     const f = await fixture(t);
     const config = f.connection.db.collection('config');
     const state = f.connection.db.collection('syncState');
-    const original = (await state.findOne({ _id: 'application-data-v2' })).dependencies.configuration;
+    const original = (await state.findOne({ _id: 'application-data-v3' })).dependencies.configuration;
     const expires = new Date(Date.now() + 3500);
     await config.insertOne({ _id: 'future-boundary', status: 'Active', effective: { from: new Date(0), to: expires } });
-    await waitFor(async () => (await state.findOne({ _id: 'application-data-v2' })).dependencies.configuration !== original);
+    await waitFor(async () => (await state.findOne({ _id: 'application-data-v3' })).dependencies.configuration !== original);
     const before = await f.sync.status();
-    const captured = (await state.findOne({ _id: 'application-data-v2' })).dependencies.configuration;
+    const captured = (await state.findOne({ _id: 'application-data-v3' })).dependencies.configuration;
     await new Promise(resolve => setTimeout(resolve, Math.max(0, expires.getTime() - Date.now() + 30)));
     const after = await f.sync.status();
     assert.notEqual(before.dependencies.configuration, after.dependencies.configuration);
-    assert.equal((await state.findOne({ _id: 'application-data-v2' })).dependencies.configuration, captured);
+    assert.equal((await state.findOne({ _id: 'application-data-v3' })).dependencies.configuration, captured);
     assert.equal(await config.countDocuments(), 1);
 });
 
@@ -540,7 +564,7 @@ test('regression: capture health should stay available under a caught-up steady 
    await collection.insertOne({ firstName: 'steady-' + writes++ });
    await new Promise(resolve => setTimeout(resolve, 20));
  }
- await waitFor(async () => (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v2' })).datasets.employees.head === writes);
+ await waitFor(async () => (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v3' })).datasets.employees.head === writes);
  const status = await f.sync.status();
  console.log('REVIEW_STEADY', JSON.stringify({ writes, head: status.datasets.employees.sequence, capture: status.capture }));
  assert.equal(status.capture.available, true, 'all writes were captured but sync rejects reads until an idle poll');
@@ -773,9 +797,9 @@ test('edge: killing a capture process mid-batch allows fenced takeover without m
     await f.connection.db.collection('employee').insertMany(Array.from({ length: 400 }, (_, index) => ({ index })));
     const stagedCount = await staged;
     assert.ok(stagedCount > 1, 'kill while a multi-event transaction is staged');
-    const interruptedHead = (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v2' })).datasets.employees.head;
+    const interruptedHead = (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v3' })).datasets.employees.head;
     assert.ok(interruptedHead + stagedCount <= 400);
-    assert.equal(await f.connection.db.collection('syncJournalV2').countDocuments({ dataset: 'employees' }), interruptedHead);
+    assert.equal(await f.connection.db.collection('syncJournalV3').countDocuments({ dataset: 'employees' }), interruptedHead);
     const exited = new Promise(resolve => child.once('exit', resolve)); child.kill('SIGKILL'); await exited;
     f.start();
     // A killed client cannot abort its transaction; MongoDB may retain its locks until the server's 60s lifetime expires.
@@ -787,7 +811,7 @@ test('edge: killing a capture process mid-batch allows fenced takeover without m
     try { await old.recover(); assert.equal(old.records.size, 400); }
     catch (error) { assert.equal(error.code, 'RESET_REQUIRED'); assert.equal((await f.client()).records.size, 400); }
     const status = await f.sync.status();
-    const entries = await f.connection.db.collection('syncJournalV2').find({ dataset: 'employees', generation: status.datasets.employees.generation }).sort({ sequence: 1 }).toArray();
+    const entries = await f.connection.db.collection('syncJournalV3').find({ dataset: 'employees', generation: status.datasets.employees.generation }).sort({ sequence: 1 }).toArray();
     assert.deepEqual(entries.map(entry => entry.sequence), Array.from({ length: 400 }, (_, i) => i + 1));
     assert.equal(new Set(entries.map(entry => String(entry.recordId))).size, 400);
 });
@@ -847,7 +871,7 @@ test('capture commits bounded batches with contiguous sequences across a large b
     const batches = [];
     f.connection.db.collection = name => {
         const collection = original(name);
-        if (name === 'syncJournalV2') {
+        if (name === 'syncJournalV3') {
             const insert = collection.insertMany.bind(collection);
             collection.insertMany = async (entries, options) => { batches.push(entries.length); return insert(entries, options); };
         }
@@ -859,7 +883,7 @@ test('capture commits bounded batches with contiguous sequences across a large b
     assert.ok(batches.length < 30, `Expected bounded batches, got ${batches.length}`);
     assert.ok(batches.every(count => count <= 100));
     assert.equal(batches.reduce((sum, count) => sum + count, 0), 1000);
-    const entries = await original('syncJournalV2').find({ dataset: 'employees' }).sort({ sequence: 1 }).toArray();
+    const entries = await original('syncJournalV3').find({ dataset: 'employees' }).sort({ sequence: 1 }).toArray();
     assert.deepEqual(entries.map(entry => entry.sequence), Array.from({ length: 1000 }, (_, i) => i + 1));
     assert.equal(new Set(entries.map(entry => entry._id)).size, 1000);
 });
@@ -873,7 +897,7 @@ test('retention cleanup yields to lease renewal under database latency', { skip:
     let cleanupQueries = 0;
     f.connection.db.collection = name => {
         const collection = original(name);
-        if (!['syncState', 'syncJournalV2'].includes(name)) return collection;
+        if (!['syncState', 'syncJournalV3'].includes(name)) return collection;
         for (const method of ['findOne', 'updateOne', 'insertMany']) {
             const operation = collection[method].bind(collection);
             collection[method] = async (...args) => { await pause(); return operation(...args); };
@@ -883,7 +907,7 @@ test('retention cleanup yields to lease renewal under database latency', { skip:
             const cursor = find(...args);
             const array = cursor.toArray.bind(cursor);
             cursor.toArray = async () => {
-                if (name === 'syncJournalV2' && args[0].dataset && args[0].sequence?.$gt !== undefined) cleanupQueries++;
+                if (name === 'syncJournalV3' && args[0].dataset && args[0].sequence?.$gt !== undefined) cleanupQueries++;
                 await pause(); return array();
             };
             return cursor;
@@ -916,7 +940,7 @@ test('a recently active consumer still reports stale source capture as unavailab
     };
     try {
         f.start(); await f.connection.db.collection('employee').insertOne({ name: 'Delayed source event' });
-        await waitFor(async () => (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v2' })).datasets.employees.head === 1);
+        await waitFor(async () => (await f.connection.db.collection('syncState').findOne({ _id: 'application-data-v3' })).datasets.employees.head === 1);
         const status = await f.sync.status();
         assert.equal(status.capture.available, false); assert.ok(status.capture.pollAgeMs < 2000);
         assert.ok(status.capture.lagMs >= 50000);

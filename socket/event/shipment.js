@@ -6,7 +6,9 @@ const { performance } = require('node:perf_hooks');
 const { shouldMarkCompleted, requiresBol } = require("../../utils/outboundScac");
 const { prepareShipmentDocuments } = require("../../utils/outboundOrder");
 const { submitAsns } = require("../../utils/edi/asn");
-const saveBolDraft = require('../../utils/saveBolDraft');
+const { outboundBolPipeline, attachBolDocuments, resolveBolReferences } = require('../../utils/bolDocuments');
+const { createBolDocumentService } = require('../../utils/bolDocumentService');
+const bolDocuments = createBolDocumentService(db);
 
 module.exports = (socket, io) => {
 
@@ -72,6 +74,7 @@ module.exports = (socket, io) => {
     socket.on("outbound:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
+            if (data.loads) await resolveBolReferences(db, data.loads);
 
             await db.outbound.updateOne({ _id }, { $set: data });
 
@@ -93,7 +96,7 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:query", async (query, callback) => {
         try {
-            const shipment = await db.outbound.find(query).lean();
+            const shipment = await attachBolDocuments(db, await db.outbound.find(query).lean());
 
             callback?.({ status: "success", message: "Outbound shipment fetched successfully", payload: shipment });
         } catch (error) {
@@ -103,7 +106,8 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:get", async (query, callback) => {
         try {
-            const shipments = await db.outbound.findOne(query).lean();
+            const record = await db.outbound.findOne(query).lean();
+            const [shipments] = record ? await attachBolDocuments(db, [record]) : [];
             callback?.({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -112,7 +116,7 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:aggregate", async (query, callback) => {
         try {
-            const counts = await db.outbound.aggregate(query);
+            const counts = await db.outbound.aggregate([...outboundBolPipeline(), ...query]);
             callback?.({ status: "success", message: "Outbound shipment count fetched successfully", payload: counts });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -289,7 +293,16 @@ module.exports = (socket, io) => {
                 }
             }
 
-            const shipment = (Object.hasOwn(data, 'bol.rawData') || Object.hasOwn(data, 'bol')) ? await saveBolDraft(db.outbound, { shipmentId }, data) : await db.outbound.findOneAndUpdate(
+            if (Object.keys(data).some(key => key === 'bol' || key.startsWith('bol.') || key === 'bolId' || key === 'bolSummary')) throw new Error('Use the BOL document editor');
+            if (Object.hasOwn(data, 'loadNumber')) {
+                const parent = await db.outbound.findOne({ 'loads.shipmentId': shipmentId }, { loads: 1 }).lean();
+                const load = parent?.loads.find(row => row.shipmentId === shipmentId);
+                if (!load) throw new Error('Shipment was not found');
+                const changed = { ...load, ...data };
+                await resolveBolReferences(db, [changed]);
+                update['loads.$[target].bolId'] = changed.bolId || null;
+            }
+            const shipment = await db.outbound.findOneAndUpdate(
                 { 'loads.shipmentId': shipmentId },
                 { $set: update },
                 { arrayFilters: [{ 'target.shipmentId': shipmentId }], new: true }
@@ -308,6 +321,7 @@ module.exports = (socket, io) => {
         try {
             const { _id, load } = payload;
 
+            await resolveBolReferences(db, [load]);
             await db.outbound.updateOne({ _id }, { $push: { loads: load } });
 
             callback?.({ status: "success", message: "Load added successfully" });
@@ -321,14 +335,17 @@ module.exports = (socket, io) => {
         const { _id, load } = payload;
 
         try {
+            await resolveBolReferences(db, [load]);
             load.status = shouldMarkCompleted(load) ? "Completed" : load.status;
 
             const update = Object.keys(load).reduce((acc, key) =>
                 Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
                 , {});
 
-            // Whole-load edits must preserve a signature saved from the phone.
-            const shipment = Object.hasOwn(load, 'bol') ? await saveBolDraft(db.outbound, { shipmentId: load.shipmentId }, load) : await db.outbound.findOneAndUpdate(
+            if (load.bol) throw new Error('Shipment updates accept BOL references only');
+            delete update['loads.$[elem].bolSummary'];
+
+            const shipment = await db.outbound.findOneAndUpdate(
                 { _id },
                 { $set: update },
                 { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
@@ -439,6 +456,9 @@ module.exports = (socket, io) => {
                 const { loads } = shipment;
                 const loadIndex = loads.findIndex(doc => String(doc?.shipmentId ?? '').trim() === shipmentId);
                 const updatedLoad = { ...load, shipmentId };
+                if (updatedLoad.bol) throw new Error('Shipment updates accept BOL references only');
+                delete updatedLoad.bolSummary;
+                delete updatedLoad.bolId;
                 for (const [field, value] of Object.entries(updatedLoad)) {
                     const fieldType = db.outbound.schema.path('loads').schema.path(field);
                     if (fieldType) updatedLoad[field] = fieldType.cast(value);
@@ -452,6 +472,8 @@ module.exports = (socket, io) => {
                 loadRef.status = shouldMarkCompleted(loadRef) ? "Completed" : loadRef.status;
                 touchedPos.add(poNumber);
             }
+
+            await resolveBolReferences(db, [...touchedPos].flatMap(po => shipmentMap.get(po).loads));
 
             // Pass 2: if empty load's ShipIQ cartons match PO remaining, assign remaining items
             const bulkOps = [];
@@ -569,7 +591,7 @@ module.exports = (socket, io) => {
                 { $match: query }
             );
 
-            const shipments = await db.outbound.aggregate(pipeline);
+            const shipments = await db.outbound.aggregate([...outboundBolPipeline(), ...pipeline]);
 
             callback({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
@@ -585,8 +607,8 @@ module.exports = (socket, io) => {
             // note?.length
             //     ? await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
-            if (Object.hasOwn(data, 'bol.rawData') || Object.hasOwn(data, 'bol')) await saveBolDraft(db.outbound, { loadNumber }, data);
-            else await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            if (Object.keys(data).some(key => key === 'bol' || key.startsWith('bol.') || key === 'bolId' || key === 'bolSummary')) throw new Error('Use the BOL document editor');
+            await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
 
             if (['Picked Up', 'Completed'].includes(data.status)) {
                 const shipments = await db.outbound.find({ 'loads.loadNumber': loadNumber });
@@ -660,7 +682,7 @@ module.exports = (socket, io) => {
     socket.on("bill-of-lading:check", async (data, callback) => {
         try {
             const { number } = data;
-            const shipment = await db.outbound.findOne({ 'bol.number': number });
+            const shipment = await db.bolDocument.exists({ number });
             const message = shipment ? "Bill of Lading already exists" : "Bill of Lading does not exist";
 
             callback?.({ status: "success", message, payload: !!shipment });
@@ -674,34 +696,7 @@ module.exports = (socket, io) => {
         try {
             const { shipmentIdArray, loadNumber, link } = payload;
 
-            await db.outbound.updateMany(
-                { 'loads.shipmentId': { $in: shipmentIdArray } },
-                {
-                    $set: {
-                        'loads.$[shipment].bol.url': link,
-                        'loads.$[shipment].bol.uploadedAt': new Date(), // we are not using uploadedAt because the client side time might not be accurate
-                        'loads.$[shipment].status': 'Completed'
-                    }
-                },
-                { arrayFilters: [{ 'shipment.shipmentId': { $in: shipmentIdArray } }] }
-            );
-
-            shipmentIdArray.length > 1 &&
-                await db.outbound.updateMany(
-                    { 'loads.loadNumber': loadNumber, 'loads.shipmentId': { $nin: shipmentIdArray } },
-                    {
-                        $set: {
-                            'loads.$[shipment].bol': { number: null, url: null, uploadedAt: null, rawData: null },
-                            'loads.$[shipment].status': 'Leftover, Reschedule Needed'
-                        }
-                    },
-                    {
-                        arrayFilters: [{
-                            'shipment.loadNumber': loadNumber,
-                            'shipment.shipmentId': { $nin: shipmentIdArray }
-                        }]
-                    }
-                );
+            await bolDocuments.save({ loadNumber, url: link, shipmentIds: shipmentIdArray });
 
             // update outbound gate status
             await db.gate.updateOne({ 'truck.loadNumber': loadNumber }, { $set: { 'truck': null, 'status': 'Available' } });
@@ -854,9 +849,10 @@ module.exports = (socket, io) => {
 
                 // Third aggregation - unique BOL numbers
                 db.outbound.aggregate([
+                    ...outboundBolPipeline(),
                     { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                     { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
-                    { $addFields: { 'bol': { $toString: '$bol.number' } } },
+                    { $addFields: { 'bol': { $toString: '$bolSummary.number' } } },
                     { $project: { 'bol': 1, status: 1, _id: 1 } },
                     {
                         $group: {

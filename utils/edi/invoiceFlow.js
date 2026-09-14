@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const { CREATE_INVOICE, domestic, isPoLoaded, inspectInvoice, invoiceReview, buildInvoice, invoiceFingerprint, readPurchaseOrders, amountCents } = require('./invoice');
 const { createOrderfulClient, readOrderfulPo } = require('./orderful');
 const { readInvoice, createSalesInvoicePdf } = require('../salesInvoicePdf');
+const { attachBolDocuments } = require('../bolDocuments');
 
 const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction = createOrderfulClient({ db }),
     getTimeZone = () => require('../dayjs').getFactoryTimeZone() }) => {
@@ -35,8 +36,8 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         }
         return rows.filter(row => !expired.has(row.poNumber.split('-')[0]));
     };
-    const bolUrls = mes => Object.fromEntries((mes.loads || []).filter(load => load.loadNumber && load.bol?.url)
-        .map(load => [load.loadNumber, load.bol.url]));
+    const bolUrls = mes => Object.fromEntries((mes.loads || []).filter(load => load.loadNumber && load.bolSummary?.url)
+        .map(load => [load.loadNumber, load.bolSummary.url]));
     const latestTime = values => {
         const times = values.filter(Boolean).map(value => new Date(value).getTime()).filter(Number.isFinite);
         return times.length ? new Date(Math.max(...times)).toISOString() : null;
@@ -80,14 +81,16 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
                 acceptedAt: transaction.acknowledgment_status === 'ACCEPTED' ? transaction.accepted_at : null } },
         }, { arrayFilters: [target], runValidators: true });
         ctx.mes = await db.outbound.findOne({ poNumber: ctx.mes.poNumber, client: 'Target' }).lean();
+        [ctx.mes] = await attachBolDocuments(db, [ctx.mes]);
     };
     const context = async poNumber => {
         if (typeof poNumber !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(poNumber)) throw new Error('A valid full PO number is required');
         const client = await getClient();
         const integrationKey = createHash('sha256').update(`${client.config.baseUrl}:${client.headers['x-tenant-id'] || ''}:OFDHTGTDMS`).digest('hex');
         const key = { integrationKey, poNumber };
-        const mes = await db.outbound.findOne({ poNumber }).lean();
-        if (!mes) throw new Error('MES shipment was not found');
+        const recordMes = await db.outbound.findOne({ poNumber }).lean();
+        if (!recordMes) throw new Error('MES shipment was not found');
+        const [mes] = await attachBolDocuments(db, [recordMes]);
         if (mes.client !== 'Target') throw new Error('Sales invoices currently support Target orders only');
         const orders = await readPurchaseOrders(client, [poNumber], false);
         if (orders.length !== 1) throw new Error('ERP purchase order was not found uniquely');
@@ -144,9 +147,9 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
                     status: { $nin: ['Completed', 'Cancelled', 'Canceled'] },
                 } } } },
             ] };
-        const selected = await db.outbound.find(query, { poNumber: 1, client: 1, items: 1, 'loads.items': 1, 'loads.loadNumber': 1, 'loads.shipmentId': 1,
+        const selected = await attachBolDocuments(db, await db.outbound.find(query, { poNumber: 1, client: 1, items: 1, 'loads.items': 1, 'loads.loadNumber': 1, 'loads.shipmentId': 1,
             'loads.status': 1, 'loads.checklist.loaded': 1, 'loads.checklist.invoiced': 1, 'loads.asn': 1,
-            'loads.checklist.noticed': 1, 'loads.bol.url': 1 }).sort({ updatedAt: -1, _id: 1 }).lean();
+            'loads.checklist.noticed': 1, 'loads.bolId': 1 }).sort({ updatedAt: -1, _id: 1 }).lean());
         if (!selected.length) return { rows: [] };
         const numbers = selected.map(mes => mes.poNumber);
         const orders = await readPurchaseOrders(client, numbers, false);
@@ -239,6 +242,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         if (freshOrders.length !== 1) throw new Error('ERP PO changed. Refresh the invoice preview.');
         ctx.po = await readOrderfulPo(freshOrders[0], ctx.mes, ctx.record, getOrderfulTransaction);
         ctx.mes = await db.outbound.findOne({ poNumber }).lean();
+        [ctx.mes] = await attachBolDocuments(db, [ctx.mes]);
         state = inspectInvoice(ctx.po, ctx.mes, ctx.record);
         if (state.transactionId) return { transactionId: state.transactionId, existing: true };
         const baseline = buildInvoice(ctx.po, state, invoiceDate);

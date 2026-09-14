@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const mongoose = require('mongoose');
 const dayjs = require('dayjs');
 const { randomUUID } = require('node:crypto');
+const { createRequire } = require('node:module');
 
 async function loadSyncFixture(uri, sources = {}) {
     if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/data_sync_test_[a-z\d_]+(?:\?|$)/i.test(uri || ''))
@@ -28,21 +29,21 @@ async function loadSyncFixture(uri, sources = {}) {
         const module = { exports: {} };
         vm.runInNewContext(sources[file] || fs.readFileSync(path.join(__dirname, '../..', file), 'utf8'), {
             module, console: logger, Date, setTimeout, clearTimeout,
-            require: name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name),
+            require: name => Object.hasOwn(dependencies, name) ? dependencies[name] : createRequire(path.join(__dirname, '../..', file))(name),
         });
         return module.exports;
     };
     const common = { mongoose, '../config/database': database,
         '../socket/io': { io: { except: () => ({ emit() {} }) } },
         '../utils/outboundScac': require('../../utils/outboundScac') };
-    const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common) };
+    const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common), bolDocument: evaluate('models/bolDocument.js', common) };
     await Promise.all(Object.values(db).map(model => model.init()));
     const handlers = {};
     evaluate('socket/event/shipment.js', { mongoose, '../../models': db, '../../utils/dayjs': dayjs,
         '../../utils/outboundScac': require('../../utils/outboundScac'),
         '../../utils/outboundOrder': {}, '../../utils/edi/asn': {} })(
         { on: (name, handler) => { handlers[name] = handler; } }, {});
-    return { db, connection, commands, logs,
+    return { db, connection, commands, logs, handlers,
         sync: async payload => {
             let result;
             await handlers['load:sync'](payload, response => { result = response; });

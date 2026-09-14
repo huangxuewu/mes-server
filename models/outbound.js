@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const { io } = require("../socket/io");
 const database = require("../config/database");
 const { shouldMarkCompleted } = require("../utils/outboundScac");
+const { attachBolDocuments } = require('../utils/bolDocuments');
 
 const itemSchema = new mongoose.Schema({
     upc: String,
@@ -63,12 +64,7 @@ const loadSchema = new mongoose.Schema({
         checkedAt: Date,
         error: String,
     },
-    bol: {
-        url: { type: String, default: "" },
-        number: { type: String, default: "" },
-        uploadedAt: { type: Date, default: null },
-        rawData: { type: Object, default: null },
-    },
+    bolId: { type: mongoose.Schema.Types.ObjectId, ref: 'bolDocument', default: null },
     items: mongoose.Mixed,
     auditLog: [auditLogSchema],
     checklist: {
@@ -138,17 +134,23 @@ const outboundSchema = new mongoose.Schema({
 
 outboundSchema.index({ poNumber: 1 });
 outboundSchema.index({ masterPO: 1 });
+outboundSchema.index({ 'loads.bolId': 1 });
+outboundSchema.index({ 'loads.shipmentId': 1 });
+outboundSchema.index({ 'loads.loadNumber': 1 });
 
 const Outbound = database.model("outbound", outboundSchema, "outbound");
 
 Outbound
     .watch([], { fullDocument: "updateLookup" })
-    .on("change", (change) => {
+    .on("change", async (change) => {
         switch (change.operationType) {
             case "insert":
             case "update":
             case "replace":
-                io.except('data-sync:outbound').emit("outbound:update", change.fullDocument);
+                try {
+                    const [record] = await attachBolDocuments(database.models, [change.fullDocument]);
+                    io.except('data-sync:outbound').emit("outbound:update", record);
+                } catch (error) { console.error('Outbound summary refresh failed', error.message); }
 
                 break;
             case "delete":
@@ -185,6 +187,7 @@ Outbound.hooks.pre("save", async function (next) {
 
 Outbound.getActiveLoads = async () => {
     const loads = await Outbound.aggregate([
+        ...require('../utils/bolDocuments').outboundBolPipeline(),
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
         { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },

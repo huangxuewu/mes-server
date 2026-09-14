@@ -7,6 +7,6 @@ const getShipmentScac = (load) =>
 const requiresBol = (load) => !NO_BOL_SCACS.has(getShipmentScac(load));
 
 const shouldMarkCompleted = (load) =>
-    !!(load?.bol?.url) || (!requiresBol(load) && !!load?.checklist?.loaded?.status);
+    load?.status === 'Completed' || !!(load?.bolSummary?.url) || (!requiresBol(load) && !!load?.checklist?.loaded?.status);
 
 module.exports = { NO_BOL_SCACS, getShipmentScac, requiresBol, shouldMarkCompleted };

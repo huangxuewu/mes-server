@@ -42,7 +42,7 @@ const allocationsMatch = (left, right) =>
 const hasPhysicalProgress = load =>
     ["Picked Up", "Completed"].includes(load?.status)
     || Boolean(load?.actualPickupAt)
-    || Boolean(load?.bol?.number || load?.bol?.url)
+    || Boolean(load?.bolId)
     || Object.values(load?.checklist ?? {}).some(step => step?.status);
 
 const buildOutboundDocument = (order, buyer, items = buyer?.items) => ({

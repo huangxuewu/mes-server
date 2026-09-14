@@ -1,8 +1,8 @@
 const carrierNames = require('../config/bolCarrierNames.json');
 const { createHash, randomUUID } = require('node:crypto');
 
-const outboundBolSourceRevision = targets => createHash('sha256').update(JSON.stringify(targets.map(({ record, load }) => [
-    String(record._id), load.shipmentId, load.loadNumber, load.bol?.number,
+const outboundBolSourceRevision = targets => createHash('sha256').update(JSON.stringify(targets.map(({ record, load, bolDocument }) => [
+    String(record._id), load.shipmentId, load.loadNumber, bolDocument?.number,
     ...['poNumber', 'name', 'address', 'city', 'state', 'zip'].map(key => record[key] ?? ''),
     ...['assignedSCAC', 'executingSCAC', 'carrierSCAC', 'proNumber', 'chRobinsonNumber', 'cartons', 'weight', 'pallets'].map(key => load[key] ?? ''),
 ]).sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`)))).digest('hex');
@@ -16,7 +16,7 @@ const buildOutboundBol = (targets, number, now = new Date()) => {
     for (const target of targets) {
         if (target.load.status === 'Completed') throw new Error('signaturePad.bolCompleted');
         if (target.load.status === 'Cancelled' || String(target.load.carrierSCAC || target.load.executingSCAC || target.load.assignedSCAC || '').toUpperCase().trim() === 'DMSP'
-            || target.load.bol?.url || !target.record.poNumber || !target.load.assignedSCAC
+            || target.bolDocument?.url || !target.record.poNumber || !target.load.assignedSCAC
             || !Number.isFinite(target.load.cartons) || target.load.cartons <= 0
             || !Number.isFinite(target.load.weight) || target.load.weight <= 0
             || (target.load.pallets != null && (!Number.isFinite(target.load.pallets) || target.load.pallets < 0))) throw new Error('signaturePad.bolNotReady');

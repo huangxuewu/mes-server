@@ -9,7 +9,7 @@ if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/data_sync_test_[a-z\d_]+(?:\?|$
         const collection = connection.db.collection.bind(connection.db);
         connection.db.collection = name => {
             const target = collection(name);
-            if (name === 'syncJournalV2') {
+            if (name === 'syncJournalV3') {
                 const insert = target.insertMany.bind(target);
                 target.insertMany = async (...args) => {
                     const result = await insert(...args);
