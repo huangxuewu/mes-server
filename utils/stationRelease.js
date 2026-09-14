@@ -51,6 +51,7 @@ const compareVersions = (left, right) => {
 let cached;
 let expiresAt = 0;
 let pending;
+let lastReleaseFailure = '';
 const getLatestRelease = async ({ force = false } = {}) => {
     if (!force && cached && Date.now() < expiresAt) return cached;
     if (pending) return pending;
@@ -59,7 +60,10 @@ const getLatestRelease = async ({ force = false } = {}) => {
             const manifest = await getReleaseManifest('latest', { force });
             cached = { version: manifest.version, error: '' };
             expiresAt = Date.now() + 60000;
-        } catch {
+            lastReleaseFailure = '';
+        } catch (error) {
+            lastReleaseFailure = [error.code, error.response?.status && `HTTP ${error.response.status}`, error.message]
+                .filter(Boolean).join(': ').replace(/[\r\n]+/g, ' ').slice(0, 300) || 'Unknown release lookup error';
             cached = { version: cached?.version || '', error: 'releaseUnavailable' };
             expiresAt = Date.now() + 15000;
         }
@@ -84,7 +88,7 @@ const startReleaseChecks = () => {
     if (releaseCheckTimer) return;
     const refresh = async () => {
         const release = await getLatestRelease({ force: true });
-        if (release.error) console.error('[Station updates] Latest release unavailable; retrying in one minute.');
+        if (release.error) console.error(`[Station updates] Latest release unavailable; retrying in one minute. Reason: ${lastReleaseFailure}`);
     };
     void refresh();
     releaseCheckTimer = setInterval(refresh, 60000);

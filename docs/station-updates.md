@@ -7,6 +7,8 @@ The backend queries GitHub at startup without blocking startup, refreshes the
 release cache every minute, and rechecks when an operator deploys. Concurrent
 requests share the same lookup. A discovery failure retains the last known version for display
 but disables deployment until a check succeeds.
+Failed background checks log the underlying error code, HTTP status when present,
+and error message. A socket connection does not trigger this background retry loop.
 
 The deployment command includes the version shown to the operator. If the latest
 release changed before the command is sent, the backend updates the roster and
