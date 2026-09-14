@@ -147,9 +147,15 @@ const verifyBolMigration = async (database) => {
         }
     }
     if (embedded) errors.push(`${embedded} embedded BOL fields remain`);
+    const sourcesByDocument = new Map();
+    for await (const source of database.collection('bolMigrationSource').find({})) {
+        archived++;
+        const id = String(source.documentId);
+        if (!sourcesByDocument.has(id)) sourcesByDocument.set(id, []);
+        sourcesByDocument.get(id).push(source);
+    }
     for await (const audit of database.collection('bolMigrationAudit').find({})) {
-        const sources = await database.collection('bolMigrationSource').find({ documentId: audit._id }).toArray();
-        archived += sources.length;
+        const sources = sourcesByDocument.get(String(audit._id)) || [];
         const selected = sources.find(source => source.outboundId === audit.selected.outboundId && source.shipmentId === audit.selected.shipmentId);
         if (sources.length !== audit.sourceCount || !selected || fingerprint(selected.bol) !== audit.fingerprint) errors.push(`Invalid source archive: ${audit._id}`);
         const document = documents.get(String(audit._id));
@@ -159,7 +165,6 @@ const verifyBolMigration = async (database) => {
             if (fingerprint(selectedFields) !== audit.fingerprint) errors.push(`Migrated content differs from selection: ${audit._id}`);
         }
     }
-    archived = await database.collection('bolMigrationSource').countDocuments();
     return { verifiedAt: new Date().toISOString(), ok: !errors.length, documents: documents.size, shipments, references, embedded, archived,
         load77925000: { shipments: targetReferences.length, documents: new Set(targetReferences).size }, errors };
 };
