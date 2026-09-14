@@ -16,9 +16,10 @@ const inspectBolMigration = async (database, onProgress = () => {}) => {
         orders++;
         for (const load of record.loads || []) {
             loads++;
-            if (load.bolId && !load.bol) { migrated++; continue; }
-            if (!load.bol) continue;
-            const source = { outboundId: String(record._id), poNumber: record.poNumber, shipmentId: load.shipmentId, loadNumber: load.loadNumber || '', bol: load.bol };
+            if (load.bolId && !Object.hasOwn(load, 'bol')) { migrated++; continue; }
+            if (!Object.hasOwn(load, 'bol')) continue;
+            const source = { outboundId: String(record._id), poNumber: record.poNumber, shipmentId: load.shipmentId, loadNumber: load.loadNumber || '', bol: load.bol,
+                ...(load.bolId ? { bolId: load.bolId } : {}) };
             if (!load.shipmentId || record.loads.filter(row => row.shipmentId === load.shipmentId).length !== 1) {
                 invalid.push({ ...source, bol: undefined, reason: 'Missing or duplicated shipment ID' }); continue;
             }
@@ -110,10 +111,16 @@ const migrateBolDocuments = async ({ connection, inspection, resolutions = {}, c
         } finally { await session.endSession(); }
     }
     for (const source of empty) {
-        const changed = await database.collection('outbound').updateOne({ _id: new ObjectId(source.outboundId),
-        loads: { $elemMatch: { shipmentId: source.shipmentId, bol: source.bol } } },
-    { $set: { 'loads.$.bolId': null }, $unset: { 'loads.$.bol': '' } });
-        if (changed.matchedCount !== 1) throw new Error(`Empty BOL ${source.shipmentId} changed after inspection`);
+        const session = await connection.startSession();
+        try {
+            await session.withTransaction(async () => {
+                const changed = await database.collection('outbound').updateOne({ _id: new ObjectId(source.outboundId),
+                    loads: { $elemMatch: { shipmentId: source.shipmentId, bol: source.bol } } },
+                { $set: { 'loads.$.bolId': source.bolId || null }, $unset: { 'loads.$.bol': '' } }, { session });
+                if (changed.matchedCount !== 1) throw new Error(`Empty BOL ${source.shipmentId} changed after inspection`);
+                await database.collection('bolMigrationSource').insertOne({ ...source, documentId: source.bolId || null, migratedAt: new Date() }, { session });
+            });
+        } finally { await session.endSession(); }
     }
     return result;
 };
@@ -152,6 +159,7 @@ const verifyBolMigration = async (database) => {
             if (fingerprint(selectedFields) !== audit.fingerprint) errors.push(`Migrated content differs from selection: ${audit._id}`);
         }
     }
+    archived = await database.collection('bolMigrationSource').countDocuments();
     return { verifiedAt: new Date().toISOString(), ok: !errors.length, documents: documents.size, shipments, references, embedded, archived,
         load77925000: { shipments: targetReferences.length, documents: new Set(targetReferences).size }, errors };
 };

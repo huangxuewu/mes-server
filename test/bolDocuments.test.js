@@ -148,3 +148,14 @@ test('migration detects a concurrent edit and rolls back document creation and a
     assert.equal(await f.db.bolDocument.countDocuments(), 0);
     assert.equal(await f.db.outbound.collection.countDocuments({ 'loads.bol': { $exists: true } }), 2);
 });
+
+ test('missing and empty historical BOLs remain optional and create no placeholder documents', integration, async t=>{
+    const f=await fixture(t,3);
+    await f.db.outbound.collection.updateOne({poNumber:'PO-0'},{$set:{'loads.0.bol':null}});
+    await f.db.outbound.collection.updateOne({poNumber:'PO-1'},{$set:{'loads.0.bol':{number:''}}});
+    const inspection=await inspectBolMigration(f.connection.db);assert.equal(inspection.report.documents,0);assert.equal(inspection.report.emptyCopies,2);
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'bol-empty-'));t.after(()=>fs.rmSync(dir,{recursive:true}));
+    await migrateBolDocuments({connection:f.connection,inspection,apply:true,backupPath:path.join(dir,'backup.jsonl')});
+    const rows=await f.db.outbound.collection.find().toArray();assert.ok(rows.every(row=>!row.loads[0].bolId&&!Object.hasOwn(row.loads[0],'bol')));
+    assert.equal(await f.db.bolDocument.countDocuments(),0);assert.equal((await verifyBolMigration(f.connection.db)).ok,true);
+ });
