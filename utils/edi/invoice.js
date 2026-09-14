@@ -86,12 +86,6 @@ const inspectInvoice = (po, mes, record = {}) => {
     const invoice = invoices[0];
     if (record.transactionId && invoice && record.transactionId !== invoice.id)
         throw new Error('ERP invoice differs from the recorded invoice. Review in ERP.');
-    if (invoice) return { poNumber: po.po_number, invoiceNumber: invoice.business_number, invoice,
-        transactionId: invoice.id, ready: false, reasons: [], asns: [],
-        asnAccepted: transactions.some(transaction => transaction.transaction_type === '856')
-            && transactions.filter(transaction => transaction.transaction_type === '856').every(accepted),
-        loadNumbers: [...new Set((mes.loads || []).map(load => load.loadNumber))],
-        pdfPath: record.pdfPath || '', pdfSavedAt: record.pdfSavedAt || null };
     const asns = new Map();
     for (const transaction of transactions.filter(transaction => transaction.transaction_type === '856')) {
         const set = transactionSet(transaction);
@@ -99,6 +93,11 @@ const inspectInvoice = (po, mes, record = {}) => {
         if (!id) throw new Error('ASN shipment identification is missing');
         if (!asns.has(id) || new Date(transaction.created_at) > new Date(asns.get(id).created_at)) asns.set(id, transaction);
     }
+    if (invoice) return { poNumber: po.po_number, invoiceNumber: invoice.business_number, invoice,
+        transactionId: invoice.id, ready: false, reasons: [], asns: [],
+        asnAccepted: asns.size > 0 && [...asns.values()].every(accepted),
+        loadNumbers: [...new Set((mes.loads || []).map(load => load.loadNumber))],
+        pdfPath: record.pdfPath || '', pdfSavedAt: record.pdfSavedAt || null };
     const required = new Map();
     const items = [...(po.items || [])].sort((a, b) => Number(a.id) - Number(b.id)).map((item, index) => {
         const quantity = Number(item.total_item_qty);

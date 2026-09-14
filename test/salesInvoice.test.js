@@ -73,6 +73,30 @@ test('invoice eligibility waits for the ASN recorded on the noticed load, not an
     po.edi_transaction.push({ ...structuredClone(po.edi_transaction[0]), id: '101', created_at: '2026-09-02' });
     assert.equal(inspectInvoice(po, mes).ready, true);
 });
+
+test('invoiced POs use the latest ASN per shipment instead of superseded failed attempts', () => {
+    const { po, mes, invoice } = fixture();
+    const earlier = po.edi_transaction[0];
+    const replacement = { ...structuredClone(earlier), id: '101', created_at: '2026-09-02' };
+    Object.assign(earlier, { validation_status: 'INVALID', delivery_status: 'PENDING', acknowledgment_status: 'NOT_ACKNOWLEDGED' });
+    po.edi_transaction = [replacement, invoice, earlier];
+    assert.equal(inspectInvoice(po, mes).asnAccepted, true);
+    assert.equal(inspectInvoice(po, mes).ready, false, 'an accepted replacement must not re-enable invoicing');
+    po.edi_transaction.reverse();
+    assert.equal(inspectInvoice(po, mes).asnAccepted, true, 'ERP array order does not select the current ASN');
+    replacement.acknowledgment_status = 'NOT_ACKNOWLEDGED';
+    Object.assign(earlier, { validation_status: 'VALID', delivery_status: 'DELIVERED', acknowledgment_status: 'ACCEPTED' });
+    assert.equal(inspectInvoice(po, mes).asnAccepted, false, 'an older acceptance cannot hide a pending replacement');
+    replacement.acknowledgment_status = 'ACCEPTED';
+    const other = { ...structuredClone(replacement), id: '102', business_number: '11', acknowledgment_status: 'NOT_ACKNOWLEDGED' };
+    other.document.json_data.transactionSets[0].beginningSegmentForShipNotice[0].shipmentIdentification = '11';
+    po.edi_transaction.push(other);
+    assert.equal(inspectInvoice(po, mes).asnAccepted, false, 'each distinct shipment must be accepted');
+    other.acknowledgment_status = 'ACCEPTED';
+    assert.equal(inspectInvoice(po, mes).asnAccepted, true);
+    po.edi_transaction = [invoice];
+    assert.equal(inspectInvoice(po, mes).asnAccepted, false, 'an invoice alone is not ASN acceptance evidence');
+});
 test('PO cancellation deadline is not mistaken for a cancelled order', () => {
     const { po, mes } = fixture();
     po.canceled_date = '2026-09-08';
