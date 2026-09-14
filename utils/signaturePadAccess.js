@@ -15,6 +15,16 @@ const normalizeBolBarcode = barcode => {
 };
 
 const createSignaturePadAccess = ({ models, secret, getUser }) => {
+    const gateDetails = async (raw, loadNumber, session) => {
+        if (raw.driver_signature || !loadNumber || (String(raw.trailer || '').trim() && String(raw.seal_number || '').trim())) return {};
+        let query = models.hauler.findOne({ loadNumber, status: { $ne: 'Cancelled' } }).sort({ arrivedAt: -1, createdAt: -1, _id: -1 });
+        if (session) query = query.session(session);
+        const truck = await query.lean();
+        const details = {};
+        if (!String(raw.trailer || '').trim() && String(truck?.trailer || '').trim()) details.trailer = String(truck.trailer).trim();
+        if (!String(raw.seal_number || '').trim() && String(truck?.seal || '').trim()) details.seal_number = String(truck.seal).trim();
+        return details;
+    };
     const authenticate = async token => {
         if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new Error('signaturePad.deviceUnauthorized');
         const device = await models.signaturePadDevice.findOne({ tokenHash: hash(token), revoked: false }).lean();
@@ -84,7 +94,26 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                     return { needsGeneration: true, bolNumber: number, loadNumber: targets[0].loadNumber };
                 }
             }
-            const { targets, revision, dualRevision, printRevision } = await findBol(number);
+            let { targets, revision, dualRevision, printRevision } = await findBol(number);
+            if (!targets.some(target => target.raw.driver_signature || ['Completed', 'Cancelled'].includes(target.status))
+                && Object.keys(await gateDetails(targets[0].raw, targets[0].loadNumber)).length) {
+                const session = await models.outbound.startSession();
+                try {
+                    await session.withTransaction(async () => {
+                        const fresh = await findBol(number, session);
+                        if (fresh.targets.some(target => target.raw.driver_signature || ['Completed', 'Cancelled'].includes(target.status))) return;
+                        const details = await gateDetails(fresh.targets[0].raw, fresh.targets[0].loadNumber, session);
+                        if (!Object.keys(details).length) return;
+                        const fields = Object.fromEntries(Object.entries(details).map(([key, value]) => [`loads.$[target].bol.rawData.${key}`, value]));
+                        for (const target of fresh.targets) {
+                            const updated = await models.outbound.updateOne({ _id: target.outboundId, loads: { $elemMatch: { shipmentId: target.shipmentId, 'bol.number': number } } },
+                                { $set: fields }, { arrayFilters: [{ 'target.shipmentId': target.shipmentId, 'target.bol.number': number }], session });
+                            if (updated.matchedCount !== 1) throw new Error('signaturePad.bolChanged');
+                        }
+                    });
+                } finally { await session.endSession(); }
+                ({ targets, revision, dualRevision, printRevision } = await findBol(number));
+            }
             const signed = targets.some(target => target.raw.driver_signature);
             if (signed && targets.some(target => target.raw.signature_pad_requires_shipper && !target.raw.shipper_signature)) throw new Error('signaturePad.bolNotReady');
             if (signed && !allowSigned) throw new Error('signaturePad.alreadySigned');
@@ -100,6 +129,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
             const grant = jwt.sign({ kind: signed ? 'signature-pad-print' : 'signature-pad-bol', deviceId: device._id, number,
                 revision: signed ? printRevision : requiresShipper ? dualRevision : revision, requiresShipper, documentId }, secret, { expiresIn: '30m', algorithm: 'HS256' });
             return { documentId, grant, signed, requiresShipper, bolNumber: number, loadNumber: targets[0].loadNumber,
+                trailerNumber: String(raw.trailer || '').trim(),
                 carrierName: String(raw.carrier_name || ''), shipTo: String(raw.ship_to?.name || ''), copies: targets.length };
         },
         async prepare(device, input) {
@@ -113,6 +143,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                         return;
                     }
                     const raw = buildOutboundBol(targets, number);
+                    Object.assign(raw, await gateDetails(raw, targets[0].loadNumber, session));
                     for (const target of targets) {
                         const updated = await models.outbound.updateOne({ _id: target.outboundId, loads: { $elemMatch: { shipmentId: target.shipmentId, 'bol.number': number } } },
                             { $set: { 'loads.$[target].bol.rawData': raw } },

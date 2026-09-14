@@ -17,6 +17,7 @@ const setup = () => {
     const raw = { bill_of_lading_number: number, load_number: 'LOAD-1', carrier_name: 'Hub Group', ship_to: { name: 'Warehouse' }, shipper_signature: 'original-shipper', driver_signature: '', items: [{ quantity: 24 }] };
     let records = [1, 2].map(id => ({ _id: `outbound-${id}`, loads: [{ shipmentId: `shipment-${id}`, loadNumber: 'LOAD-1', status: 'Loading', bol: { number, rawData: structuredClone(raw) } }] }));
     const devices = new Map();
+    const trucks = [];
     let writes = 0, failAt = 0, ended = 0;
     const outbound = {
         find(query) {
@@ -47,9 +48,12 @@ const setup = () => {
         },
         async updateOne(query, update) { const row = [...devices.values()].find(row => matches(row, query)); if (row) Object.assign(row, update.$set); },
     };
-    const models = { outbound, signaturePadDevice, user: { findById: () => ({ lean: async () => user }) } };
+    const hauler = { findOne: query => ({ sort() { return this; }, session() { return this; }, lean: async () => structuredClone(trucks
+        .filter(truck => truck.loadNumber === query.loadNumber && truck.status !== query.status.$ne)
+        .sort((a, b) => new Date(b.arrivedAt || 0) - new Date(a.arrivedAt || 0))[0] || null) }) };
+    const models = { outbound, hauler, signaturePadDevice, user: { findById: () => ({ lean: async () => user }) } };
     const access = createSignaturePadAccess({ models, secret: 'test-only-signing-key', getUser: async () => user });
-    return { access, models, device, user, raw, records: () => records, devices, writes: () => writes, ended: () => ended, failWrite: value => { failAt = value; },
+    return { access, models, device, user, raw, trucks, records: () => records, devices, writes: () => writes, ended: () => ended, failWrite: value => { failAt = value; },
         lookup: () => access.lookup(device, barcode), input: async grant => ({ grant, submissionId: randomUUID(), image: await image }) };
 };
 
@@ -65,6 +69,7 @@ const uncreated = () => {
 
 test('valid shipments create one shared BOL and require both handwritten signatures', async () => {
     const t = uncreated();
+    t.trucks.push({ loadNumber: 'LOAD-1', trailer: ' GATE-123 ', seal: ' SEAL-456 ' });
     assert.equal((await t.access.lookup(t.device, barcode, true, true)).needsGeneration, true);
     assert.equal(t.writes(), 0, 'Lookup only identifies the generation step');
     const prepared = await t.access.prepare(t.device, { barcode });
@@ -72,6 +77,8 @@ test('valid shipments create one shared BOL and require both handwritten signatu
     const raw = t.records()[0].loads[0].bol.rawData;
     assert.equal(raw.bill_of_lading_number, number);
     assert.equal(raw.carrier_name, 'Hub Group');
+    assert.equal(raw.trailer, 'GATE-123'); assert.equal(raw.seal_number, 'SEAL-456');
+    assert.equal(prepared.trailerNumber, 'GATE-123');
     assert.deepEqual(raw.grand_totals.customer_order_info, { pkgs: 25, plts: 2, weight: 101 });
     assert.equal(raw.customer_order_info[0].customer_order_number, '062-123451');
     assert.equal(raw.customer_order_info.length, 10); assert.equal(raw.commodity_info.length, 4);
@@ -209,8 +216,57 @@ test('durable device authorization hashes tokens and enforces owner, revocation 
     t.user.role = 'System'; await assert.rejects(t.access.authenticate(next.token), /deviceUnauthorized/);
 });
 
+test('gate registration fills only blank BOL fields and invalidates earlier signing requests', async () => {
+    const t = setup();
+    for (const record of t.records()) record.loads[0].bol.rawData.trailer = 'BOL-EDIT';
+    const before = await t.lookup();
+    t.trucks.push({ loadNumber: 'OTHER', trailer: 'WRONG', seal: 'WRONG', arrivedAt: '2026-09-15' },
+        { loadNumber: 'LOAD-1', trailer: 'OLD', seal: 'OLD', arrivedAt: '2026-09-13' },
+        { loadNumber: 'LOAD-1', trailer: 'GATE-123', seal: ' SEAL-456 ', arrivedAt: '2026-09-14' },
+        { loadNumber: 'LOAD-1', trailer: 'CANCELLED', seal: 'CANCELLED', status: 'Cancelled', arrivedAt: '2026-09-15' });
+    const found = await t.lookup();
+    assert.equal(found.trailerNumber, 'BOL-EDIT');
+    for (const record of t.records()) {
+        assert.equal(record.loads[0].bol.rawData.trailer, 'BOL-EDIT');
+        assert.equal(record.loads[0].bol.rawData.seal_number, 'SEAL-456');
+    }
+    await assert.rejects(t.access.sign(t.device, await t.input(before.grant)), /bolChanged/);
+    await t.access.sign(t.device, await t.input(found.grant));
+    const signed = structuredClone(t.records());
+    t.trucks[2].trailer = 'NEW'; t.trucks[2].seal = 'NEW';
+    await t.access.lookup(t.device, barcode, true);
+    assert.deepEqual(t.records(), signed, 'Signed BOLs are never changed by gate records');
+});
+
+test('gate details preserve a manually edited seal and roll back merged BOLs on failure', async () => {
+    const t = setup();
+    for (const record of t.records()) record.loads[0].bol.rawData.seal_number = 'BOL-SEAL';
+    t.trucks.push({ loadNumber: 'LOAD-1', trailer: 'GATE-123', seal: 'GATE-SEAL' });
+    const before = structuredClone(t.records());
+    t.failWrite(2);
+    await assert.rejects(t.lookup(), /simulated write failure/);
+    assert.deepEqual(t.records(), before);
+    const found = await t.lookup();
+    assert.equal(found.trailerNumber, 'GATE-123');
+    for (const record of t.records()) assert.equal(record.loads[0].bol.rawData.seal_number, 'BOL-SEAL');
+});
+
+test('gate fallback cannot alter a merged BOL with an already signed copy', async () => {
+    const t = setup();
+    t.records()[1].loads[0].bol.rawData.driver_signature = await image;
+    t.trucks.push({ loadNumber: 'LOAD-1', trailer: 'GATE-123', seal: 'SEAL-456' });
+    const before = structuredClone(t.records());
+    await assert.rejects(t.access.lookup(t.device, barcode, true), /ambiguousBol/);
+    assert.deepEqual(t.records(), before);
+    assert.equal(t.writes(), 0);
+});
+
 test('lookup returns document details and updates only the driver signature on every merged copy', async () => {
-    const t = setup(); const found = await t.lookup();
+    const t = setup();
+    assert.equal((await t.lookup()).trailerNumber, '');
+    for (const record of t.records()) record.loads[0].bol.rawData.trailer = ' T-123 ';
+    const found = await t.lookup();
+    assert.equal(found.trailerNumber, 'T-123');
     assert.equal(found.bolNumber, number); assert.equal(found.loadNumber, 'LOAD-1'); assert.equal(found.carrierName, 'Hub Group'); assert.equal(found.copies, 2);
     const input = await t.input(found.grant); const saved = await t.access.sign(t.device, input);
     assert.equal(saved.documentId, found.documentId);
