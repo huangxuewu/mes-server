@@ -53,6 +53,146 @@ const setup = () => {
         lookup: () => access.lookup(device, barcode), input: async grant => ({ grant, submissionId: randomUUID(), image: await image }) };
 };
 
+const uncreated = () => {
+    const t = setup();
+    for (const [index, record] of t.records().entries()) {
+        Object.assign(record, { poNumber: `12345${index}`, name: 'Target DC', address: '123 Test Road', city: 'Test City', state: 'SC', zip: '29646' });
+        Object.assign(record.loads[0], { assignedSCAC: 'HBGI', executingSCAC: '', cartons: 12 + index, pallets: 1, weight: 50 + index });
+        record.loads[0].bol.rawData = null;
+    }
+    return t;
+};
+
+test('valid shipments create one shared BOL and require both handwritten signatures', async () => {
+    const t = uncreated();
+    assert.equal((await t.access.lookup(t.device, barcode, true, true)).needsGeneration, true);
+    assert.equal(t.writes(), 0, 'Lookup only identifies the generation step');
+    const prepared = await t.access.prepare(t.device, { barcode });
+    assert.equal(prepared.requiresShipper, true); assert.equal(prepared.signed, false);
+    const raw = t.records()[0].loads[0].bol.rawData;
+    assert.equal(raw.bill_of_lading_number, number);
+    assert.equal(raw.carrier_name, 'Hub Group');
+    assert.deepEqual(raw.grand_totals.customer_order_info, { pkgs: 25, plts: 2, weight: 101 });
+    assert.equal(raw.customer_order_info[0].customer_order_number, '062-123451');
+    assert.equal(raw.customer_order_info.length, 10); assert.equal(raw.commodity_info.length, 4);
+    assert.deepEqual(raw, t.records()[1].loads[0].bol.rawData);
+    await t.access.prepare(t.device, { barcode }); assert.equal(t.writes(), 2, 'Generation retries keep the existing document');
+    const input = await t.input(prepared.grant);
+    await assert.rejects(t.access.sign(t.device, input), /shipperRequired/);
+    await assert.rejects(t.access.sign(t.device, { ...input, shipperImage: 'invalid' }), /invalidImage/);
+    input.shipperImage = await image;
+    const saved = await t.access.sign(t.device, input);
+    assert.deepEqual(await t.access.sign(t.device, input), saved, 'Both signatures have idempotent retries');
+    assert.equal(t.writes(), 4);
+    for (const record of t.records()) {
+        assert.equal(record.loads[0].bol.rawData.shipper_signature, input.shipperImage);
+        assert.equal(record.loads[0].bol.rawData.driver_signature, input.image);
+    }
+    assert.equal((await t.access.lookup(t.device, barcode, true, true)).signed, true);
+    await t.access.authorize(t.user, t.device._id);
+    const print = await t.access.printData(t.user, { grant: prepared.grant, deviceId: t.device._id, submissionId: input.submissionId });
+    assert.equal(print.bol.shipper_signature, input.shipperImage);
+    await assert.rejects(saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': raw }), /alreadySigned/);
+    const edited = structuredClone(t.records()[0].loads[0].bol.rawData); edited.shipper_signature = 'overwritten';
+    await assert.rejects(saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': edited }), /alreadySigned/);
+});
+
+test('generation rejects incomplete, completed, ambiguous and uploaded-only shipments without writing', async () => {
+    for (const change of [
+        t => { t.records()[0].address = ''; },
+        t => { t.records()[0].loads[0].cartons = 0; },
+        t => { t.records()[0].loads[0].status = 'Completed'; },
+        t => { t.records()[0].loads[0].status = 'Cancelled'; },
+        t => { t.records()[0].loads[0].carrierSCAC = 'DMSP'; },
+        t => { t.records()[0].loads[0].bol.url = 'https://example.com/saved.pdf'; },
+        t => { t.records()[1].loads[0].loadNumber = 'OTHER'; },
+        t => { t.records()[1].address = 'Different destination'; },
+        t => { t.records()[1].loads[0].bol.rawData = t.raw; },
+        t => { t.records().splice(0); },
+    ]) {
+        const t = uncreated(); change(t);
+        await assert.rejects(t.access.lookup(t.device, barcode, true, true), /bolNotReady|bolCompleted|ambiguousBol|bolNotFound/);
+        await assert.rejects(t.access.prepare(t.device, { barcode }), /bolNotReady|bolCompleted|ambiguousBol|bolNotFound/);
+        assert.equal(t.writes(), 0);
+    }
+});
+
+test('generation preserves LTL billing and consolidation destination rules', async () => {
+    const t = uncreated();
+    for (const record of t.records()) record.loads[0].assignedSCAC = 'CHXD';
+    await t.access.prepare(t.device, { barcode });
+    const raw = t.records()[0].loads[0].bol.rawData;
+    assert.equal(raw.carrier_name, 'CH Robinson'); assert.equal(raw.freight_charge_terms, 'third_party');
+    assert.equal(raw.bill_to.name, 'TARGET CORP C/O CHRLTL'); assert.equal(raw.customer_order_info[0].pallet_slip, 'Y');
+    const c = uncreated();
+    for (const record of c.records()) { record.loads[0].assignedSCAC = 'SCII'; record.address = record._id; }
+    await c.access.prepare(c.device, { barcode });
+    assert.equal(c.records()[0].loads[0].bol.rawData.ship_to.address, '2590 Campbell Blvd');
+});
+
+test('generation and dual signature saves roll back all merged copies on failure', async () => {
+    const t = uncreated(); t.failWrite(2);
+    await assert.rejects(t.access.prepare(t.device, { barcode }), /simulated/);
+    assert.ok(t.records().every(record => !record.loads[0].bol.rawData));
+    const prepared = await t.access.prepare(t.device, { barcode });
+    const input = { ...await t.input(prepared.grant), shipperImage: await image };
+    t.failWrite(t.writes() + 2);
+    await assert.rejects(t.access.sign(t.device, input), /simulated/);
+    assert.ok(t.records().every(record => !record.loads[0].bol.rawData.shipper_signature && !record.loads[0].bol.rawData.driver_signature));
+    await t.access.sign(t.device, input);
+});
+
+test('a document created elsewhere during generation is preserved and ordinary scans stay driver-only', async () => {
+    const t = setup(); const before = structuredClone(t.records());
+    const prepared = await t.access.prepare(t.device, { barcode });
+    assert.equal(prepared.requiresShipper, false); assert.equal(t.writes(), 0); assert.deepEqual(t.records(), before);
+    await assert.rejects(t.access.sign(t.device, { ...await t.input(prepared.grant), shipperImage: await image }), /invalidMessage/);
+});
+
+test('changed shipment quantities and destinations invalidate generated unsigned BOLs', async () => {
+    for (const change of [t => { t.records()[0].loads[0].cartons++; }, t => { t.records()[0].address = 'New address'; }]) {
+        const t = uncreated(); const prepared = await t.access.prepare(t.device, { barcode });
+        change(t);
+        await assert.rejects(t.access.lookup(t.device, barcode, true, true), /bolChanged/);
+        await assert.rejects(t.access.sign(t.device, { ...await t.input(prepared.grant), shipperImage: await image }), /bolChanged/);
+        assert.equal(t.writes(), 2);
+    }
+});
+
+test('deleting and regenerating identical shipments invalidates old signing grants', async () => {
+    const t = uncreated(); const original = await t.access.prepare(t.device, { barcode });
+    const oldId = t.records()[0].loads[0].bol.rawData.signature_pad_document_id;
+    await saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': null, 'bol.url': null });
+    const replacement = await t.access.prepare(t.device, { barcode });
+    assert.notEqual(t.records()[0].loads[0].bol.rawData.signature_pad_document_id, oldId);
+    await assert.rejects(t.access.sign(t.device, { ...await t.input(original.grant), shipperImage: await image }), /bolChanged/);
+    await t.access.sign(t.device, { ...await t.input(replacement.grant), shipperImage: await image });
+});
+
+test('a shipper signature added in MES resumes driver signing and cannot be overwritten by an older two-party scan', async () => {
+    const t = uncreated(); const original = await t.access.prepare(t.device, { barcode });
+    const draft = structuredClone(t.records()[0].loads[0].bol.rawData);
+    draft.shipper_signature = 'saved-in-MES'; draft.shipper_signature_date = '2026-09-14T16:00:00Z';
+    await saveBolDraft(t.models.outbound, { loadNumber: 'LOAD-1' }, { 'bol.rawData': draft });
+    await assert.rejects(t.access.sign(t.device, { ...await t.input(original.grant), shipperImage: await image }), /bolChanged/);
+    const found = await t.access.lookup(t.device, barcode, true, true);
+    assert.equal(found.requiresShipper, false);
+    const input = await t.input(found.grant); await t.access.sign(t.device, input);
+    await t.access.authorize(t.user, t.device._id);
+    const printed = await t.access.printData(t.user, { grant: found.grant, submissionId: input.submissionId, deviceId: t.device._id });
+    assert.equal(printed.bol.shipper_signature, 'saved-in-MES');
+});
+
+test('two phones cannot replace each other’s saved signatures, but the winner can retry after completion', async () => {
+    const t = uncreated(); const first = await t.access.prepare(t.device, { barcode });
+    const other = { _id: 'pad-two' }; const second = await t.access.lookup(other, barcode, true, true);
+    const input = { ...await t.input(first.grant), shipperImage: await image };
+    const saved = await t.access.sign(t.device, input);
+    await assert.rejects(t.access.sign(other, { ...await t.input(second.grant), shipperImage: await image }), /alreadySigned/);
+    for (const record of t.records()) record.loads[0].status = 'Completed';
+    assert.deepEqual(await t.access.sign(t.device, input), saved);
+});
+
 test('reads the printed MES Code 128, human-readable AI, and scanner AIM prefixes', () => {
     for (const value of [barcode, `(401)${number}`, `]C0${barcode}\r\n`, `]C1${barcode}`, `(401)8401 7970 8423 6010 7`]) assert.equal(normalizeBolBarcode(value), number);
     for (const value of ['', number, '(400)123', '401', 'https://example.com', null, 'x'.repeat(129)]) assert.throws(() => normalizeBolBarcode(value), /invalidBarcode/);
@@ -133,7 +273,23 @@ test('HTTPS API authentication rejects anonymous and revoked devices before look
         const credential = await t.access.authorize(t.user, t.device._id);
         const headers = { Authorization: `Bearer ${credential.token}`, 'Content-Type': 'application/json' };
         const response = await fetch(`${url}/bol/lookup`, { method: 'POST', headers, body: JSON.stringify({ barcode }) });
-        assert.equal(response.status, 200); assert.equal((await response.json()).payload.bolNumber, number);
+        assert.equal(response.status, 200);
+        const found = (await response.json()).payload;
+        assert.equal(found.bolNumber, number);
+        const signingResponse = await fetch(`${url}/bol/sign`, { method: 'POST', headers, body: JSON.stringify(await t.input(found.grant)) });
+        assert.equal(signingResponse.status, 200);
+        const signedResponse = await fetch(`${url}/bol/lookup`, { method: 'POST', headers, body: JSON.stringify({ barcode, allowSigned: true }) });
+        assert.equal(signedResponse.status, 200);
+        assert.equal((await signedResponse.json()).payload.signed, true);
+        t.records().splice(0, t.records().length, ...uncreated().records());
+        const pendingResponse = await fetch(`${url}/bol/lookup`, { method: 'POST', headers, body: JSON.stringify({ barcode, allowSigned: true, allowCreate: true }) });
+        assert.equal((await pendingResponse.json()).payload.needsGeneration, true);
+        const prepareResponse = await fetch(`${url}/bol/prepare`, { method: 'POST', headers, body: JSON.stringify({ barcode }) });
+        assert.equal(prepareResponse.status, 200);
+        const prepared = (await prepareResponse.json()).payload;
+        assert.equal(prepared.requiresShipper, true);
+        const bothResponse = await fetch(`${url}/bol/sign`, { method: 'POST', headers, body: JSON.stringify({ ...await t.input(prepared.grant), shipperImage: await image }) });
+        assert.equal(bothResponse.status, 200);
         assert.equal((await fetch(`${url}/revoke`, { method: 'POST', headers, body: '{}' })).status, 200);
         assert.equal((await fetch(`${url}/bol/lookup`, { method: 'POST', headers, body: JSON.stringify({ barcode }) })).status, 401);
     } finally { await new Promise(resolve => server.close(resolve)); }
@@ -170,6 +326,43 @@ test('a deleted printed BOL is not found even when its number remains on the shi
 test('a partially missing merged BOL remains unready instead of signing a remaining copy', async () => {
     const t = setup(); t.records()[1].loads[0].bol.rawData = null;
     await assert.rejects(t.lookup(), /bolNotReady/); assert.equal(t.writes(), 0);
+});
+
+test('signed BOL scans issue print-only grants, including historical signatures and completed loads', async () => {
+    const t = setup(); await t.access.authorize(t.user, t.device._id);
+    for (const record of t.records()) {
+        record.loads[0].status = 'Completed';
+        Object.assign(record.loads[0].bol.rawData, { driver_signature: await image, driver_signature_date: '2026-09-14' });
+    }
+    const before = structuredClone(t.records());
+    const found = await t.access.lookup(t.device, barcode, true);
+    assert.equal(found.signed, true);
+    assert.equal(found.bolNumber, number);
+    await assert.rejects(t.lookup(), /alreadySigned/, 'Older pads retain their existing behavior');
+    await assert.rejects(t.access.sign(t.device, await t.input(found.grant)), /deviceUnauthorized/);
+    const request = { grant: found.grant, submissionId: randomUUID(), deviceId: t.device._id };
+    const printable = await t.access.printData(t.user, request);
+    assert.equal(printable.documentId, found.documentId);
+    assert.deepEqual(printable.bol, before[0].loads[0].bol.rawData);
+    assert.deepEqual(t.records(), before);
+    assert.equal(t.writes(), 0);
+    await assert.rejects(t.access.printData(t.user, { ...request, deviceId: 'another-pad' }), /deviceUnauthorized/);
+    await assert.rejects(t.access.printData({ ...t.user, status: 'Inactive' }, request), /deviceUnauthorized/);
+    for (const record of t.records()) record.loads[0].bol.rawData.driver_signature_date = '2026-09-15';
+    await assert.rejects(t.access.printData(t.user, request), /bolChanged/);
+    const updated = await t.access.lookup(t.device, barcode, true);
+    await t.access.revoke(t.user, t.device._id);
+    await assert.rejects(t.access.printData(t.user, { ...request, grant: updated.grant }), /deviceUnauthorized/);
+});
+
+test('signed scan printing rejects partially signed copies and does not unlock unsigned completed loads', async () => {
+    const t = setup();
+    t.records()[0].loads[0].bol.rawData.driver_signature = await image;
+    await assert.rejects(t.access.lookup(t.device, barcode, true), /ambiguousBol/);
+    t.records()[0].loads[0].bol.rawData.driver_signature = '';
+    t.records()[0].loads[0].status = 'Completed';
+    await assert.rejects(t.access.lookup(t.device, barcode, true), /bolCompleted/);
+    assert.equal(t.writes(), 0);
 });
 
 test('explicit deletion releases signed merged BOLs so a replacement can be signed', async () => {

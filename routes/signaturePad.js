@@ -10,10 +10,10 @@ module.exports = (models = require('../models')) => {
         try { req.pad = await access.authenticate(req.get('Authorization')?.replace(/^Bearer /, '')); next(); }
         catch { res.status(401).json({ status: 'error', message: 'signaturePad.deviceUnauthorized' }); }
     });
-    router.use(express.json({ limit: '300kb' }));
-    for (const operation of ['lookup', 'sign']) router.post(`/bol/${operation}`, async (req, res) => {
+    router.use(express.json({ limit: '600kb' }));
+    for (const operation of ['lookup', 'prepare', 'sign']) router.post(`/bol/${operation}`, async (req, res) => {
         try {
-            const payload = operation === 'lookup' ? await access.lookup(req.pad, req.body?.barcode) : await access.sign(req.pad, req.body);
+            const payload = operation === 'lookup' ? await access.lookup(req.pad, req.body?.barcode, req.body?.allowSigned === true, req.body?.allowCreate === true) : await access[operation](req.pad, req.body);
             res.json({ status: 'success', payload });
         } catch (error) {
             const message = error.message?.startsWith('signaturePad.') ? error.message : 'signaturePad.serverUnavailable';

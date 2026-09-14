@@ -14,6 +14,13 @@ module.exports = async (model, selector, data) => {
             for (const { id, load } of targets) {
                 const previous = load.bol?.rawData || {};
                 if (!deleting) {
+                    if (previous.shipper_signature_submission_id && (previous.shipper_signature !== draft.shipper_signature
+                        || previous.shipper_signature_date !== draft.shipper_signature_date
+                        || previous.shipper_signature_submission_id !== draft.shipper_signature_submission_id
+                        || previous.shipper_signature_device_id !== draft.shipper_signature_device_id)) throw new Error('signaturePad.alreadySigned');
+                    if (previous.signature_pad_requires_shipper && !draft.signature_pad_requires_shipper) throw new Error('signaturePad.bolChanged');
+                    if (previous.signature_pad_document_id && (previous.signature_pad_document_id !== draft.signature_pad_document_id
+                        || previous.signature_pad_source_revision !== draft.signature_pad_source_revision)) throw new Error('signaturePad.bolChanged');
                     if (previous.driver_signature && previous.driver_signature !== draft.driver_signature) throw new Error('signaturePad.alreadySigned');
                     if (load.status === 'Completed' && (previous.driver_signature || '') !== (draft.driver_signature || '')) throw new Error('signaturePad.bolCompleted');
                     if ((previous.driver_signature_submission_id || '') !== (draft.driver_signature_submission_id || '')) throw new Error('signaturePad.bolChanged');
