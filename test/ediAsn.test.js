@@ -6,7 +6,7 @@ const { buildAsn, transactionState, submitAsns, ASN_QUERY, ACCOUNT_QUERY, CREATE
 
 const fixture = (loadNumber = "1234") => {
     const mes = { loadNumber, shipmentId: "SHIP1", poNumber: "PO-0555", checklist: { loaded: { status: true } },
-        bol: { number: "84017971234567890", url: "https://www.dropbox.com/bol", rawData: { carrier_name: "Test Carrier" } },
+        bolDocument: { number: "84017971234567890", url: "https://www.dropbox.com/bol", rawData: { carrier_name: "Test Carrier" } },
         items: [{ styleCode: "PILLOW", upc: "012345678901", quantity: 12, backorder: 4, casePack: 4 }] };
     const shipment = { id: 1, load_shipment_notice_id: "SHIP1", load: { id: 20, load_number: loadNumber, bol_number: "ERP-OLD" },
         shipment_notice: { shipment_id: "SHIP1", assigned_scac: "TEST", status: "Carrier Accepted", cartons: 3 },
@@ -25,7 +25,7 @@ test("ASN uses MES BOL, actual units after backorders, ERP SSCCs and Central tim
     assert.equal(document.beginningSegmentForShipNotice[0].date, "20260909");
     assert.equal(document.beginningSegmentForShipNotice[0].time, "2030");
     assert.equal(document.beginningSegmentForShipNotice[0].shipmentIdentification, "1");
-    assert.deepEqual(document.HL_loop[0].referenceInformation.map(item => item.referenceIdentification), [mes.bol.number, mes.bol.number]);
+    assert.deepEqual(document.HL_loop[0].referenceInformation.map(item => item.referenceIdentification), [mes.bolDocument.number, mes.bolDocument.number]);
     const items = document.HL_loop.filter(level => level.hierarchicalLevel[0].hierarchicalLevelCode === "I");
     assert.equal(items.length, 2);
     assert.equal(items.reduce((sum, item) => sum + Number(item.itemDetailShipment[0].numberOfUnitsShipped), 0), 8);
@@ -45,7 +45,7 @@ test("mapping, quantities, case packs, labels, cancelled notices and missing BOL
         [m => { m.items[0].styleCode = "OTHER"; m.items[0].upc = "OTHER"; }, /uniquely match/],
         [(m, s) => { s.load_packings = []; }, /insufficient/],
         [(m, s) => { s.load_packings[1].packing_number = "001"; }, /duplicate/],
-        [m => { m.bol.number = ""; }, /MES BOL/],
+        [m => { m.bolDocument.number = ""; }, /MES BOL/],
     ]) {
         const { mes, shipment } = fixture(); mutate(mes, shipment);
         assert.throws(() => buildAsn(shipment, mes), error);
@@ -152,7 +152,7 @@ test("validate all loaded POs before any create, and detect conflicting existing
     await assert.rejects(submitAsns({ shipments: [f.mes, { ...f.mes, shipmentId: "missing" }] }, f.options), /matching ERP shipment/);
     assert.equal(f.calls.filter(call => call.query === CREATE_ASN).length, 0);
     await submitAsns({ shipments: [f.mes] }, f.options);
-    f.mes.bol.number = "99999";
+    f.mes.bolDocument.number = "99999";
     await assert.rejects(submitAsns({ shipments: [f.mes] }, f.options), /different BOL or quantities/);
     assert.equal(f.calls.filter(call => call.query === CREATE_ASN).length, 1);
 });
@@ -194,7 +194,7 @@ test("unloaded shipments and missing MES BOL links cannot reach ERP writes", asy
     f.mes.checklist.loaded.status = false;
     await assert.rejects(submitAsns({ shipments: [f.mes] }, f.options), /load and upload/);
     f.mes.checklist.loaded.status = true;
-    f.mes.bol.url = "";
+    f.mes.bolDocument.url = "";
     await assert.rejects(submitAsns({ shipments: [f.mes] }, f.options), /load and upload/);
     assert.equal(f.calls.filter(call => call.query === CREATE_ASN || call.query === "upload").length, 0);
 });

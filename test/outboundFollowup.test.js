@@ -74,6 +74,24 @@ test('failed ASN submission never marks Noticed', async () => {
     assert.equal(writes, 0);
 });
 
+test('ASN submission resolves the referenced BOL document before building the request', async () => {
+    const document = { _id: new mongoose.Types.ObjectId(), number: '84017970842584717', url: 'https://example.test/bol.pdf', rawData: { carrier_name: 'Test Carrier' } };
+    let submitted;
+    const { handlers } = fixture({
+        outbound: { find: () => ({ lean: async () => [{ poNumber: 'PO1', loads: [{ shipmentId: 'SHIP1', loadNumber: '1234', bolId: document._id }] }] }) },
+        bolDocument: { aggregate: pipeline => ({ session: async () => {
+            assert.equal(String(pipeline[0].$match._id.$in[0]), String(document._id));
+            assert.equal(pipeline.length, 1);
+            return [document];
+        } }) },
+    }, async request => { submitted = request.shipments; return {}; });
+    let result;
+    await handlers['bill-of-lading:submit-asn']({ loadNumber: '1234', shipmentIdArray: ['SHIP1'] }, response => { result = response; });
+    assert.equal(result.status, 'success');
+    assert.equal(submitted[0].bolDocument, document);
+    assert.equal(Object.hasOwn(submitted[0], 'bol'), false);
+});
+
 test('warehouse saves cannot overwrite hidden follow-up flags from a stale checklist', async () => {
     let update;
     const { handlers } = fixture({ outbound: {

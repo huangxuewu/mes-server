@@ -653,7 +653,8 @@ module.exports = (socket, io) => {
                 throw new Error("Loaded shipment IDs are required");
             if (typeof loadNumber !== "string") throw new Error("Load number is required");
             if (retryShipmentId !== undefined && (typeof retryShipmentId !== 'string' || !shipmentIdArray.includes(retryShipmentId))) throw new Error('Retry shipment must belong to the selected load');
-            const documents = await db.outbound.find({ loads: { $elemMatch: { loadNumber, shipmentId: { $in: shipmentIdArray } } } }).lean();
+            const documents = await attachBolDocuments(db,
+                await db.outbound.find({ loads: { $elemMatch: { loadNumber, shipmentId: { $in: shipmentIdArray } } } }).lean(), { full: true });
             const shipments = documents.flatMap(({ loads, ...parent }) => loads
                 .filter(load => load.loadNumber === loadNumber && shipmentIdArray.includes(load.shipmentId))
                 .map(load => ({ ...parent, ...load })));

@@ -79,7 +79,7 @@ const latestAsn = shipment => (shipment.po?.edi_transaction || [])
 const buildAsn = (shipment, mes, now = new Date()) => {
     const po = shipment.po;
     const notice = shipment.shipment_notice;
-    const bolNumber = normalize(mes.bol?.number || mes.bol?.rawData?.bill_of_lading_number);
+    const bolNumber = normalize(mes.bolDocument?.number || mes.bolDocument?.rawData?.bill_of_lading_number);
     if (!/^\d+$/.test(bolNumber)) throw new Error(`PO ${mes.poNumber}: save a numeric MES BOL number first`);
     if (!po || normalize(po.po_number) !== normalize(mes.poNumber)) throw new Error(`PO ${mes.poNumber}: ERP PO does not match`);
     if (!notice || normalize(shipment.load_shipment_notice_id) !== normalize(mes.shipmentId)
@@ -93,7 +93,7 @@ const buildAsn = (shipment, mes, now = new Date()) => {
     const consolidated = ["SCII", "SQKO"].includes(notice.assigned_scac);
     const method = consolidated && notice.pro ? "C" : notice.executing_scac ? "U" : "M";
     const carrier = method === "C" ? "Southeast Consolidators - GA" : method === "U" ? "CH Robinson"
-        : mes.bol?.rawData?.carrier_name || mes.carrierContact?.name || notice.assigned_scac;
+        : mes.bolDocument?.rawData?.carrier_name || mes.carrierContact?.name || notice.assigned_scac;
     const scac = consolidated ? "SOCS" : notice.assigned_scac;
     const quantities = new Map();
     if (!Array.isArray(mes.items) || !mes.items.length) throw new Error(`PO ${mes.poNumber}: MES sending quantities are missing`);
@@ -231,7 +231,7 @@ const submitAsns = async ({ shipments, retryShipmentId }, { clientFactory = getC
         const plans = [];
         for (const mes of selected) {
             onProgress({ phase: 'preparing', poNumber: mes.poNumber, shipmentId: mes.shipmentId });
-            if (!mes.checklist?.loaded?.status || !mes.bol?.url) throw new Error(`PO ${mes.poNumber}: load and upload the MES BOL first`);
+            if (!mes.checklist?.loaded?.status || !mes.bolDocument?.url) throw new Error(`PO ${mes.poNumber}: load and upload the MES BOL first`);
             const matches = rows.filter(row => normalize(row.load_shipment_notice_id) === normalize(mes.shipmentId) && normalize(row.po?.po_number) === normalize(mes.poNumber));
             if (matches.length !== 1) throw new Error(`PO ${mes.poNumber}: expected one matching ERP shipment, found ${matches.length}`);
             const shipment = await verifyShipment(matches[0]);
