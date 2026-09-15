@@ -5,6 +5,34 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../utils/documentLifecycle.js'), 'utf8');
+
+test('scheduled lifecycle refresh does not overlap a slow pass and resumes after failure', async () => {
+    let tick, resolveRead, rejectRead, reads = 0;
+    const errors = [], module = { exports: {} };
+    const db = { document: { find: () => ({ select() { return this; }, lean: () => {
+        reads++;
+        return new Promise((resolve, reject) => { resolveRead = resolve; rejectRead = reject; });
+    } }) } };
+    vm.runInNewContext(source, { module, Date,
+        console: { error: (...args) => errors.push(args) },
+        setInterval: callback => { tick = callback; return { unref() {} }; },
+        require: name => name === '../models' ? db : name === './documentAccess'
+            ? { protectedDocumentEmitter: io => io } : require('../utils/memoryDiagnostics'),
+    });
+    module.exports.startDocumentLifecycle({});
+    assert.equal(reads, 1);
+    await tick(); await tick();
+    assert.equal(reads, 1, 'timer ticks must not start more reads while the first is pending');
+    rejectRead(new Error('Database unavailable'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(errors.length, 1);
+    const second = tick();
+    assert.equal(reads, 2);
+    resolveRead([]); await second;
+    const third = tick();
+    assert.equal(reads, 3);
+    resolveRead([]); await third;
+});
 const fixture = (records, mutateAfterRead) => {
     const calls = [], emitted = [];
     const copy = value => structuredClone(value);

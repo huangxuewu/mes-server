@@ -15,9 +15,13 @@ const image = { type: "image", attrs: { src: asset.url } };
 const fixture = ({ owner = {}, others = [], revisions = [], failure, missing = false, liveDocuments = new Map(), changed = false } = {}) => {
     const removed = [];
     const deleted = [];
-    const query = (value) => ({ select: () => ({ lean: async () => value }) });
+    const query = (value) => ({ select() { return this; }, lean() { return this; },
+        then(resolve, reject) { return Promise.resolve(value).then(resolve, reject); },
+        cursor: () => ({ async *[Symbol.asyncIterator]() { yield* value; }, async close() {} }),
+    });
     const db = {
         document: {
+            findById: () => query({ _id: "doc1", attachments: [asset], ...owner }),
             find: () => query([{ _id: "doc1", attachments: [asset], ...owner }, ...others]),
             exists: async () => changed,
             updateOne: async (_, update) => removed.push(...update.$pull.attachments._id.$in),
@@ -122,12 +126,20 @@ test("live and persisted collaboration references protect a resource", async () 
     for (const input of [
         { liveDocuments: new Map([["doc1", shared]]) },
         { owner: { yjsState: Buffer.from(Y.encodeStateAsUpdate(shared)) } },
+        { owner: { yjsState: new (require('mongoose').mongo.Binary)(Y.encodeStateAsUpdate(shared)) } },
     ]) {
         const result = fixture(input);
         await result.run();
         assert.deepEqual(result.deleted, []);
     }
     shared.destroy();
+});
+
+test('corrupt persisted collaboration state prevents resource deletion', async () => {
+    const result = fixture({ owner: { yjsState: Buffer.from([1]) } });
+    await assert.rejects(result.run());
+    assert.deepEqual(result.deleted, []);
+    assert.deepEqual(result.removed, []);
 });
 
 test("Dropbox errors retain metadata, and already missing files can finish cleanup", async () => {
@@ -146,4 +158,45 @@ test("cleanup cannot delete another document's file or a folder path", async () 
         assert.deepEqual(result.deleted, []);
     }
     assert.equal(resourceKey(asset.url), resourceKey("https://dl.dropboxusercontent.com/scl/fi/photo/photo.png?dl=0"));
+});
+
+test('missing owners and non-resource selections do not scan the document corpus', async () => {
+    for (const owner of [null, { attachments: [asset] }]) {
+        const db = { document: { findById: () => ({ select: () => ({ lean: async () => owner }) }),
+            find: () => { throw new Error('unexpected corpus read'); } },
+            documentRevision: { find: () => { throw new Error('unexpected revision read'); } } };
+        await cleanupDocumentResources({ documentId: 'doc1', resourceIds: ['different-asset'], db, dropbox: {} });
+    }
+});
+
+test('failed document or revision scans close the cursor and cannot delete files', async () => {
+    for (const failed of ['documents', 'revisions']) {
+        const closed = [], reads = [];
+        const query = name => ({ select() { return this; }, lean() { return this; }, cursor(options) {
+            assert.equal(options.batchSize, 32);
+            reads.push(name);
+            return { async *[Symbol.asyncIterator]() {
+                yield name === 'documents' ? { _id: 'doc1', attachments: [asset] } : {};
+                if (failed === name) throw new Error('Read interrupted');
+            }, async close() { closed.push(name); } };
+        } });
+        const db = { document: { findById: () => ({ select: () => ({ lean: async () => ({ attachments: [asset] }) }) }),
+            find: () => query('documents') }, documentRevision: { find: () => query('revisions') } };
+        await assert.rejects(cleanupDocumentResources({ documentId: 'doc1', resourceIds: ['resource1'], db,
+            dropbox: { filesDeleteV2: () => assert.fail('incomplete reference scan must never delete') } }), /Read interrupted/);
+        assert.deepEqual(closed, reads);
+    }
+});
+
+test('scanning 5000 synthetic documents does not retain their bodies or text references', { timeout: 15000 }, async t => {
+    const { stdout } = await require('node:util').promisify(require('node:child_process').execFile)(process.execPath,
+        ['--expose-gc', path.join(__dirname, 'support/documentResourceMemory.cjs')], { timeout: 12000 });
+    const result = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+    t.diagnostic(JSON.stringify(result));
+    assert.equal(result.documents, 5000);
+    assert.equal(result.materializedReads, 0);
+    assert.equal(result.closed, 2);
+    // The original implementation retained more than 52 MiB of this corpus.
+    // Heap retention is the regression signal; RSS depends on the native allocator.
+    assert.ok(result.heapGrowthMiB < 8, `Retained ${result.heapGrowthMiB} MiB`);
 });

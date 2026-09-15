@@ -14,16 +14,18 @@ const resourceKey = (value) => {
     }
 };
 
-const collectReferences = (value, references) => {
-    if (typeof value === "string") references.add(resourceKey(value));
-    else if (Array.isArray(value)) value.forEach((item) => collectReferences(item, references));
-    else if (value && typeof value === "object") Object.values(value).forEach((item) => collectReferences(item, references));
+const collectReferences = (value, references, candidates) => {
+    if (typeof value === "string") {
+        const key = resourceKey(value);
+        if (candidates.has(key)) references.add(key);
+    } else if (Array.isArray(value)) value.forEach((item) => collectReferences(item, references, candidates));
+    else if (value && typeof value === "object") Object.values(value).forEach((item) => collectReferences(item, references, candidates));
 };
 
-const collectSharedReferences = (node, references) => {
-    if (node.getAttributes) collectReferences(node.getAttributes(), references);
-    if (node.toDelta) collectReferences(node.toDelta(), references);
-    if (node.toArray) node.toArray().forEach((child) => collectSharedReferences(child, references));
+const collectSharedReferences = (node, references, candidates) => {
+    if (node.getAttributes) collectReferences(node.getAttributes(), references, candidates);
+    if (node.toDelta) collectReferences(node.toDelta(), references, candidates);
+    if (node.toArray) node.toArray().forEach((child) => collectSharedReferences(child, references, candidates));
 };
 
 const isResource = (asset) => !/\/original\//i.test(asset.storagePath || "")
@@ -32,34 +34,39 @@ const isResource = (asset) => !/\/original\//i.test(asset.storagePath || "")
 
 const cleanupDocumentResources = async ({ documentId, resourceIds, db, dropbox, liveDocuments = new Map() }) => {
     const checkedAt = new Date();
-    const [documents, revisions] = await Promise.all([
-        db.document.find({}).select("contentJson formSchema thumbnail attachments +yjsState").lean(),
-        db.documentRevision.find({}).select("contentJson formSchema artifacts").lean(),
-    ]);
-    const owner = documents.find((document) => String(document._id) === String(documentId));
+    const owner = await db.document.findById(documentId).select("attachments").lean();
     if (!owner) return;
+    const assets = (owner.attachments || []).filter(asset => resourceIds.includes(String(asset._id)) && isResource(asset));
+    if (!assets.length) return;
+    // Keep only candidate file keys, not every text string in the document corpus.
+    const candidates = new Set(assets.flatMap(asset => [resourceKey(asset.url), asset.storagePath]));
     const references = new Set();
-    for (const document of documents) {
-        collectReferences([document.contentJson, document.formSchema, document.thumbnail], references);
-        collectReferences((document.attachments || []).filter((asset) => String(document._id) !== String(documentId) || !isResource(asset)), references);
-        // The collaboration state can be newer than the last JSON autosave.
-        if (document.yjsState?.length) {
-            const shared = new Y.Doc();
-            try {
-                Y.applyUpdate(shared, new Uint8Array(document.yjsState));
-                collectSharedReferences(shared.getXmlFragment("default"), references);
-            } finally {
-                shared.destroy();
+    const documents = db.document.find({}).select("contentJson formSchema thumbnail attachments +yjsState").lean().cursor({ batchSize: 32 });
+    try {
+        for await (const document of documents) {
+            collectReferences([document.contentJson, document.formSchema, document.thumbnail], references, candidates);
+            collectReferences((document.attachments || []).filter((asset) => String(document._id) !== String(documentId) || !isResource(asset)), references, candidates);
+            // The collaboration state can be newer than the last JSON autosave.
+            const state = document.yjsState?._bsontype === 'Binary' ? document.yjsState.value() : document.yjsState;
+            if (state?.length) {
+                const shared = new Y.Doc();
+                try {
+                    Y.applyUpdate(shared, new Uint8Array(state));
+                    collectSharedReferences(shared.getXmlFragment("default"), references, candidates);
+                } finally {
+                    shared.destroy();
+                }
             }
         }
-    }
-    collectReferences(revisions, references);
+    } finally { await documents.close(); }
+    const revisions = db.documentRevision.find({}).select("contentJson formSchema artifacts").lean().cursor({ batchSize: 32 });
+    try {
+        for await (const revision of revisions) collectReferences(revision, references, candidates);
+    } finally { await revisions.close(); }
     const removedIds = [];
     try {
-        for (const asset of owner.attachments || []) {
-            if (!resourceIds.includes(String(asset._id))) continue;
-            if (!isResource(asset)) continue;
-            for (const shared of liveDocuments.values()) collectSharedReferences(shared.getXmlFragment("default"), references);
+        for (const asset of assets) {
+            for (const shared of liveDocuments.values()) collectSharedReferences(shared.getXmlFragment("default"), references, candidates);
             if (references.has(resourceKey(asset.url)) || references.has(asset.storagePath)) continue;
             // Only individual files owned by this document may be deleted.
             const prefixes = [`/DocumentCenter/${documentId}/`, `/DH MES/document/${documentId}/`, `/MES/DocumentCenter/${documentId}/`];
@@ -74,7 +81,7 @@ const cleanupDocumentResources = async ({ documentId, resourceIds, db, dropbox, 
                     db.documentRevision.exists({ updatedAt: { $gte: checkedAt } }),
                 ]);
                 if (changedDocument || changedRevision) return;
-                for (const shared of liveDocuments.values()) collectSharedReferences(shared.getXmlFragment("default"), references);
+                for (const shared of liveDocuments.values()) collectSharedReferences(shared.getXmlFragment("default"), references, candidates);
                 if (references.has(resourceKey(asset.url)) || references.has(asset.storagePath)) continue;
                 await dropbox.filesDeleteV2({ path: asset.storagePath });
             } catch (error) {

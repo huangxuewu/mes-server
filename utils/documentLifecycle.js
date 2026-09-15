@@ -38,10 +38,16 @@ const refreshDocumentLifecycle = require('./memoryDiagnostics').wrap('job:docume
 });
 
 const startDocumentLifecycle = (io) => {
-    refreshDocumentLifecycle(io).catch((error) => console.error("Document lifecycle:", error.message));
-    const timer = setInterval(() => {
-        refreshDocumentLifecycle(io).catch((error) => console.error("Document lifecycle:", error.message));
-    }, LIFECYCLE_INTERVAL_MS);
+    let pending = false;
+    const run = async () => {
+        if (pending) return;
+        pending = true;
+        try { await refreshDocumentLifecycle(io); }
+        catch (error) { console.error("Document lifecycle:", error.message); }
+        finally { pending = false; }
+    };
+    void run();
+    const timer = setInterval(run, LIFECYCLE_INTERVAL_MS);
     timer.unref?.();
     return timer;
 };
