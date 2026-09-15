@@ -31,6 +31,7 @@ const buildOutboundBol = (targets, number, now = new Date()) => {
     const commodity = { handling_unit_qty: '', handling_unit_type: '', package_qty: '', package_type: '', weight: '', hm: '', commodity_description: '', ltl_only_nmfc: '', ltl_only_class: '' };
     const orders = [...targets].sort((a, b) => b.load.cartons - a.load.cartons).map(target => ({ ...order,
         customer_order_number: `062-${target.record.poNumber}`, pkgs: target.load.cartons, weight: target.load.weight,
+        shipment_id: target.load.shipmentId, inspected: target.load.checklist?.inspected?.status === true, loaded: target.load.checklist?.loaded?.status === true,
         plts: target.load.pallets ?? '', pallet_slip: ltl ? 'Y' : 'N' }));
     while (orders.length < 10) orders.push({ ...order });
     return {

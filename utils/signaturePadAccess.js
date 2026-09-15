@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { hasPermission } = require('../socket/session');
 const { buildOutboundBol, outboundBolSourceRevision } = require('./buildOutboundBol');
+const { buildBolWorkflow, applyBolWorkflow } = require('./bolWorkflow');
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const allowed = user => user?.status === 'Active' && user.role !== 'System' && hasPermission(user, 'module', 'office');
@@ -32,14 +33,14 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
         return device;
     };
     const findTargets = async (number, session) => {
-        let documentQuery = models.bolDocument.find({ number }, { number: 1, url: 1, rawData: 1 });
+        let documentQuery = models.bolDocument.find({ number }, { number: 1, url: 1, rawData: 1, loadNumber: 1, inspectionSignatures: 1 });
         if (session) documentQuery = documentQuery.session(session);
         const documents = await documentQuery.lean();
         if (!documents.length) throw new Error('signaturePad.bolNotFound');
         const byId = new Map(documents.map(document => [String(document._id), document]));
         let query = models.outbound.find({ 'loads.bolId': { $in: documents.map(document => document._id) } },
             { poNumber: 1, name: 1, address: 1, city: 1, state: 1, zip: 1,
-                'loads.bolId': 1, 'loads.shipmentId': 1, 'loads.loadNumber': 1, 'loads.status': 1,
+                'loads.bolId': 1, 'loads.shipmentId': 1, 'loads.loadNumber': 1, 'loads.status': 1, 'loads.checklist': 1, 'loads.inspectionRelease': 1,
                 'loads.assignedSCAC': 1, 'loads.executingSCAC': 1, 'loads.carrierSCAC': 1,
                 'loads.proNumber': 1, 'loads.chRobinsonNumber': 1, 'loads.cartons': 1, 'loads.weight': 1, 'loads.pallets': 1 });
         if (session) query = query.session(session);
@@ -166,9 +167,14 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
             const device = await models.signaturePadDevice.findOne({ _id: input.deviceId, revoked: false }).lean();
             if (!device || !allowed(await getUser(device.ownerId))) throw new Error('signaturePad.deviceUnauthorized');
             const { targets, revision, dualRevision, printRevision } = await findBol(grant.number);
+            const printable = async () => {
+                const records = await models.outbound.find({ 'loads.loadNumber': targets[0].loadNumber }, { poNumber: 1, loads: 1 }).lean();
+                return applyBolWorkflow(targets[0].raw, buildBolWorkflow(
+                    { ...targets[0].bolDocument, loadNumber: targets[0].loadNumber }, records), true);
+            };
             if (grant.kind === 'signature-pad-print') {
                 if (printRevision !== grant.revision || targets.some(target => !target.raw.driver_signature)) throw new Error('signaturePad.bolChanged');
-                return { documentId: grant.documentId, bol: targets[0].raw };
+                return { documentId: grant.documentId, bol: await printable() };
             }
             if ((grant.requiresShipper ? dualRevision : revision) !== grant.revision || targets.some(target => !target.raw.driver_signature
                 || target.raw.driver_signature !== targets[0].raw.driver_signature || target.raw.driver_signature_date !== targets[0].raw.driver_signature_date
@@ -176,7 +182,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                 || (grant.requiresShipper && (!target.raw.shipper_signature || target.raw.shipper_signature !== targets[0].raw.shipper_signature
                     || target.raw.shipper_signature_date !== targets[0].raw.shipper_signature_date
                     || target.raw.shipper_signature_submission_id !== input.submissionId || target.raw.shipper_signature_device_id !== input.deviceId)))) throw new Error('signaturePad.bolChanged');
-            return { documentId: grant.documentId, bol: targets[0].raw };
+            return { documentId: grant.documentId, bol: await printable() };
         },
         async sign(device, input) {
             let grant;

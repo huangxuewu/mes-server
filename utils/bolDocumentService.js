@@ -1,10 +1,20 @@
+const { buildBolWorkflow, applyBolWorkflow } = require('./bolWorkflow');
+
 const createBolDocumentService = models => {
     const { outbound, bolDocument } = models;
+    const workflows = async documents => {
+        if (!documents.length) return new Map();
+        const records = await outbound.find({ $or: documents.map(document => document.loadNumber
+            ? { 'loads.loadNumber': document.loadNumber } : { 'loads.shipmentId': document.shipmentId }) },
+            { poNumber: 1, loads: 1 }).lean();
+        return new Map(documents.map(document => [String(document._id), buildBolWorkflow(document, records)]));
+    };
     const get = async ({ loadNumber, documentId, shipmentId }) => {
         if ([loadNumber, documentId, shipmentId].some(value => value != null && typeof value !== 'string')) throw new Error('Invalid BOL identity');
         if (!loadNumber && !documentId && !shipmentId) throw new Error('BOL load number or shipment ID is required');
-        return bolDocument.findOne(documentId ? { _id: documentId, ...(loadNumber ? { loadNumber } : {}) }
+        const document = await bolDocument.findOne(documentId ? { _id: documentId, ...(loadNumber ? { loadNumber } : {}) }
             : loadNumber ? { loadNumber } : { loadNumber: '', shipmentId }).lean();
+        return document ? { ...document, workflow: (await workflows([document])).get(String(document._id)) } : null;
     };
     const sync = async ({ targets }) => {
         if (!Array.isArray(targets) || targets.length > 20) throw new Error('Invalid BOL cache targets');
@@ -14,7 +24,9 @@ const createBolDocumentService = models => {
             return target.loadNumber ? { loadNumber: target.loadNumber } : { loadNumber: '', shipmentId: target.shipmentId };
         });
         if (!selectors.length) return [];
-        const metadata = await bolDocument.find({ $or: selectors }, { loadNumber: 1, shipmentId: 1, revision: 1, updatedAt: 1 }).lean();
+        const metadata = await bolDocument.find({ $or: selectors }, { loadNumber: 1, shipmentId: 1, revision: 1, updatedAt: 1,
+            inspectionSignatures: 1 }).lean();
+        const currentWorkflows = await workflows(metadata);
         const changed = targets.map((target, index) => {
             const current = metadata.find(document => selectors[index].loadNumber
                 ? document.loadNumber === target.loadNumber : !document.loadNumber && document.shipmentId === target.shipmentId);
@@ -24,8 +36,11 @@ const createBolDocumentService = models => {
         });
         const ids = [...new Map(changed.filter(row => row.current && !row.unchanged).map(row => [String(row.current._id), row.current._id])).values()];
         const documents = ids.length ? await bolDocument.find({ _id: { $in: ids } }).lean() : [];
-        return changed.map(({ current, unchanged }) => unchanged ? { unchanged: true }
-            : { document: documents.find(document => String(document._id) === String(current?._id)) || null });
+        return changed.map(({ current, unchanged }) => {
+            const workflow = currentWorkflows.get(String(current?._id));
+            const document = documents.find(document => String(document._id) === String(current?._id));
+            return unchanged ? { unchanged: true, workflow } : { document: document ? { ...document, workflow } : null };
+        });
     };
     const save = async ({ loadNumber = '', shipmentId, documentId, rawData, number, url, revision, shipmentIds, clear = false }) => {
         if (typeof loadNumber !== 'string' || (!loadNumber.trim() && !shipmentId)) throw new Error('BOL load number or shipment ID is required');
@@ -35,7 +50,7 @@ const createBolDocumentService = models => {
         let saved;
         try {
             await session.withTransaction(async () => {
-                const records = await outbound.find({ loads: { $elemMatch: selector } }, { loads: 1 }).session(session).lean();
+                const records = await outbound.find({ loads: { $elemMatch: selector } }, { loads: 1, poNumber: 1 }).session(session).lean();
                 const loads = records.flatMap(record => record.loads.filter(load => loadNumber ? load.loadNumber === loadNumber : load.shipmentId === shipmentId && !load.loadNumber));
                 if (!loads.length) throw new Error('signaturePad.bolChanged');
                 if (shipmentIds && (!Array.isArray(shipmentIds) || !shipmentIds.length || shipmentIds.some(id => !loads.some(load => load.shipmentId === id)))) throw new Error('Invalid BOL shipment selection');
@@ -49,6 +64,7 @@ const createBolDocumentService = models => {
                 if (number !== undefined && (draft || document?.rawData)) draft = { ...(draft || document.rawData), bill_of_lading_number: number };
                 if (draft !== undefined && !clear) {
                     if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('Invalid BOL document');
+                    draft = applyBolWorkflow(draft, buildBolWorkflow({ ...document, ...documentSelector }, records));
                     if (previous.shipper_signature_submission_id && ['shipper_signature', 'shipper_signature_date', 'shipper_signature_submission_id', 'shipper_signature_device_id']
                         .some(field => previous[field] !== draft[field])) throw new Error('signaturePad.alreadySigned');
                     if (previous.signature_pad_requires_shipper && !draft.signature_pad_requires_shipper) throw new Error('signaturePad.bolChanged');
@@ -81,7 +97,7 @@ const createBolDocumentService = models => {
                 }
             });
         } finally { await session.endSession(); }
-        return saved;
+        return { ...saved, workflow: (await workflows([saved])).get(String(saved._id)) };
     };
     return { get, sync, save };
 };
