@@ -1,5 +1,6 @@
 const { randomUUID, createHash } = require('node:crypto');
 const memory = require('./memoryDiagnostics');
+const { createSyncPageCache } = require('./syncPageCache');
 const { outboundBolPipeline } = require('./bolDocuments');
 const dayjs = require('dayjs');
 dayjs.extend(require('dayjs/plugin/utc'));
@@ -32,10 +33,13 @@ const cursorFor = (dataset, state, scope, business) => ({ dataset,
     generation: DATE_SCOPED.has(dataset) ? `${state.generation}:${business.timeZone}` : state.generation,
     sequence: state.head, scope });
 const byteSize = value => Buffer.byteLength(JSON.stringify(value));
+// Shared responses must never retain or echo extra fields from one caller's cursor to another caller.
+const copyCursor = ({ dataset, generation, sequence, scope }) => ({ dataset, generation, sequence, scope });
 
 // Raw collections keep this service independent of model import side effects and test databases.
 function createDataSync({ connection, getBusinessContext, notify = () => {}, logger = console, leaseMs = 15000, maxBytes = MAX_BYTES }) {
     const owner = randomUUID();
+    const pages = createSyncPageCache();
     const states = () => connection.db.collection('syncState');
     const journal = () => connection.db.collection(JOURNAL);
     let initializing;
@@ -49,6 +53,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
     let observedHeads = '';
     let sourceClockOffset = 0;
     let lastClockSample = 0;
+    let lastCacheReport = 0;
 
     const initialize = () => initializing ||= (async () => {
         await connection.asPromise();
@@ -204,6 +209,10 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         const state = await readState();
         const signature = JSON.stringify([state.dependencies, DATASETS.map(name => [name, state.datasets[name].generation, state.datasets[name].head])]);
         if (signature !== observedHeads) { observedHeads = signature; notify(); }
+        if (Date.now() - lastCacheReport >= 30000) {
+            lastCacheReport = Date.now();
+            logger.info('[DataSync] Shared pages', pages.stats());
+        }
     };
 
     const run = async () => {
@@ -344,6 +353,15 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                 ] } } },
             } } } },
             { $match: { 'loads.0': { $exists: true } } }, { $sort: { _id: 1 } }, { $limit: limit },
+        ], readOptions).toArray() : dataset === 'orders' ? await collection.aggregate([
+            { $match: query }, { $sort: { _id: 1 } }, { $limit: limit },
+            // Discard history and private buyer fields before transferring or decoding them in Node.
+            { $unset: 'productionLogs' },
+            { $set: { buyers: { $map: { input: { $ifNull: ['$buyers', []] }, as: 'buyer', in: {
+                $arrayToObject: { $filter: { input: { $objectToArray: '$$buyer' }, as: 'field', cond: { $in: ['$$field.k', [
+                    'poNumber', 'poDate', 'masterPO', 'name', 'address', 'city', 'state', 'zip', 'country', 'done', 'status', 'shipWindow',
+                ]] } } },
+            } } } } },
         ], readOptions).toArray() : await collection.find(query, readOptions).sort({ _id: 1 }).limit(limit).toArray();
         // List endpoints return hydrated master records; preserve their schema defaults/serialization.
         const Model = Object.values(connection.models).find(model => model.collection.name === COLLECTIONS[dataset]);
@@ -368,23 +386,30 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
     const snapshot = async ({ dataset, scope, baseline, afterId } = {}) => {
         const { state, session, business } = await beginRead(dataset, scope);
         try {
-            const cursor = baseline || cursorFor(dataset, state.datasets[dataset], scope, business);
+            const cursor = baseline ? copyCursor(baseline) : cursorFor(dataset, state.datasets[dataset], scope, business);
             validate(dataset, scope, cursor, state, business);
             if (afterId != null && (typeof afterId !== 'string' || !/^[a-f\d]{24}$/i.test(afterId)))
                 throw new SyncError('INVALID_REQUEST', 'Invalid snapshot page key');
-            const ObjectId = connection.base.mongo.ObjectId;
-            const records = await queryRecords(dataset, scope, afterId ? { _id: { $gt: new ObjectId(afterId) } } : {}, session, PAGE_SIZE + 1, business);
-            const page = { dataset, baseline: cursor, upserts: [], afterId: null, hasMore: false };
-            let pageBytes = byteSize(page);
-            for (const record of records.slice(0, PAGE_SIZE)) {
-                const recordBytes = byteSize(record);
-                if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
-                if (pageBytes + recordBytes + 256 > maxBytes) break;
-                pageBytes += recordBytes + (page.upserts.length ? 1 : 0);
-                page.upserts.push(record);
-            }
-            page.hasMore = records.length > page.upserts.length;
-            page.afterId = page.upserts.length ? String(page.upserts.at(-1)._id) : null;
+            // The current captured head is part of the key even when the caller supplies an older baseline.
+            // Every caller still validates live scope/generation/retention before and after using a shared page.
+            const key = JSON.stringify(['snapshot', dataset, scope, cursor.generation, state.datasets[dataset].head,
+                business.timeZone, cursor.sequence, afterId?.toLowerCase() || null]);
+            const page = await pages.read(key, async () => {
+                const ObjectId = connection.base.mongo.ObjectId;
+                const records = await queryRecords(dataset, scope, afterId ? { _id: { $gt: new ObjectId(afterId) } } : {}, session, PAGE_SIZE + 1, business);
+                const page = { dataset, baseline: cursor, upserts: [], afterId: null, hasMore: false };
+                let pageBytes = byteSize(page);
+                for (const record of records.slice(0, PAGE_SIZE)) {
+                    const recordBytes = byteSize(record);
+                    if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
+                    if (pageBytes + recordBytes + 256 > maxBytes) break;
+                    pageBytes += recordBytes + (page.upserts.length ? 1 : 0);
+                    page.upserts.push(record);
+                }
+                page.hasMore = records.length > page.upserts.length;
+                page.afterId = page.upserts.length ? String(page.upserts.at(-1)._id) : null;
+                return page;
+                });
             validate(dataset, scope, cursor, await readState(session), await getBusinessContext());
             return page;
         } finally { await session.endSession(); }
@@ -394,36 +419,42 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         const { state, session, business } = await beginRead(dataset, scope);
         try {
             validate(dataset, scope, cursor, state, business);
-            const target = targetCursor || cursorFor(dataset, state.datasets[dataset], scope, business);
+            cursor = copyCursor(cursor);
+            const target = targetCursor ? copyCursor(targetCursor) : cursorFor(dataset, state.datasets[dataset], scope, business);
             validate(dataset, scope, target, state, business);
             if (target.sequence < cursor.sequence) throw new SyncError('INVALID_REQUEST', 'Sync target precedes cursor');
-            const entries = await journal().find({ dataset, generation: state.datasets[dataset].generation,
-                sequence: { $gt: cursor.sequence, $lte: target.sequence } }, { session, readConcern: { level: 'majority' } })
-                .sort({ sequence: 1 }).limit(PAGE_SIZE).toArray();
-            if (entries.length !== Math.min(PAGE_SIZE, target.sequence - cursor.sequence)
-                || entries.some((entry, index) => entry.sequence !== cursor.sequence + index + 1))
-                throw new SyncError('RESET_REQUIRED', 'Change journal is no longer contiguous');
-            const records = entries.length ? await queryRecords(dataset, scope, { _id: { $in: entries.map(entry => entry.recordId) } }, session, PAGE_SIZE, business) : [];
-            const byId = new Map(records.map(record => [String(record._id), record]));
-            const page = { dataset, fromCursor: cursor, nextCursor: cursor, targetCursor: target,
-                upserts: [], removes: [], hasMore: false };
-            let pageBytes = byteSize(page);
-            const included = new Set();
-            for (const entry of entries) {
-                const id = String(entry.recordId);
-                const record = byId.get(id);
-                if (!included.has(id)) {
-                    const recordBytes = byteSize(record || id);
-                    if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
-                    if (pageBytes + recordBytes + 256 > maxBytes) break;
-                    pageBytes += recordBytes + ((record ? page.upserts : page.removes).length ? 1 : 0);
-                    record ? page.upserts.push(record) : page.removes.push(id);
-                    included.add(id);
+            const key = JSON.stringify(['pull', dataset, scope, cursor.generation, state.datasets[dataset].head,
+                business.timeZone, cursor.sequence, target.sequence]);
+            const page = await pages.read(key, async () => {
+                const entries = await journal().find({ dataset, generation: state.datasets[dataset].generation,
+                    sequence: { $gt: cursor.sequence, $lte: target.sequence } }, { session, readConcern: { level: 'majority' } })
+                    .sort({ sequence: 1 }).limit(PAGE_SIZE).toArray();
+                if (entries.length !== Math.min(PAGE_SIZE, target.sequence - cursor.sequence)
+                    || entries.some((entry, index) => entry.sequence !== cursor.sequence + index + 1))
+                    throw new SyncError('RESET_REQUIRED', 'Change journal is no longer contiguous');
+                const records = entries.length ? await queryRecords(dataset, scope, { _id: { $in: entries.map(entry => entry.recordId) } }, session, PAGE_SIZE, business) : [];
+                const byId = new Map(records.map(record => [String(record._id), record]));
+                const page = { dataset, fromCursor: cursor, nextCursor: cursor, targetCursor: target,
+                    upserts: [], removes: [], hasMore: false };
+                let pageBytes = byteSize(page);
+                const included = new Set();
+                for (const entry of entries) {
+                    const id = String(entry.recordId);
+                    const record = byId.get(id);
+                    if (!included.has(id)) {
+                        const recordBytes = byteSize(record || id);
+                        if (recordBytes + 2048 > maxBytes) throw new SyncError('RECORD_TOO_LARGE', 'A sync record exceeds the package limit');
+                        if (pageBytes + recordBytes + 256 > maxBytes) break;
+                        pageBytes += recordBytes + ((record ? page.upserts : page.removes).length ? 1 : 0);
+                        record ? page.upserts.push(record) : page.removes.push(id);
+                        included.add(id);
+                    }
+                    pageBytes += String(entry.sequence).length - String(page.nextCursor.sequence).length;
+                    page.nextCursor = { ...cursor, sequence: entry.sequence };
                 }
-                pageBytes += String(entry.sequence).length - String(page.nextCursor.sequence).length;
-                page.nextCursor = { ...cursor, sequence: entry.sequence };
-            }
-            page.hasMore = page.nextCursor.sequence < target.sequence;
+                page.hasMore = page.nextCursor.sequence < target.sequence;
+                return page;
+                });
             validate(dataset, scope, cursor, await readState(session), await getBusinessContext());
             logger.info('[DataSync] Delta', { dataset, scanned: page.nextCursor.sequence - cursor.sequence,
                 upserts: page.upserts.length, removes: page.removes.length, bytes: byteSize(page) });
@@ -431,12 +462,13 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         } finally { await session.endSession(); }
     };
 
-    return { status, snapshot, pull, initialize,
+    return { status, snapshot, pull, initialize, cacheStats: pages.stats,
         start() { if (!stopped) return; stopped = false; worker = run(); },
         async stop() {
             stopped = true; wake?.(); await stream?.close().catch(() => {}); await worker;
             if (lease) await states().updateOne({ _id: STATE_ID, owner, fence: lease.fence }, { $set: { leaseUntil: new Date(0), lastPollAt: null } });
             lease = null;
+            pages.clear();
         },
     };
 }

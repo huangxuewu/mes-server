@@ -546,6 +546,43 @@ test('order snapshots and deltas use the existing list projection and exclude pr
     assert.equal(client.records.get(String(id)).productionLogs, undefined);
 });
 
+test('25 clients share order snapshot and delta reads; a new captured head refreshes the shared page', { skip: !uri }, async t => {
+    const f = await fixture(t);
+    const orders = f.connection.db.collection('order');
+    const id = new mongoose.Types.ObjectId();
+    await orders.insertOne({ _id: id, poNumber: 'one', productionLogs: [{ payload: 'x'.repeat(10000) }],
+        buyers: [{ name: 'Buyer', privatePrice: 42, status: null }], retained: { arbitrary: true } });
+    await f.catchUp('orders', 1);
+    const original = f.connection.db.collection.bind(f.connection.db);
+    const aggregate = orders.aggregate.bind(orders);
+    let reads = 0, transferred;
+    orders.aggregate = (...args) => {
+        reads++;
+        const cursor = aggregate(...args), array = cursor.toArray.bind(cursor);
+        cursor.toArray = async () => { await new Promise(resolve => setTimeout(resolve, 100)); transferred = await array(); return transferred; };
+        return cursor;
+    };
+    f.connection.db.collection = name => name === 'order' ? orders : original(name);
+    t.after(() => { f.connection.db.collection = original; });
+    const snapshots = await Promise.all(Array.from({ length: 25 }, () => f.sync.snapshot({ dataset: 'orders', scope: 'all' })));
+    assert.equal(reads, 1);
+    assert.ok(snapshots.every(page => page === snapshots[0]));
+    assert.equal(transferred[0].productionLogs, undefined);
+    assert.equal(transferred[0].buyers[0].privatePrice, undefined);
+    assert.deepEqual(transferred[0].retained, { arbitrary: true });
+    assert.equal(transferred[0].buyers[0].status, null);
+    assert.equal(await f.sync.snapshot({ dataset: 'orders', scope: 'all' }), snapshots[0]);
+    await orders.updateOne({ _id: id }, { $set: { poNumber: 'two' } });
+    await f.catchUp('orders', 2);
+    const deltas = await Promise.all(Array.from({ length: 25 }, () => f.sync.pull({ dataset: 'orders', scope: 'all', cursor: snapshots[0].baseline })));
+    assert.equal(reads, 2); assert.ok(deltas.every(page => page === deltas[0]));
+    assert.equal(deltas[0].upserts[0].poNumber, 'two');
+    const fresh = await f.sync.snapshot({ dataset: 'orders', scope: 'all', baseline: { ...snapshots[0].baseline, callerPrivate: 'do not share' } });
+    assert.equal(reads, 3); assert.equal(fresh.upserts[0].poNumber, 'two');
+    assert.equal(fresh.baseline.callerPrivate, undefined);
+    assert.ok(f.sync.cacheStats().joins >= 48);
+});
+
 test('working-set v3 metadata coexists with v1 state during server rollout', { skip: !uri }, async t => {
     const f = await fixture(t);
     const state = f.connection.db.collection('syncState');
