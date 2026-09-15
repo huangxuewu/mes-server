@@ -51,12 +51,14 @@ module.exports = (socket, io) => {
         const { pdf } = await import("pdf-to-img");
         const doc = await pdf(pdfBuffer, { scale: 1.5 });
 
-        let page1 = null;
-        if (typeof doc.getPage === 'function') page1 = await doc.getPage(1);
-        else for await (const image of doc) { page1 = image; break; }
-
-        if (!page1) throw new Error("Failed to render first page");
-        return Buffer.isBuffer(page1) ? page1 : Buffer.from(page1);
+        try {
+            const page1 = await doc.getPage(1);
+            if (!page1) throw new Error("Failed to render first page");
+            return Buffer.isBuffer(page1) ? page1 : Buffer.from(page1);
+        } finally {
+            // PDF.js retains decoded images until its loading task is destroyed.
+            await doc.destroy();
+        }
     };
 
     // get image from url

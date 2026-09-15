@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "test:pdf-thumbnail": "node --test test/pdfThumbnail.test.js",
     "test:data-sync": "node --test test/dataSync.test.js",
     "dev": "node index.js",
     "start": "node index.js",
@@ -15,7 +16,7 @@
     "test:document-center": "node --test test/documentCenter.test.js test/documentFileCreation.test.js test/documentCollaboration.test.js test/documentCollaborationTransport.test.js test/documentRevisionExport.test.js test/documentAssetRegistration.test.js test/documentLifecycle.test.js test/documentResources.test.js test/formRevisionExport.test.js test/formPdfEvidence.test.js"
   },
   "engines": {
-    "node": ">=22 <25",
+    "node": ">=22.13.0 <25",
     "npm": ">=10"
   },
   "dependencies": {
@@ -37,7 +38,7 @@
     "md5": "^2.3.0",
     "mongoose": "^8.10.0",
     "morgan": "~1.9.1",
-    "pdf-to-img": "^5.0.0",
+    "pdf-to-img": "6.2.0",
     "pdfkit": "^0.17.2",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.4",
