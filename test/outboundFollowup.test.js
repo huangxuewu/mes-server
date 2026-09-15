@@ -29,6 +29,7 @@ const fixture = (db, submitAsns) => {
         '../../utils/bolDocuments':require('../utils/bolDocuments'), '../../utils/bolDocumentService':require('../utils/bolDocumentService'), '../../utils/dayjs': () => {}, '../../models': db, mongoose,
         'node:perf_hooks': { performance: {} }, '../../utils/outboundScac': { requiresBol: () => true },
         '../../utils/outboundOrder': {}, '../../utils/edi/asn': { submitAsns },
+        '../../utils/signaturePadWorkflow': require('../utils/signaturePadWorkflow'),
     };
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../socket/event/shipment.js'), 'utf8'), {
@@ -103,5 +104,5 @@ test('warehouse saves cannot overwrite hidden follow-up flags from a stale check
         loaded: { status: true }, noticed: { status: false }, invoiced: { status: false },
     } }, response => { result = response; });
     assert.equal(result.status, 'success');
-    assert.deepEqual(Object.keys(update), ['loads.$[target].checklist.loaded']);
+    assert.deepEqual(Object.keys(update), ['loads.$[target].checklist.loaded.status']);
 });

@@ -9,6 +9,8 @@ const { submitAsns } = require("../../utils/edi/asn");
 const { outboundBolPipeline, attachBolDocuments, resolveBolReferences } = require('../../utils/bolDocuments');
 const { createBolDocumentService } = require('../../utils/bolDocumentService');
 const bolDocuments = createBolDocumentService(db);
+const { createSignaturePadWorkflow } = require('../../utils/signaturePadWorkflow');
+const shipmentWorkflow = createSignaturePadWorkflow({ models: db });
 
 module.exports = (socket, io) => {
 
@@ -74,7 +76,12 @@ module.exports = (socket, io) => {
     socket.on("outbound:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
-            if (data.loads) await resolveBolReferences(db, data.loads);
+            if (data.loads) {
+                await resolveBolReferences(db, data.loads);
+                const previous = await db.outbound.findOne({ _id }, { loads: 1 }).lean();
+                await shipmentWorkflow.assignShipmentBarcodes(data.loads.map(load => ({ load,
+                    previous: previous?.loads?.find(row => row.shipmentId === load.shipmentId) })));
+            }
 
             await db.outbound.updateOne({ _id }, { $set: data });
 
@@ -286,7 +293,9 @@ module.exports = (socket, io) => {
             for (const [key, value] of Object.entries(data)) {
                 if (key === 'checklist' && value) {
                     for (const type of ['printed', 'picked', 'labeled', 'loading', 'loaded']) {
-                        if (value[type]) update[`loads.$[target].checklist.${type}`] = value[type];
+                        if (!value[type]) continue;
+                        for (const field of ['status', 'timestamp'])
+                            if (Object.hasOwn(value[type], field)) update[`loads.$[target].checklist.${type}.${field}`] = value[type][field];
                     }
                 } else {
                     update[`loads.$[target].${key}`] = value;
@@ -300,6 +309,11 @@ module.exports = (socket, io) => {
                 if (!load) throw new Error('Shipment was not found');
                 const changed = { ...load, ...data };
                 await resolveBolReferences(db, [changed]);
+                await shipmentWorkflow.assignShipmentBarcodes([{ load: changed, previous: load }]);
+                for (const type of ['picked', 'inspected', 'labeled']) {
+                    for (const field of ['barcode', 'barcodeLoadNumber'])
+                        update[`loads.$[target].checklist.${type}.${field}`] = changed.checklist[type][field];
+                }
                 update['loads.$[target].bolId'] = changed.bolId || null;
             }
             const shipment = await db.outbound.findOneAndUpdate(
@@ -322,6 +336,7 @@ module.exports = (socket, io) => {
             const { _id, load } = payload;
 
             await resolveBolReferences(db, [load]);
+            await shipmentWorkflow.assignShipmentBarcodes([{ load }]);
             await db.outbound.updateOne({ _id }, { $push: { loads: load } });
 
             callback?.({ status: "success", message: "Load added successfully" });
@@ -337,6 +352,8 @@ module.exports = (socket, io) => {
         try {
             await resolveBolReferences(db, [load]);
             load.status = shouldMarkCompleted(load) ? "Completed" : load.status;
+            const previous = await db.outbound.findOne({ _id }, { loads: 1 }).lean();
+            await shipmentWorkflow.assignShipmentBarcodes([{ load, previous: previous?.loads?.find(row => row.shipmentId === load.shipmentId) }]);
 
             const update = Object.keys(load).reduce((acc, key) =>
                 Object.assign(acc, { [`loads.$[elem].${key}`]: load[key] })
@@ -346,10 +363,11 @@ module.exports = (socket, io) => {
             delete update['loads.$[elem].bolSummary'];
 
             const shipment = await db.outbound.findOneAndUpdate(
-                { _id },
+                { _id, $expr: { $eq: [{ $literal: previous?.loads || [] }, '$loads'] } },
                 { $set: update },
                 { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
             );
+            if (!shipment) throw new Error('Shipment changed while saving. Refresh and try again.');
 
             callback?.({ status: "success", message: "Outbound shipment updated successfully", payload: shipment });
 
@@ -438,9 +456,11 @@ module.exports = (socket, io) => {
             timings.fetchMs = Math.round(performance.now() - startTime);
             phase = 'merge';
             const shipmentMap = new Map(shipments.map(s => [s.poNumber, s]));
-            const originalLoads = new Map(shipments.map(shipment => [shipment.poNumber, JSON.stringify(shipment.loads)]));
+            const originalLoads = new Map(shipments.map(shipment => [shipment.poNumber, shipment.loads]));
+            for (const shipment of shipments) shipment.loads = shipment.loads.map(load => ({ ...load }));
             const touchedPos = new Set();
             const allocationIssues = [];
+            const barcodeEntries = new Map();
 
             // Pass 1: merge ShipIQ load metadata
             for (const payload of payloads) {
@@ -456,9 +476,12 @@ module.exports = (socket, io) => {
                 const { loads } = shipment;
                 const loadIndex = loads.findIndex(doc => String(doc?.shipmentId ?? '').trim() === shipmentId);
                 const updatedLoad = { ...load, shipmentId };
+                const barcodeKey = `${poNumber}:${shipmentId}`;
+                if (!barcodeEntries.has(barcodeKey)) barcodeEntries.set(barcodeKey, { previous: loadIndex === -1 ? null : structuredClone(loads[loadIndex]) });
                 if (updatedLoad.bol) throw new Error('Shipment updates accept BOL references only');
                 delete updatedLoad.bolSummary;
                 delete updatedLoad.bolId;
+                delete updatedLoad.checklist;
                 for (const [field, value] of Object.entries(updatedLoad)) {
                     const fieldType = db.outbound.schema.path('loads').schema.path(field);
                     if (fieldType) updatedLoad[field] = fieldType.cast(value);
@@ -469,10 +492,12 @@ module.exports = (socket, io) => {
                     : loads.push(updatedLoad);
 
                 const loadRef = loads[loadIndex !== -1 ? loadIndex : loads.length - 1];
+                barcodeEntries.get(barcodeKey).load = loadRef;
                 loadRef.status = shouldMarkCompleted(loadRef) ? "Completed" : loadRef.status;
                 touchedPos.add(poNumber);
             }
 
+            await shipmentWorkflow.assignShipmentBarcodes([...barcodeEntries.values()]);
             await resolveBolReferences(db, [...touchedPos].flatMap(po => shipmentMap.get(po).loads));
 
             // Pass 2: if empty load's ShipIQ cartons match PO remaining, assign remaining items
@@ -510,10 +535,11 @@ module.exports = (socket, io) => {
                     if (!loadRef?.items?.length) delete loadRef.items;
                 }
 
-                if (JSON.stringify(shipment.loads) === originalLoads.get(poNumber)) continue;
+                if (JSON.stringify(shipment.loads) === JSON.stringify(originalLoads.get(poNumber))) continue;
                 bulkOps.push({
                     updateOne: {
-                        filter: { _id: shipment._id },
+                        // Literal first prevents Mongoose from adding schema defaults to the saved snapshot.
+                        filter: { _id: shipment._id, $expr: { $eq: [{ $literal: originalLoads.get(poNumber) }, '$loads'] } },
                         update: { $set: { loads: shipment.loads } }
                     }
                 });
@@ -522,8 +548,11 @@ module.exports = (socket, io) => {
             timings.mergeMs = Math.round(performance.now() - startTime) - timings.fetchMs;
             phase = 'save';
             const saveStarted = performance.now();
-            if (bulkOps.length > 0)
-                await db.outbound.bulkWrite(bulkOps);
+            if (bulkOps.length > 0) {
+                const result = await db.outbound.bulkWrite(bulkOps);
+                if (result.matchedCount !== bulkOps.length)
+                    throw new Error('Shipments changed during sync. Sync again to apply the latest data.');
+            }
             timings.saveMs = Math.round(performance.now() - saveStarted);
 
             phase = 'orders';

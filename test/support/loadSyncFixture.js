@@ -28,7 +28,7 @@ async function loadSyncFixture(uri, sources = {}) {
     const evaluate = (file, dependencies) => {
         const module = { exports: {} };
         vm.runInNewContext(sources[file] || fs.readFileSync(path.join(__dirname, '../..', file), 'utf8'), {
-            module, console: logger, Date, setTimeout, clearTimeout,
+            module, console: logger, Date, structuredClone, setTimeout, clearTimeout,
             require: name => Object.hasOwn(dependencies, name) ? dependencies[name] : createRequire(path.join(__dirname, '../..', file))(name),
         });
         return module.exports;
@@ -37,7 +37,7 @@ async function loadSyncFixture(uri, sources = {}) {
         '../socket/io': { io: { except: () => ({ emit() {} }) } },
         '../utils/outboundScac': require('../../utils/outboundScac') };
     const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common), bolDocument: evaluate('models/bolDocument.js', common),
-        hauler: evaluate('models/hauler.js', common), signaturePadDevice: evaluate('models/signaturePadDevice.js', common) };
+        hauler: evaluate('models/hauler.js', common), signaturePadDevice: evaluate('models/signaturePadDevice.js', common), counter: evaluate('models/counter.js', common) };
     await Promise.all(Object.values(db).map(model => model.init()));
     const handlers = {};
     evaluate('socket/event/shipment.js', { mongoose, '../../models': db, '../../utils/dayjs': dayjs,

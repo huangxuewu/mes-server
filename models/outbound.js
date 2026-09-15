@@ -73,10 +73,20 @@ const loadSchema = new mongoose.Schema({
             timestamp: { type: Date, default: null },
         },
         picked: {
+            barcode: String,
+            barcodeLoadNumber: String,
             status: { type: Boolean, default: false, description: "Whether all the boxes are picked and ready to be labeled" },
             timestamp: { type: Date, default: null },
         },
+        inspected: {
+            barcode: String,
+            barcodeLoadNumber: String,
+            status: { type: Boolean, default: false, description: "Whether the DC shipment has been inspected" },
+            timestamp: { type: Date, default: null },
+        },
         labeled: {
+            barcode: String,
+            barcodeLoadNumber: String,
             status: { type: Boolean, default: false, description: "Whether all the boxes are labeled" },
             timestamp: { type: Date, default: null },
         },
@@ -136,6 +146,9 @@ outboundSchema.index({ poNumber: 1 });
 outboundSchema.index({ masterPO: 1 });
 outboundSchema.index({ 'loads.bolId': 1 });
 outboundSchema.index({ 'loads.shipmentId': 1 });
+outboundSchema.index({ 'loads.checklist.picked.barcode': 1 }, { sparse: true });
+outboundSchema.index({ 'loads.checklist.inspected.barcode': 1 }, { sparse: true });
+outboundSchema.index({ 'loads.checklist.labeled.barcode': 1 }, { sparse: true });
 outboundSchema.index({ 'loads.loadNumber': 1 });
 
 const Outbound = database.model("outbound", outboundSchema, "outbound");
