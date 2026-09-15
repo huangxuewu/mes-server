@@ -1,14 +1,31 @@
 const { getActiveSessionUser, getSessionUserId } = require('./session');
 const { id, member, projectMessage } = require('../utils/messagePolicy');
-const projectTopic = async (topic, userId) => {
+const { Types: { ObjectId } } = require('mongoose');
+const projectTopics = async (topics, userId) => {
+    if (!topics.length) return [];
     const db = require('../models');
-    const { requestHash, clientRequestId, ...safe } = topic.toObject ? topic.toObject() : topic;
-    const read = await db.messageRead.findOne({ topicId: topic._id, userId }).lean();
-    const query = { topicId: topic._id, authorId: { $ne: userId }, status: { $nin: ['Deleted', 'Retracted'] } };
-    if (read?.readAt) query.$or = [{ createdAt: { $gt: read.readAt } }, { createdAt: read.readAt, _id: { $gt: read.messageId } }];
-    safe.unreadCount = await db.message.countDocuments(query);
-    return safe;
+    const reads = await db.messageRead.find({ topicId: { $in: topics.map(topic => topic._id) }, userId },
+        { topicId: 1, readAt: 1, messageId: 1 }).lean();
+    const readsByTopic = new Map(reads.map(read => [id(read.topicId), read]));
+    const unread = await db.message.aggregate([
+        { $match: { authorId: { $ne: new ObjectId(id(userId)) }, status: { $nin: ['Deleted', 'Retracted'] },
+            $or: topics.map(topic => {
+                const read = readsByTopic.get(id(topic));
+                return { topicId: new ObjectId(id(topic)), ...(read?.readAt ? { $or: [
+                    { createdAt: { $gt: read.readAt } },
+                    { createdAt: read.readAt, _id: { $gt: read.messageId } },
+                ] } : {}) };
+            }),
+        } },
+        { $group: { _id: '$topicId', count: { $sum: 1 } } },
+    ]);
+    const counts = new Map(unread.map(row => [id(row._id), row.count]));
+    return topics.map(topic => {
+        const { requestHash, clientRequestId, ...safe } = topic.toObject ? topic.toObject() : topic;
+        return { ...safe, unreadCount: counts.get(id(topic)) || 0 };
+    });
 };
+const projectTopic = async (topic, userId) => (await projectTopics([topic], userId))[0];
 const deliverTopicChange = async (io, topic) => {
     const projections = new Map();
     const participantIds = new Set(topic.participants.map(id));
@@ -49,4 +66,4 @@ const deliverMessageChange = async (io, message) => {
         } catch { /* Invalid sessions receive no protected data. */ }
     }));
 };
-module.exports = { projectTopic, deliverTopicChange, deliverMessageChange };
+module.exports = { projectTopic, projectTopics, deliverTopicChange, deliverMessageChange };

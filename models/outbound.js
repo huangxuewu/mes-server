@@ -200,8 +200,8 @@ Outbound.hooks.pre("save", async function (next) {
 
 Outbound.getActiveLoads = async () => {
     const loads = await Outbound.aggregate([
-        ...require('../utils/bolDocuments').outboundBolPipeline(),
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
+        ...require('../utils/bolDocuments').outboundBolPipeline(),
         { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
         { $match: { "loads.status": { $in: ["Carrier Accepted, Awaiting Pickup", "Past Pickup"] } } },
         { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },

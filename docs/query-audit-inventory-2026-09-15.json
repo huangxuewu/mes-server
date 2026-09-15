@@ -1,0 +1,2269 @@
+{
+  "generatedAt": "2026-09-15T05:30:27.466Z",
+  "scope": "Runtime server JavaScript; tests, migrations, scripts, static browser bundles and dependency directories excluded. Static candidates are not a proof of runtime execution.",
+  "filesScanned": 213,
+  "filesWithReadSites": 94,
+  "counts": {
+    "findById": 120,
+    "findOne": 101,
+    "find": 147,
+    "aggregate": 16,
+    "exists": 11,
+    "populate": 41,
+    "countDocuments": 10,
+    "distinct": 3,
+    "$lookup": 1
+  },
+  "entries": [
+    {
+      "file": "socket/collaboration.js",
+      "line": 38,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/collaboration.js",
+      "line": 39,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/collaboration.js",
+      "line": 61,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/collaboration.js",
+      "line": 61,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/collaboration.js",
+      "line": 76,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/announcement.js",
+      "line": 34,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/announcement.js",
+      "line": 43,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/appointment.js",
+      "line": 13,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/appointment.js",
+      "line": 61,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/appointment.js",
+      "line": 200,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/appointment.js",
+      "line": 229,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/appointment.js",
+      "line": 314,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/assessment.js",
+      "line": 9,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/assessment.js",
+      "line": 18,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/assessment.js",
+      "line": 28,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/assessment.js",
+      "line": 53,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/auth.js",
+      "line": 22,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/auth.js",
+      "line": 52,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/auth.js",
+      "line": 74,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/bill.js",
+      "line": 6,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/bill.js",
+      "line": 15,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/bill.js",
+      "line": 25,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 26,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 275,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 296,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 345,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 381,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 416,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 436,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 455,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 509,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 572,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/calendar.js",
+      "line": 615,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 9,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 22,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 56,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 76,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 76,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 76,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 104,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 106,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 106,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 127,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 202,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/changeRequest.js",
+      "line": 235,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 30,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 46,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 160,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 172,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 182,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 196,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 225,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 358,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 370,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 391,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/config.js",
+      "line": 396,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/contact.js",
+      "line": 21,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/contact.js",
+      "line": 30,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/contact.js",
+      "line": 40,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/dashboard.js",
+      "line": 61,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/department.js",
+      "line": 67,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/department.js",
+      "line": 77,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 31,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 31,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 31,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 48,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 48,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 48,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 71,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 75,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 103,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 125,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 136,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/discipline.js",
+      "line": 148,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 73,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 137,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 180,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 211,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 211,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 216,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 239,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 239,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 262,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 312,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 312,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 329,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 361,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 361,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 449,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 449,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 467,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 517,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 517,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 535,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 660,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 660,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 678,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 699,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 699,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 717,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 724,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 745,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 774,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 851,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 851,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 877,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 892,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 892,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 906,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 946,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 973,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 973,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 973,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 973,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1000,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1000,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1018,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1022,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1022,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1022,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1040,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1046,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1046,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1046,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/document.js",
+      "line": 1046,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/documentSettings.js",
+      "line": 34,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/documentSettings.js",
+      "line": 70,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 53,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 63,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 88,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 107,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 121,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 126,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 179,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 195,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 197,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 256,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 290,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 291,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 292,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 301,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 330,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 347,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 388,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 400,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 432,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/employee.js",
+      "line": 441,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 33,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 61,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 77,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 87,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 121,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/expense.js",
+      "line": 149,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 67,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 79,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 88,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 136,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 149,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 190,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 190,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 228,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 228,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 245,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 249,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 250,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 272,
+      "operation": "populate"
+    },
+    {
+      "file": "socket/event/form.js",
+      "line": 272,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 27,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 36,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 37,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 38,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 39,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 156,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 177,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 178,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 179,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/inventory.js",
+      "line": 180,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/line.js",
+      "line": 69,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/line.js",
+      "line": 108,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/line.js",
+      "line": 117,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/material.js",
+      "line": 44,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/material.js",
+      "line": 53,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 17,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 56,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 66,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 89,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 102,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/materialCatalog.js",
+      "line": 111,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 15,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 33,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 37,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 52,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 82,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 134,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 144,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 164,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 177,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 179,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/message.js",
+      "line": 253,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/messageAttachment.js",
+      "line": 33,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/messageAttachment.js",
+      "line": 38,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/messageAttachment.js",
+      "line": 67,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/messageAttachment.js",
+      "line": 149,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/messageAttachment.js",
+      "line": 152,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/metasheet.js",
+      "line": 35,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/metasheet.js",
+      "line": 45,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 26,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 66,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 82,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 147,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 156,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/order.js",
+      "line": 192,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/pallet.js",
+      "line": 27,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/pallet.js",
+      "line": 97,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/pallet.js",
+      "line": 106,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/pallet.js",
+      "line": 115,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "socket/event/permissionRule.js",
+      "line": 17,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/position.js",
+      "line": 8,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/position.js",
+      "line": 63,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/position.js",
+      "line": 73,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/position.js",
+      "line": 83,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/product.js",
+      "line": 37,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/product.js",
+      "line": 46,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/production.js",
+      "line": 7,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionHealth.js",
+      "line": 12,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionHealth.js",
+      "line": 13,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/productionPallet.js",
+      "line": 19,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionPallet.js",
+      "line": 21,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionPallet.js",
+      "line": 22,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionPallet.js",
+      "line": 26,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionPallet.js",
+      "line": 30,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 25,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 45,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 46,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 47,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 48,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 49,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 50,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 71,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 73,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 76,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 85,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 131,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 140,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 141,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 143,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 148,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 151,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/productionRun.js",
+      "line": 173,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/productionSchedule.js",
+      "line": 24,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/productionSchedule.js",
+      "line": 27,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/project.js",
+      "line": 26,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/project.js",
+      "line": 41,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/project.js",
+      "line": 51,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/project.js",
+      "line": 91,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/serviceProvider.js",
+      "line": 6,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/serviceProvider.js",
+      "line": 15,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 47,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 51,
+      "operation": "distinct"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 81,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 106,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 116,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 131,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 142,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 165,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 262,
+      "operation": "distinct"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 284,
+      "operation": "distinct"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 304,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 328,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 376,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 464,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 647,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 667,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 710,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 739,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 760,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 772,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 781,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 869,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 881,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 889,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 899,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 922,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 941,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/shipment.js",
+      "line": 979,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/signaturePad.js",
+      "line": 6,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/station.js",
+      "line": 112,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/storage.js",
+      "line": 12,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/storage.js",
+      "line": 33,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/storage.js",
+      "line": 45,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/training.js",
+      "line": 38,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/training.js",
+      "line": 58,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/user.js",
+      "line": 65,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/user.js",
+      "line": 103,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/user.js",
+      "line": 124,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/user.js",
+      "line": 138,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/user.js",
+      "line": 150,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/userRegistration.js",
+      "line": 25,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/userRegistration.js",
+      "line": 44,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/event/userRegistration.js",
+      "line": 49,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/event/utility.js",
+      "line": 133,
+      "operation": "find"
+    },
+    {
+      "file": "socket/event/visitor.js",
+      "line": 47,
+      "operation": "find"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 7,
+      "operation": "find"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 10,
+      "operation": "aggregate"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 38,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 47,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 55,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/messageDelivery.js",
+      "line": 64,
+      "operation": "exists"
+    },
+    {
+      "file": "socket/phoneSharing.js",
+      "line": 62,
+      "operation": "findOne"
+    },
+    {
+      "file": "socket/session.js",
+      "line": 38,
+      "operation": "findById"
+    },
+    {
+      "file": "socket/session.js",
+      "line": 106,
+      "operation": "findById"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 41,
+      "operation": "find"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 50,
+      "operation": "find"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 51,
+      "operation": "find"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 52,
+      "operation": "find"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 53,
+      "operation": "find"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 78,
+      "operation": "findById"
+    },
+    {
+      "file": "api/inventory/index.js",
+      "line": 182,
+      "operation": "findById"
+    },
+    {
+      "file": "routes/productionMobile.js",
+      "line": 30,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/productionMobile.js",
+      "line": 31,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/productionMobile.js",
+      "line": 33,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/productionMobile.js",
+      "line": 52,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/productionMobile.js",
+      "line": 62,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/signaturePad.js",
+      "line": 8,
+      "operation": "findById"
+    },
+    {
+      "file": "routes/userRegistration.js",
+      "line": 24,
+      "operation": "findOne"
+    },
+    {
+      "file": "routes/userRegistration.js",
+      "line": 53,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/appointmentAi.js",
+      "line": 18,
+      "operation": "find"
+    },
+    {
+      "file": "utils/appointmentRefresh.js",
+      "line": 39,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/bolDocuments.js",
+      "line": 6,
+      "operation": "$lookup"
+    },
+    {
+      "file": "utils/bolDocuments.js",
+      "line": 16,
+      "operation": "aggregate"
+    },
+    {
+      "file": "utils/bolDocuments.js",
+      "line": 34,
+      "operation": "find"
+    },
+    {
+      "file": "utils/changeRequestHandlers.js",
+      "line": 144,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/changeRequestHandlers.js",
+      "line": 160,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/changeRequestHandlers.js",
+      "line": 176,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 76,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 90,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 104,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 117,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 144,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 173,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 189,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 276,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 330,
+      "operation": "aggregate"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 343,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 345,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 355,
+      "operation": "find"
+    },
+    {
+      "file": "utils/dataSync.js",
+      "line": 396,
+      "operation": "find"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 46,
+      "operation": "find"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 65,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 67,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 84,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 91,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentAccess.js",
+      "line": 117,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentLifecycle.js",
+      "line": 8,
+      "operation": "find"
+    },
+    {
+      "file": "utils/documentLifecycle.js",
+      "line": 31,
+      "operation": "populate"
+    },
+    {
+      "file": "utils/documentLifecycle.js",
+      "line": 31,
+      "operation": "populate"
+    },
+    {
+      "file": "utils/documentLifecycle.js",
+      "line": 31,
+      "operation": "populate"
+    },
+    {
+      "file": "utils/documentLifecycle.js",
+      "line": 31,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/documentResources.js",
+      "line": 36,
+      "operation": "find"
+    },
+    {
+      "file": "utils/documentResources.js",
+      "line": 37,
+      "operation": "find"
+    },
+    {
+      "file": "utils/documentResources.js",
+      "line": 73,
+      "operation": "exists"
+    },
+    {
+      "file": "utils/documentResources.js",
+      "line": 74,
+      "operation": "exists"
+    },
+    {
+      "file": "utils/documentStorage.js",
+      "line": 19,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/asnMonitor.js",
+      "line": 14,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/config.js",
+      "line": 21,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 30,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 83,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 91,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 97,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 142,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 156,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 217,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/invoiceFlow.js",
+      "line": 250,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/edi/invoiceMonitor.js",
+      "line": 12,
+      "operation": "find"
+    },
+    {
+      "file": "utils/edi/orderful.js",
+      "line": 43,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/gmail.js",
+      "line": 119,
+      "operation": "find"
+    },
+    {
+      "file": "utils/gmail.js",
+      "line": 128,
+      "operation": "find"
+    },
+    {
+      "file": "utils/gmailQuota.js",
+      "line": 101,
+      "operation": "aggregate"
+    },
+    {
+      "file": "utils/messageAttachmentCleanup.js",
+      "line": 3,
+      "operation": "find"
+    },
+    {
+      "file": "utils/messageAttachmentCleanup.js",
+      "line": 6,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/productionMetrics.js",
+      "line": 25,
+      "operation": "aggregate"
+    },
+    {
+      "file": "utils/productionPalletActions.js",
+      "line": 16,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/productionPalletActions.js",
+      "line": 24,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/productionPalletActions.js",
+      "line": 41,
+      "operation": "exists"
+    },
+    {
+      "file": "utils/productionPalletActions.js",
+      "line": 42,
+      "operation": "find"
+    },
+    {
+      "file": "utils/runtimeConfig.js",
+      "line": 36,
+      "operation": "find"
+    },
+    {
+      "file": "utils/runtimeConfig.js",
+      "line": 37,
+      "operation": "find"
+    },
+    {
+      "file": "utils/sharingLocation.js",
+      "line": 14,
+      "operation": "find"
+    },
+    {
+      "file": "utils/signaturePadAccess.js",
+      "line": 20,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/signaturePadAccess.js",
+      "line": 30,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/signaturePadAccess.js",
+      "line": 35,
+      "operation": "find"
+    },
+    {
+      "file": "utils/signaturePadAccess.js",
+      "line": 40,
+      "operation": "find"
+    },
+    {
+      "file": "utils/signaturePadAccess.js",
+      "line": 166,
+      "operation": "findOne"
+    },
+    {
+      "file": "utils/signaturePadWorkflow.js",
+      "line": 23,
+      "operation": "find"
+    },
+    {
+      "file": "utils/signaturePadWorkflow.js",
+      "line": 39,
+      "operation": "find"
+    },
+    {
+      "file": "utils/stationLive.js",
+      "line": 40,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationLive.js",
+      "line": 61,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationRoster.js",
+      "line": 12,
+      "operation": "find"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 87,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 97,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 119,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 240,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 262,
+      "operation": "findById"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 287,
+      "operation": "find"
+    },
+    {
+      "file": "utils/stationScreenshots.js",
+      "line": 308,
+      "operation": "findById"
+    },
+    {
+      "file": "models/accessories.js",
+      "line": 173,
+      "operation": "find"
+    },
+    {
+      "file": "models/accessories.js",
+      "line": 183,
+      "operation": "find"
+    },
+    {
+      "file": "models/accessories.js",
+      "line": 191,
+      "operation": "find"
+    },
+    {
+      "file": "models/announcement.js",
+      "line": 238,
+      "operation": "find"
+    },
+    {
+      "file": "models/announcement.js",
+      "line": 307,
+      "operation": "find"
+    },
+    {
+      "file": "models/announcement.js",
+      "line": 318,
+      "operation": "find"
+    },
+    {
+      "file": "models/announcement.js",
+      "line": 323,
+      "operation": "find"
+    },
+    {
+      "file": "models/bom.js",
+      "line": 73,
+      "operation": "findById"
+    },
+    {
+      "file": "models/contact.js",
+      "line": 129,
+      "operation": "find"
+    },
+    {
+      "file": "models/contact.js",
+      "line": 139,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/finishedGoods.js",
+      "line": 117,
+      "operation": "find"
+    },
+    {
+      "file": "models/material.js",
+      "line": 208,
+      "operation": "find"
+    },
+    {
+      "file": "models/material.js",
+      "line": 213,
+      "operation": "find"
+    },
+    {
+      "file": "models/order.js",
+      "line": 86,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/order.js",
+      "line": 118,
+      "operation": "findById"
+    },
+    {
+      "file": "models/order.js",
+      "line": 134,
+      "operation": "find"
+    },
+    {
+      "file": "models/outbound.js",
+      "line": 202,
+      "operation": "aggregate"
+    },
+    {
+      "file": "models/product.js",
+      "line": 248,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 85,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 145,
+      "operation": "populate"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 145,
+      "operation": "find"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 159,
+      "operation": "populate"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 159,
+      "operation": "find"
+    },
+    {
+      "file": "models/productionLog.js",
+      "line": 173,
+      "operation": "aggregate"
+    },
+    {
+      "file": "models/productionPlan.js",
+      "line": 69,
+      "operation": "countDocuments"
+    },
+    {
+      "file": "models/productionPlan.js",
+      "line": 106,
+      "operation": "populate"
+    },
+    {
+      "file": "models/productionPlan.js",
+      "line": 106,
+      "operation": "find"
+    },
+    {
+      "file": "models/productionPlan.js",
+      "line": 120,
+      "operation": "populate"
+    },
+    {
+      "file": "models/productionPlan.js",
+      "line": 120,
+      "operation": "find"
+    },
+    {
+      "file": "models/rawMaterials.js",
+      "line": 132,
+      "operation": "find"
+    },
+    {
+      "file": "models/rawMaterials.js",
+      "line": 137,
+      "operation": "find"
+    },
+    {
+      "file": "models/storage.js",
+      "line": 121,
+      "operation": "findById"
+    },
+    {
+      "file": "models/storage.js",
+      "line": 126,
+      "operation": "findById"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 180,
+      "operation": "findById"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 203,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 211,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 212,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 324,
+      "operation": "findById"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 332,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 334,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 497,
+      "operation": "findOne"
+    },
+    {
+      "file": "models/timecard.js",
+      "line": 565,
+      "operation": "find"
+    },
+    {
+      "file": "models/tools.js",
+      "line": 147,
+      "operation": "find"
+    },
+    {
+      "file": "models/tools.js",
+      "line": 153,
+      "operation": "find"
+    },
+    {
+      "file": "models/tools.js",
+      "line": 164,
+      "operation": "find"
+    }
+  ]
+}

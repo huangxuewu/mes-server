@@ -10,11 +10,17 @@ const { createGmailSyncStep } = require('../../utils/gmailSync');
 const { io: serverIo } = require('../io');
 
 const getCandidates = async () => {
-    const groups = await db.outbound.getActiveLoads();
-    return groups.map(({ loadNumber, loads }) => ({
-        loadNumber: normalize(loadNumber),
-        proNumber: normalize(loads[0]?.proNumber),
-        scac: loads[0]?.carrierSCAC || loads[0]?.executingSCAC || loads[0]?.assignedSCAC || "",
+    const groups = await db.outbound.aggregate([
+        { $match: { 'loads.status': { $in: ['Carrier Accepted, Awaiting Pickup', 'Past Pickup'] } } },
+        { $unwind: '$loads' },
+        { $match: { 'loads.status': { $in: ['Carrier Accepted, Awaiting Pickup', 'Past Pickup'] } } },
+        { $group: { _id: '$loads.loadNumber', proNumber: { $first: '$loads.proNumber' },
+            carrierSCAC: { $first: '$loads.carrierSCAC' }, executingSCAC: { $first: '$loads.executingSCAC' }, assignedSCAC: { $first: '$loads.assignedSCAC' } } },
+    ]);
+    return groups.map(load => ({
+        loadNumber: normalize(load._id),
+        proNumber: normalize(load.proNumber),
+        scac: load.carrierSCAC || load.executingSCAC || load.assignedSCAC || "",
     })).filter(candidate => candidate.loadNumber);
 };
 

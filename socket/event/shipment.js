@@ -123,11 +123,32 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:aggregate", async (query, callback) => {
         try {
-            const counts = await db.outbound.aggregate([...outboundBolPipeline(), ...query]);
+            // History's native load filter can run before BOL enrichment. Filters on BOL summaries must run after it.
+            const match = query[0]?.$match;
+            const loadFilter = match?.loads?.$elemMatch;
+            const filterFirst = match && Object.keys(match).length === 1 && loadFilter
+                && Object.keys(loadFilter).every(field => ['status', 'loadNumber', 'pickupDate', 'schedulePickupAt'].includes(field));
+            const counts = await db.outbound.aggregate([
+                ...(filterFirst ? [query[0]] : []), ...outboundBolPipeline(), ...query,
+            ]);
             callback?.({ status: "success", message: "Outbound shipment count fetched successfully", payload: counts });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
         }
+    });
+
+    socket.on('outbound:load-counts', async (_payload, callback) => {
+        try {
+            const counts = await db.outbound.aggregate([
+                { $project: { loadNumber: 1, pickupDate: 1, 'loads.loadNumber': 1, 'loads.pickupDate': 1 } },
+                { $unwind: { path: '$loads', preserveNullAndEmptyArrays: true } },
+                { $replaceRoot: { newRoot: { $mergeObjects: ['$$ROOT', '$loads'] } } },
+                { $match: { loadNumber: { $exists: true, $nin: [null, ''] } } },
+                { $group: { _id: { date: { $substr: ['$pickupDate', 0, 7] }, loadNumber: '$loadNumber' } } },
+                { $group: { _id: '$_id.date', count: { $sum: 1 } } },
+            ]);
+            callback({ status: 'success', payload: counts });
+        } catch (error) { callback({ status: 'error', message: error.message }); }
     });
 
     socket.on("outbound:complete", async (payload, callback) => {
@@ -607,11 +628,14 @@ module.exports = (socket, io) => {
 
         try {
             const preMatch = {};
+            if (query._id) preMatch._id = query._id;
+            if (query.poNumber) preMatch.poNumber = query.poNumber;
             if (query.pickupDate) preMatch['loads.pickupDate'] = query.pickupDate;
             if (query.loadNumber) preMatch['loads.loadNumber'] = query.loadNumber;
 
             const pipeline = [];
             if (Object.keys(preMatch).length) pipeline.push({ $match: preMatch });
+            pipeline.push(...outboundBolPipeline());
 
             pipeline.push(
                 { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
@@ -620,7 +644,7 @@ module.exports = (socket, io) => {
                 { $match: query }
             );
 
-            const shipments = await db.outbound.aggregate([...outboundBolPipeline(), ...pipeline]);
+            const shipments = await db.outbound.aggregate(pipeline);
 
             callback({ status: "success", message: "Outbound shipments fetched successfully", payload: shipments });
         } catch (error) {
@@ -852,50 +876,42 @@ module.exports = (socket, io) => {
     socket.on("search:cache", async (callback) => {
         try {
 
-            const results = await Promise.all([
+            const [orders, outbound] = await Promise.all([
                 // First aggregation - unique orders with buyers
                 db.order.aggregate([
-                    { $project: { _id: 1, buyers: 1 } },
+                    { $project: { _id: 1, 'buyers.poNumber': 1, 'buyers.done': 1 } },
                     { $unwind: { path: "$buyers", preserveNullAndEmptyArrays: true } },
                     { $addFields: { poNumber: '$buyers.poNumber', done: '$buyers.done' } },
                     { $project: { poNumber: 1, done: 1, _id: 1 } }
                 ]),
 
-                // Second aggregation - unique load numbers
+                // Read the small shipment search fields once for both indexes.
                 db.outbound.aggregate([
+                    { $project: { loadNumber: 1, status: 1, 'loads.loadNumber': 1, 'loads.status': 1, 'loads.bolId': 1 } },
                     { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
                     { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
-                    { $project: { loadNumber: 1, status: 1, _id: 1 } },
-                    {
-                        $group: {
-                            _id: "$loadNumber",
-                            loadNumber: { $first: "$loadNumber" },
-                            status: { $first: "$status" },
-                            docId: { $first: "$_id" }
-                        }
-                    },
-                    { $project: { loadNumber: 1, status: 1, _id: "$docId" } }
-                ]),
-
-                // Third aggregation - unique BOL numbers
-                db.outbound.aggregate([
-                    ...outboundBolPipeline(),
-                    { $unwind: { path: "$loads", preserveNullAndEmptyArrays: true } },
-                    { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", "$loads"] } } },
-                    { $addFields: { 'bol': { $toString: '$bolSummary.number' } } },
-                    { $project: { 'bol': 1, status: 1, _id: 1 } },
-                    {
-                        $group: {
-                            _id: "$bol",
-                            status: { $first: "$status" },
-                            docId: { $first: "$_id" }
-                        }
-                    },
-                    { $project: { bol: "$_id", status: 1, _id: "$docId" } }
+                    { $project: { loadNumber: 1, status: 1, bolId: 1 } },
                 ]),
             ]);
 
-            callback?.({ status: "success", message: "Search results fetched successfully", payload: results });
+            const bolIds = [...new Map(outbound.filter(row => row.bolId).map(row => [String(row.bolId), row.bolId])).values()];
+            const documents = bolIds.length
+                ? await db.bolDocument.find({ _id: { $in: bolIds } }, { number: 1 }).lean()
+                : [];
+            const numbers = new Map(documents.map(document => [String(document._id), document.number]));
+            const loadNumbers = new Map(), bolNumbers = new Map();
+            // Preserve the first shipment in scan order, including duplicate BOL numbers.
+            for (const { _id, loadNumber, status, bolId } of outbound) {
+                if (loadNumber != null && loadNumber !== '' && !loadNumbers.has(loadNumber))
+                    loadNumbers.set(loadNumber, { _id, loadNumber, status: status ?? null });
+                const number = numbers.get(String(bolId));
+                if (number == null || String(number) === '') continue;
+                const bol = String(number);
+                if (!bolNumbers.has(bol)) bolNumbers.set(bol, { _id, bol, status: status ?? null });
+            }
+
+            callback?.({ status: "success", message: "Search results fetched successfully",
+                payload: [orders, [...loadNumbers.values()], [...bolNumbers.values()]] });
         } catch (error) {
             callback?.({ status: "error", message: "Search failed", error: error.message });
         }

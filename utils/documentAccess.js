@@ -43,7 +43,8 @@ const safeDocument = async (document, user, socket) => {
     if (!value.canManageSettings) delete value.viewerIds;
     if (value.relatedDocuments?.length) {
         const db = require('../models');
-        const linked = await db.document.find({ _id: { $in: value.relatedDocuments.map(link => idOf(link.document)) } }).lean();
+        const linked = await db.document.find({ _id: { $in: value.relatedDocuments.map(link => idOf(link.document)) } },
+            { owner: 1, createdBy: 1, visibility: 1, viewerIds: 1, hasPassword: 1, securityVersion: 1 }).lean();
         const visible = new Set(linked.filter(item => canView(user, item) && hasGrant(user, item, socket?.data?.documentGrants?.[idOf(item)])).map(idOf));
         value.relatedDocuments = value.relatedDocuments.filter(link => visible.has(idOf(link.document)));
     }

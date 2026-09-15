@@ -10,7 +10,7 @@ const matches = (row, query) => Object.entries(query).every(([key, expected]) =>
     if (key === '$and') return expected.every(item => matches(row, item));
     const actual = at(row, key);
     const values = Array.isArray(actual) ? actual : [actual];
-    if (expected && typeof expected === 'object' && !(expected instanceof Date) && !Array.isArray(expected)) return Object.entries(expected).every(([operator, value]) => {
+    if (expected && typeof expected === 'object' && !(expected instanceof Date) && !Array.isArray(expected) && !expected.toHexString) return Object.entries(expected).every(([operator, value]) => {
         if (operator === '$exists') return (actual !== undefined) === value;
         if (operator === '$regex') return values.some(item => typeof item === 'string' && new RegExp(value, expected.$options || '').test(item));
         if (operator === '$options') return true;
@@ -45,6 +45,21 @@ class Collection {
     findOne(query = {}) { return this.query(this.rows.filter(row => matches(row, query)), true); }
     findById(id) { return this.findOne({ _id: id }); }
     async countDocuments(query) { return this.rows.filter(row => matches(row, query)).length; }
+    async aggregate(pipeline) {
+        let rows = this.rows;
+        for (const stage of pipeline) {
+            if (stage.$match) rows = rows.filter(row => matches(row, stage.$match));
+            else if (stage.$group?.count?.$sum === 1) {
+                const counts = new Map();
+                for (const row of rows) {
+                    const key = at(row, stage.$group._id.slice(1));
+                    counts.set(key, (counts.get(key) || 0) + 1);
+                }
+                rows = [...counts].map(([_id, count]) => ({ _id, count }));
+            } else throw new Error('Unsupported test aggregation');
+        }
+        return clone(rows);
+    }
     async exists(query) { return !!this.rows.find(row => matches(row, query)); }
     update(query, change, options = {}) {
         if (this.failNextUpdate) { this.failNextUpdate = false; throw new Error('Simulated database failure'); }

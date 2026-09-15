@@ -113,3 +113,28 @@ test('concurrent SignPads cannot overwrite the winner on a shared document', int
     assert.equal(saved.rawData.shipper_signature_submission_id, inputs[winner].submissionId);
     assert.equal(saved.revision, f.document.revision + 2);
 });
+
+test('existing SignPad scans read one standalone BOL and one projected shipment batch', integration, async t => {
+    const f = await fixture(t);
+    await f.access.prepare(f.device, { barcode });
+    f.commands.length = 0;
+    const found = await f.access.lookup(f.device, barcode, true, true);
+    assert.equal(found.copies, 19);
+    const reads = f.commands.filter(entry => entry.name === 'find');
+    assert.equal(reads.length, 2);
+    assert.equal(reads[0].command.find, 'bolDocument');
+    assert.deepEqual(reads[0].command.filter, { number });
+    assert.equal(reads[1].command.find, 'outbound');
+    assert.deepEqual(reads[1].command.filter['loads.bolId'].$in.map(String), [String(f.document._id)]);
+    assert.equal(reads[1].command.projection['loads.bolId'], 1);
+    assert.ok(!reads[1].command.projection.loads && !reads[1].command.projection['loads.items']);
+    assert.ok(!f.commands.some(entry => entry.name === 'aggregate' || entry.name === 'update'));
+});
+
+test('SignPad rejects multiple standalone documents attached to one BOL number and load', integration, async t => {
+    const f = await fixture(t);
+    await f.access.prepare(f.device, { barcode });
+    const duplicate = await f.db.bolDocument.collection.insertOne({ number, loadNumber: 'OTHER-LOAD', rawData: (await f.service.get({ loadNumber })).rawData });
+    await f.db.outbound.updateOne({ poNumber: 'PO-0' }, { $set: { 'loads.0.bolId': duplicate.insertedId } });
+    await assert.rejects(f.access.lookup(f.device, barcode, true, true), /ambiguousBol/);
+});

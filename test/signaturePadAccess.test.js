@@ -94,6 +94,46 @@ const uncreated = () => {
     return t;
 };
 
+test('BOL barcode lookup uses the standalone indexed number and skips shipment reads when absent', async () => {
+    const t = setup();
+    const queries = [];
+    const find = t.models.bolDocument.find;
+    t.models.bolDocument.find = query => { queries.push(query); return find(query); };
+    await t.lookup();
+    assert.ok(queries.length > 0);
+    assert.ok(queries.every(query => Object.keys(query).length === 1 && query.number === number));
+    t.models.bolDocument.find = () => ({ lean: async () => [] });
+    t.models.outbound.find = assert.fail;
+    await assert.rejects(t.lookup(), /bolNotFound/);
+});
+
+test('driver and dual-signature grants reject replaced standalone BOL references', async () => {
+    for (const dual of [false, true]) {
+        const t = setup();
+        if (dual) Object.assign(t.document().rawData, { signature_pad_requires_shipper: true, shipper_signature: '' });
+        const found = await t.lookup();
+        t.document()._id = 'replacement-document';
+        for (const record of t.records()) record.loads[0].bolId = t.document()._id;
+        const input = await t.input(found.grant);
+        if (dual) input.shipperImage = await image;
+        await assert.rejects(t.access.sign(t.device, input), /bolChanged/);
+        assert.equal(t.writes(), 0);
+        const fresh = await t.lookup();
+        await t.access.sign(t.device, { ...input, grant: fresh.grant });
+        assert.equal(t.writes(), 1);
+    }
+});
+
+test('reprint grants reject replaced standalone BOL references with identical signed content', async () => {
+    const t = setup();
+    await t.access.authorize(t.user, t.device._id);
+    Object.assign(t.document().rawData, { driver_signature: await image, driver_signature_date: '2026-09-15' });
+    const found = await t.access.lookup(t.device, barcode, true);
+    t.document()._id = 'replacement-document';
+    for (const record of t.records()) record.loads[0].bolId = t.document()._id;
+    await assert.rejects(t.access.printData(t.user, { grant: found.grant, deviceId: t.device._id }), /bolChanged/);
+});
+
 test('valid shipments create one shared BOL and require both handwritten signatures', async () => {
     const t = uncreated();
     t.trucks.push({ loadNumber: 'LOAD-1', trailer: ' GATE-123 ', seal: ' SEAL-456 ' });

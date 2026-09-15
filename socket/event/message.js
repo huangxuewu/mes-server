@@ -1,6 +1,6 @@
 const db = require('../../models');
 const { getActiveSessionUser, getSessionUserId } = require('../session');
-const { projectTopic, deliverTopicChange } = require('../messageDelivery');
+const { projectTopic, projectTopics, deliverTopicChange } = require('../messageDelivery');
 const policy = require('../../utils/messagePolicy');
 const { id, objectId, requestId, fields, text, member, editor, revision, revisionFilter, cleanContent, summary, projectMessage, cursorFor, cursorFilter, pageSize, hash } = policy;
 
@@ -50,7 +50,7 @@ module.exports = (socket, io) => {
         const query = { participants: user._id, isDeleted: { $ne: true }, ...cursorFilter(input.cursor) };
         if (input.view) query.archived = input.view === 'archived' ? user._id : { $ne: user._id };
         const rows = await db.topic.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean();
-        const items = await Promise.all(rows.slice(0, limit).map(topic => projectTopic(topic, user._id)));
+        const items = await projectTopics(rows.slice(0, limit), user._id);
         assertSession(user, generation);
         for (const topic of items) (socket.data.messageTopics ||= new Set()).add(id(topic));
         return { items, nextCursor: rows.length > limit ? cursorFor(rows[limit - 1]) : null };

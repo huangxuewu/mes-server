@@ -17,7 +17,7 @@ const normalizeBolBarcode = barcode => {
 const createSignaturePadAccess = ({ models, secret, getUser }) => {
     const gateDetails = async (raw, loadNumber, session) => {
         if (raw.driver_signature || !loadNumber || (String(raw.trailer || '').trim() && String(raw.seal_number || '').trim())) return {};
-        let query = models.hauler.findOne({ loadNumber, status: { $ne: 'Cancelled' } }).sort({ arrivedAt: -1, createdAt: -1, _id: -1 });
+        let query = models.hauler.findOne({ loadNumber, status: { $ne: 'Cancelled' } }, { trailer: 1, seal: 1 }).sort({ arrivedAt: -1, createdAt: -1, _id: -1 });
         if (session) query = query.session(session);
         const truck = await query.lean();
         const details = {};
@@ -32,12 +32,16 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
         return device;
     };
     const findTargets = async (number, session) => {
-        let documentQuery = models.bolDocument.find({ $or: [{ number }, { 'rawData.bill_of_lading_number': number }] });
+        let documentQuery = models.bolDocument.find({ number }, { number: 1, url: 1, rawData: 1 });
         if (session) documentQuery = documentQuery.session(session);
         const documents = await documentQuery.lean();
+        if (!documents.length) throw new Error('signaturePad.bolNotFound');
         const byId = new Map(documents.map(document => [String(document._id), document]));
         let query = models.outbound.find({ 'loads.bolId': { $in: documents.map(document => document._id) } },
-            { loads: 1, poNumber: 1, name: 1, address: 1, city: 1, state: 1, zip: 1 });
+            { poNumber: 1, name: 1, address: 1, city: 1, state: 1, zip: 1,
+                'loads.bolId': 1, 'loads.shipmentId': 1, 'loads.loadNumber': 1, 'loads.status': 1,
+                'loads.assignedSCAC': 1, 'loads.executingSCAC': 1, 'loads.carrierSCAC': 1,
+                'loads.proNumber': 1, 'loads.chRobinsonNumber': 1, 'loads.cartons': 1, 'loads.weight': 1, 'loads.pallets': 1 });
         if (session) query = query.session(session);
         const records = await query.lean();
         const targets = records.flatMap(record => (record.loads || []).filter(load => byId.has(String(load.bolId)))
@@ -45,11 +49,12 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                 loadNumber: load.loadNumber, status: load.status, raw: byId.get(String(load.bolId)).rawData, number: byId.get(String(load.bolId)).number })));
         if (!targets.length) throw new Error('signaturePad.bolNotFound');
         if (targets.some(target => target.number !== number || !target.shipmentId || !target.loadNumber)) throw new Error('signaturePad.bolNotReady');
-        if (new Set(targets.map(target => target.loadNumber)).size !== 1 || new Set(targets.map(target => `${target.outboundId}:${target.shipmentId}`)).size !== targets.length) throw new Error('signaturePad.ambiguousBol');
+        if (new Set(targets.map(target => target.loadNumber)).size !== 1 || new Set(targets.map(target => String(target.bolDocument._id))).size !== 1
+            || new Set(targets.map(target => `${target.outboundId}:${target.shipmentId}`)).size !== targets.length) throw new Error('signaturePad.ambiguousBol');
         return targets;
     };
-    const findBol = async (number, session) => {
-        const targets = await findTargets(number, session);
+    const findBol = async (number, session, existingTargets) => {
+        const targets = existingTargets || await findTargets(number, session);
         if (targets.every(target => !target.raw)) throw new Error('signaturePad.bolNotFound');
         if (targets.some(target => !target.raw || target.raw.bill_of_lading_number !== number)) throw new Error('signaturePad.bolNotReady');
         if (targets.some(target => !target.raw.driver_signature && target.raw.signature_pad_source_revision
@@ -60,13 +65,13 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
             return JSON.stringify(draft);
         });
         if (new Set(drafts).size !== 1) throw new Error('signaturePad.ambiguousBol');
-        const revision = hash(JSON.stringify(targets.map((target, index) => [target.outboundId, target.shipmentId, target.loadNumber, hash(drafts[index])]).sort((a, b) => a.join(':').localeCompare(b.join(':')))));
+        const revision = hash(JSON.stringify(targets.map((target, index) => [target.outboundId, target.shipmentId, target.loadNumber, String(target.bolDocument._id), hash(drafts[index])]).sort((a, b) => a.join(':').localeCompare(b.join(':')))));
         const dualRevision = hash(JSON.stringify(targets.map((target, index) => {
             const draft = JSON.parse(drafts[index]);
             for (const field of ['shipper_signature', 'shipper_signature_date', 'shipper_signature_submission_id', 'shipper_signature_device_id']) delete draft[field];
-            return [target.outboundId, target.shipmentId, target.loadNumber, hash(JSON.stringify(draft))];
+            return [target.outboundId, target.shipmentId, target.loadNumber, String(target.bolDocument._id), hash(JSON.stringify(draft))];
         }).sort((a, b) => a.join(':').localeCompare(b.join(':')))));
-        const printRevision = hash(JSON.stringify(targets.map(target => [target.outboundId, target.shipmentId, target.raw])
+        const printRevision = hash(JSON.stringify(targets.map(target => [target.outboundId, target.shipmentId, String(target.bolDocument._id), target.raw])
             .sort((a, b) => `${a[0]}:${a[1]}`.localeCompare(`${b[0]}:${b[1]}`))));
         return { targets, revision, dualRevision, printRevision };
     };
@@ -92,14 +97,12 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
         },
         async lookup(device, barcode, allowSigned = false, allowCreate = false) {
             const number = normalizeBolBarcode(barcode);
-            if (allowCreate) {
-                const targets = await findTargets(number);
-                if (targets.every(target => !target.raw)) {
-                    buildOutboundBol(targets, number);
-                    return { needsGeneration: true, bolNumber: number, loadNumber: targets[0].loadNumber };
-                }
+            const existingTargets = await findTargets(number);
+            if (allowCreate && existingTargets.every(target => !target.raw)) {
+                buildOutboundBol(existingTargets, number);
+                return { needsGeneration: true, bolNumber: number, loadNumber: existingTargets[0].loadNumber };
             }
-            let { targets, revision, dualRevision, printRevision } = await findBol(number);
+            let { targets, revision, dualRevision, printRevision } = await findBol(number, undefined, existingTargets);
             if (!targets.some(target => target.raw.driver_signature || ['Completed', 'Cancelled'].includes(target.status))
                 && Object.keys(await gateDetails(targets[0].raw, targets[0].loadNumber)).length) {
                 const session = await models.outbound.startSession();
@@ -142,7 +145,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                 await session.withTransaction(async () => {
                     const targets = await findTargets(number, session);
                     if (targets.some(target => target.raw)) {
-                        await findBol(number, session);
+                        await findBol(number, session, targets);
                         return;
                     }
                     const raw = buildOutboundBol(targets, number);

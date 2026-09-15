@@ -14,6 +14,7 @@ const fixture = async t => {
     t.after(() => connection.close());
     const threads = connection.db.collection('emailThread');
     const queries = [];
+    const pipelines = [];
     let prepareThreads;
     const load = (relative, overrides) => {
         const filename = path.join(__dirname, '..', relative);
@@ -28,7 +29,7 @@ const fixture = async t => {
     const outbound = load('models/outbound.js', {
         '../socket/io': { io: {} },
         '../config/database': { model: () => ({ hooks: { pre() {} },
-            aggregate: pipeline => connection.db.collection('outbound').aggregate(pipeline).toArray(),
+            aggregate: pipeline => { pipelines.push(pipeline); return connection.db.collection('outbound').aggregate(pipeline).toArray(); },
             createIndexes() {}, watch: () => ({ on() {} }),
         }) },
     });
@@ -50,7 +51,7 @@ const fixture = async t => {
     });
     const handlers = {};
     register({ on: (event, handler) => { handlers[event] = handler; } }, {});
-    return { connection, threads, outbound, queries, prepareThreads,
+    return { connection, threads, outbound, queries, pipelines, prepareThreads,
         query: () => new Promise(resolve => handlers['appointments:query']({}, resolve)) };
 };
 
@@ -72,7 +73,9 @@ test('appointment queries return active load 77834596 and shared threads without
     ]);
     const active = await f.outbound.getActiveLoads();
     assert.deepEqual(active.map(load => load.loadNumber).sort(), ['77834596', 'past-pickup']);
+    f.pipelines.length = 0;
     const result = await f.query();
+    assert.ok(f.pipelines.every(pipeline => !pipeline.some(stage => stage.$lookup)));
     assert.equal(result.status, 'success');
     assert.deepEqual(result.payload.map(thread => thread._id).sort(), ['legacy', 'shared', 'target']);
     assert.equal(result.payload.find(thread => thread._id === 'target').messages.length, 3);
