@@ -150,7 +150,7 @@ const gmailFixture = connection => {
     };
     const filename = path.join(__dirname, '../utils/gmail.js');
     const localRequire = createRequire(filename);
-    const config = { db: connection, find: () => ({ lean: async () => [
+    const config = { db: connection, find: () => ({ maxTimeMS() { return this; }, lean: async () => [
         { key: 'integration.gmail.clientId', value: '123-test.apps.googleusercontent.com' },
         { key: 'integration.gmail.clientSecret', value: 'test-secret' },
         { key: 'integration.gmail.refreshToken', value: 'test-refresh' },

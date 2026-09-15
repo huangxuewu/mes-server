@@ -86,10 +86,10 @@ const getStationUpdate = (version, release) => {
 let releaseCheckTimer;
 const startReleaseChecks = () => {
     if (releaseCheckTimer) return;
-    const refresh = async () => {
+    const refresh = require('./memoryDiagnostics').wrap('job:station-release-check', async () => {
         const release = await getLatestRelease({ force: true });
         if (release.error) console.error(`[Station updates] Latest release unavailable; retrying in one minute. Reason: ${lastReleaseFailure}`);
-    };
+    });
     void refresh();
     releaseCheckTimer = setInterval(refresh, 60000);
     releaseCheckTimer.unref();

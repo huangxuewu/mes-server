@@ -1,4 +1,5 @@
 const { createHash } = require('node:crypto');
+const memory = require('../memoryDiagnostics');
 
 const createInvoiceMonitor = ({ db, getClient, flow, logger = console, intervalMs = 5 * 60 * 1000 }) => {
     let timer;
@@ -6,7 +7,7 @@ const createInvoiceMonitor = ({ db, getClient, flow, logger = console, intervalM
     let stopped = false;
     const run = () => {
         if (running || stopped) return running;
-        running = (async () => {
+        running = memory.wrap('job:invoice-monitor', async () => {
             const client = await getClient();
             const integrationKey = createHash('sha256').update(`${client.config.baseUrl}:${client.headers['x-tenant-id'] || ''}:OFDHTGTDMS`).digest('hex');
             const cursor = db.salesInvoice.find({ integrationKey, submittedBy: { $exists: true },

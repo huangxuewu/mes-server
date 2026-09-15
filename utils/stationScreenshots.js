@@ -15,7 +15,7 @@ const imageMime = contents => contents?.subarray(0, 4).toString() === 'RIFF' && 
 const generationFilter = station => station.screenshotGeneration === undefined
     ? { screenshotGeneration: { $exists: false } } : { screenshotGeneration: station.screenshotGeneration };
 
-const validateImage = async (contents, { allowWebp = false } = {}) => {
+const validateImage = require('./memoryDiagnostics').wrap('screenshot:decode', async (contents, { allowWebp = false } = {}) => {
     if (!Buffer.isBuffer(contents) || !contents.length || contents.length > MAX_BYTES) throw new Error('Invalid screenshot image');
     if (imageMime(contents) === 'image/webp') {
         if (!allowWebp || contents.length < 20 || contents.readUInt32LE(4) + 8 !== contents.length) throw new Error('Invalid screenshot image');
@@ -50,7 +50,7 @@ const validateImage = async (contents, { allowWebp = false } = {}) => {
     if (metadata.format !== 'jpeg' || metadata.width !== width || metadata.height !== height) throw new Error('Invalid screenshot image');
     await image.timeout({ seconds: 5 }).raw().toBuffer();
     return { width, height };
-};
+});
 
 const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = path.join(os.tmpdir(), 'mes-station-screenshots'), now = Date.now }) => {
     const states = new Map();
@@ -109,7 +109,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
         await fs.mkdir(cacheDir, { recursive: true });
         await fs.writeFile(cachePath(station, revision), contents, { mode: 0o600 });
     };
-    const capture = async (id, expected) => {
+    const capture = require('./memoryDiagnostics').wrap('screenshot:capture', async (id, expected) => {
         const state = stateFor(id);
         if (state.busy) throw new Error('A screenshot capture is already in progress');
         state.busy = true;
@@ -211,7 +211,7 @@ const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = pa
             void notify(id).catch(() => {});
             if (state.afterLive) void schedule().catch(() => {});
         }
-    };
+    });
     const readImage = async (station, metadata, displayId = '') => {
         const revision = metadata.revision;
         const cacheRevision = displayId ? `${displayId}:${revision}` : revision;

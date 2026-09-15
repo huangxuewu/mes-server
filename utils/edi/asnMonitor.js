@@ -1,4 +1,5 @@
 const { accepted, domestic, readPurchaseOrders } = require('./invoice');
+const memory = require('../memoryDiagnostics');
 const { createOrderfulClient, readOrderfulPo } = require('./orderful');
 
 const ASN_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -9,7 +10,7 @@ const createAsnMonitor = ({ db, getClient, getOrderfulTransaction = createOrderf
     let stopped = false;
     const run = async () => {
         if (running || stopped) return running;
-        running = (async () => {
+        running = memory.wrap('job:asn-monitor', async () => {
             const client = await getClient();
             const cursor = db.outbound.find({ client: 'Target', loads: { $elemMatch: {
                 status: 'Completed', 'checklist.noticed.status': true,

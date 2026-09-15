@@ -6,7 +6,7 @@ const { prepareGmailMailbox } = require('./gmailMailbox');
 function createGmailSyncStep({ connection, getClient, getCandidates, prepareThreads, prepareMailbox = prepareGmailMailbox }) {
     const seen = () => connection.db.collection('gmailSyncSeen');
     let initializing;
-    return async state => {
+    return require('./memoryDiagnostics').wrap('job:gmail-step', async state => {
         await (initializing ||= seen().createIndex({ generation: 1 }).catch(error => { initializing = null; throw error; }));
         const client = await getClient();
         const profile = await client.profile();
@@ -88,7 +88,7 @@ function createGmailSyncStep({ connection, getClient, getCandidates, prepareThre
             await prepared.apply(session);
             await seen().deleteMany({ generation: progress.generation }, { session });
         } };
-    };
+    });
 }
 
 module.exports = { createGmailSyncStep };

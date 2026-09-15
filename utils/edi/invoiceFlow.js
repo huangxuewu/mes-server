@@ -136,7 +136,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         } };
     };
 
-    const verifyQueue = async suppliedClient => {
+    const verifyQueue = require('../memoryDiagnostics').wrap('invoice:verify-queue', async suppliedClient => {
         const client = suppliedClient || await getClient();
         const integrationKey = createHash('sha256').update(`${client.config.baseUrl}:${client.headers['x-tenant-id'] || ''}:OFDHTGTDMS`).digest('hex');
         const records = await db.salesInvoice.find({ integrationKey }, { poNumber: 1, transactionId: 1, submissionStartedAt: 1,
@@ -188,7 +188,7 @@ const createInvoiceFlow = ({ db, getClient, getDropbox, getOrderfulTransaction =
         }
         if (verificationErrors.length) throw new Error(`Orderful verification failed: ${verificationErrors[0].message}`);
         return { rows: await retainPoGroups(rows.filter(Boolean)) };
-    };
+    });
 
     const syncList = async () => {
         const checkedAt = new Date();

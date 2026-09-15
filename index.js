@@ -1,3 +1,5 @@
+const memory = require('./utils/memoryDiagnostics');
+memory.start();
 const dns = require("node:dns");
 dns.setDefaultResultOrder("ipv4first");
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
@@ -6,6 +8,7 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const { io, app, server } = require("./socket/io");
+server.on('close', memory.stop);
 const socketHandler = require("./socket/index");
 const { attachCollaboration } = require("./socket/collaboration");
 const { startDocumentLifecycle } = require("./utils/documentLifecycle");
@@ -16,6 +19,7 @@ const dataSync = require('./socket/dataSync');
 const apiRoutes = require('./api');
 const oauthRouter = require('./routes/oauth');
 const finishProductLabelRouter = require('./routes/finishProductLabel');
+memory.sample('startup:modules-loaded');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -25,6 +29,14 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'jade');
 
 // Middleware
+app.use((req, res, next) => {
+    const label = req.path.startsWith('/signature-pad') ? 'http:signature-pad'
+        : req.path.startsWith('/api') ? 'http:api' : 'http:other';
+    const finish = memory.begin(label);
+    res.once('finish', () => finish(res.statusCode >= 500));
+    res.once('close', () => finish(!res.writableFinished));
+    next();
+});
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
@@ -82,6 +94,7 @@ app.get("/health", (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+    memory.sample('startup:listening');
     console.log("Server is running on ", "http://" + HOST + ":" + PORT);
     require('./utils/stationRelease').startReleaseChecks();
 });

@@ -3,7 +3,7 @@ const { protectedDocumentEmitter } = require('./documentAccess');
 
 const LIFECYCLE_INTERVAL_MS = 15 * 60 * 1000;
 
-const refreshDocumentLifecycle = async (io) => {
+const refreshDocumentLifecycle = require('./memoryDiagnostics').wrap('job:document-lifecycle', async (io) => {
     const now = new Date();
     const active = await db.document.find({
         isTemplate: false,
@@ -35,7 +35,7 @@ const refreshDocumentLifecycle = async (io) => {
             .lean();
         if (payload) await protectedDocumentEmitter(io).emit("document:updated", payload);
     }
-};
+});
 
 const startDocumentLifecycle = (io) => {
     refreshDocumentLifecycle(io).catch((error) => console.error("Document lifecycle:", error.message));

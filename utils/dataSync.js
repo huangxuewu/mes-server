@@ -1,4 +1,5 @@
 const { randomUUID, createHash } = require('node:crypto');
+const memory = require('./memoryDiagnostics');
 const { outboundBolPipeline } = require('./bolDocuments');
 const dayjs = require('dayjs');
 dayjs.extend(require('dayjs/plugin/utc'));
@@ -207,6 +208,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
 
     const run = async () => {
         while (!stopped) {
+            const finishMemory = memory.begin('sync:capture-poll');
             try {
                 await initialize();
                 if (!lease) {
@@ -251,6 +253,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                 // Interleave one bounded cleanup step with capture so a full retention sweep cannot starve the lease.
                 if (Date.now() - lastPrune > 60000) await prune();
             } catch (error) {
+                finishMemory(true);
                 logger.error('[DataSync] Capture unavailable:', error.code, error.message);
                 if (lease) {
                     try {
@@ -263,7 +266,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                 stream = null;
                 lease = null;
                 if (!stopped) await wait();
-            }
+            } finally { finishMemory(false); }
         }
     };
 
@@ -314,7 +317,8 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
         } catch (error) { await session.endSession(); throw error; }
     };
 
-    const queryRecords = async (dataset, scope, filter, session, limit, business) => {
+    const queryRecords = (dataset, scope, filter, session, limit, business) => memory.wrap(
+        `sync:read:${DATASETS.includes(dataset) ? dataset : 'invalid'}`, async () => {
         const query = { ...filter };
         if (dataset === 'employees' || dataset === 'timecards') query.isDeleted = { $ne: true };
         if (dataset === 'timecards') query.date = scope;
@@ -359,7 +363,7 @@ function createDataSync({ connection, getBusinessContext, notify = () => {}, log
                 record.overtime.approvedBy = users.find(user => String(user._id) === String(record.overtime.approvedBy)) || null;
         }
         return records;
-    };
+    })();
 
     const snapshot = async ({ dataset, scope, baseline, afterId } = {}) => {
         const { state, session, business } = await beginRead(dataset, scope);

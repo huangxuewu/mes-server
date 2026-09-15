@@ -1,4 +1,4 @@
-const cleanupMessageAttachments = async ({ db, dropbox, now = new Date() }) => {
+const cleanupMessageAttachments = require('./memoryDiagnostics').wrap('job:message-attachment-cleanup', async ({ db, dropbox, now = new Date() }) => {
     if (!dropbox) return { removed: 0, skipped: 0 };
     const files = await db.messageAttachment.find({ expiresAt: { $lte: now }, status: { $in: ['Staged', 'Ready', 'Removed'] } }).limit(50).lean();
     let removed = 0, skipped = 0;
@@ -20,7 +20,7 @@ const cleanupMessageAttachments = async ({ db, dropbox, now = new Date() }) => {
         removed++;
     }
     return { removed, skipped };
-};
+});
 const startMessageAttachmentCleanup = () => {
     let pending = false;
     const run = async () => {
