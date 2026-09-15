@@ -69,6 +69,8 @@ startDocumentLifecycle(io);
 startMessageAttachmentCleanup();
 require('./utils/stationScreenshots').getStationScreenshots(io).start();
 dataSync.start();
+const stopLoadNotifications = require('./utils/outboundWorkflowState').createOutboundWorkflowState(require('./models')).start();
+server.on('close', stopLoadNotifications);
 const asnMonitor = require('./utils/edi/asnMonitor').createAsnMonitor({
     db: require('./models'), getClient: require('./utils/edi/client').getClient,
 });

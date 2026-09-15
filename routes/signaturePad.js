@@ -7,6 +7,7 @@ module.exports = (models = require('../models')) => {
     const router = express.Router();
     const access = createSignaturePadAccess({ models, secret: JWT_SECRET, getUser: async id => resolveUserPermissions(await models.user.findById(id).lean()) });
     const workflow = createSignaturePadWorkflow({ models, secret: JWT_SECRET });
+    const state = require('../utils/outboundWorkflowState').createOutboundWorkflowState(models);
     router.use(async (req, res, next) => {
         res.set('Cache-Control', 'no-store');
         try { req.pad = await access.authenticate(req.get('Authorization')?.replace(/^Bearer /, '')); next(); }
@@ -24,11 +25,31 @@ module.exports = (models = require('../models')) => {
     });
     for (const operation of ['lookup', 'confirm']) router.post(`/workflow/${operation}`, async (req, res) => {
         try {
-            const payload = await workflow[operation](req.pad, operation === 'lookup' ? req.body?.barcode : req.body);
+            const payload = operation === 'lookup'
+                ? await workflow.lookup(req.pad, req.body?.barcode, req.body?.workflowVersion)
+                : await workflow.confirm(req.pad, req.body);
             res.json({ status: 'success', payload });
         } catch (error) {
             const message = error.message?.startsWith('signaturePad.') ? error.message : 'signaturePad.serverUnavailable';
             res.status(400).json({ status: 'error', message });
+        }
+    });
+    router.post('/notifications/poll', async (req, res) => {
+        let disconnected = false;
+        res.once('close', () => { disconnected = true; });
+        try {
+            let cursor = req.body?.after ?? 0;
+            const deadline = Date.now() + 25000;
+            while (!disconnected) {
+                await access.authenticate(req.get('Authorization')?.replace(/^Bearer /, ''));
+                const payload = await state.notifications(cursor);
+                if (payload.events.length || Date.now() >= deadline) return res.json({ status: 'success', payload });
+                cursor = payload.cursor;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        } catch (error) {
+            if (!disconnected) res.status(error.message === 'signaturePad.deviceUnauthorized' ? 401 : 400)
+                .json({ status: 'error', message: error.message?.startsWith('signaturePad.') ? error.message : 'signaturePad.serverUnavailable' });
         }
     });
     router.post('/revoke', async (req, res, next) => {

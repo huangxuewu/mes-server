@@ -11,6 +11,8 @@ const { createBolDocumentService } = require('../../utils/bolDocumentService');
 const bolDocuments = createBolDocumentService(db);
 const { createSignaturePadWorkflow } = require('../../utils/signaturePadWorkflow');
 const shipmentWorkflow = createSignaturePadWorkflow({ models: db });
+const { createOutboundWorkflowState, validateDesktopChecklist } = require('../../utils/outboundWorkflowState');
+const workflowState = createOutboundWorkflowState(db);
 
 module.exports = (socket, io) => {
 
@@ -76,14 +78,26 @@ module.exports = (socket, io) => {
     socket.on("outbound:update", async (payload, callback) => {
         try {
             const { _id, ...data } = payload;
+            const previous = await db.outbound.findOne({ _id }, { loads: 1 }).lean();
             if (data.loads) {
                 await resolveBolReferences(db, data.loads);
-                const previous = await db.outbound.findOne({ _id }, { loads: 1 }).lean();
                 await shipmentWorkflow.assignShipmentBarcodes(data.loads.map(load => ({ load,
                     previous: previous?.loads?.find(row => row.shipmentId === load.shipmentId) })));
             }
 
-            await db.outbound.updateOne({ _id }, { $set: data });
+            if (Object.keys(data).some(key => key.startsWith('loads.'))) throw new Error('signaturePad.invalidMessage');
+            if (data.loads) {
+                await workflowState.run([...(previous?.loads || []), ...data.loads].map(row => row.loadNumber), async session => {
+                    for (const next of data.loads) {
+                        const rows = await workflowState.readLoad(next.loadNumber, session);
+                        validateDesktopChecklist(previous?.loads?.find(row => row.shipmentId === next.shipmentId), next, rows);
+                    }
+                    const result = await db.outbound.updateOne({ _id, $expr: { $eq: [{ $literal: previous?.loads || [] }, '$loads'] } }, { $set: data }, { session });
+                    if (result.matchedCount !== 1) throw new Error('signaturePad.workflowChanged');
+                });
+            } else {
+                await workflowState.run((previous?.loads || []).map(row => row.loadNumber), session => db.outbound.updateOne({ _id }, { $set: data }, { session }));
+            }
 
             callback({ status: "success", message: "Outbound shipment updated successfully" });
 
@@ -94,7 +108,8 @@ module.exports = (socket, io) => {
 
     socket.on("outbound:delete", async (query, callback) => {
         try {
-            await db.outbound.deleteOne(query);
+            const parent = await db.outbound.findOne(query, { loads: 1 }).lean();
+            await workflowState.run((parent?.loads || []).map(row => row.loadNumber), session => db.outbound.deleteOne(query, { session }));
             callback?.({ status: "success", message: "Outbound shipment deleted successfully" });
         } catch (error) {
             callback?.({ status: "error", message: error.message });
@@ -263,10 +278,11 @@ module.exports = (socket, io) => {
                 'loads.shipmentId': { $in: shipmentIds }
             });
 
-            await db.outbound.updateMany(
+            const records = await db.outbound.find({ _id: { $in: outboundIds } }, { loads: 1 }).lean();
+            await workflowState.run(records.flatMap(record => record.loads.map(row => row.loadNumber)), session => db.outbound.updateMany(
                 { _id: { $in: outboundIds } },
-                { $pull: { loads: { shipmentId: { $in: shipmentIds } } } }
-            );
+                { $pull: { loads: { shipmentId: { $in: shipmentIds } } } }, { session }
+            ));
             await deleteEmptyOutbounds({ _id: { $in: outboundIds } });
 
             callback?.({ status: "success", message: "Load deleted successfully" });
@@ -283,10 +299,10 @@ module.exports = (socket, io) => {
 
             const outboundIds = await db.outbound.distinct('_id', { 'loads.loadNumber': loadNumber });
 
-            await db.outbound.updateMany(
+            await workflowState.run([loadNumber], session => db.outbound.updateMany(
                 { _id: { $in: outboundIds } },
-                { $pull: { loads: { loadNumber } } }
-            );
+                { $pull: { loads: { loadNumber } } }, { session }
+            ));
             await deleteEmptyOutbounds({ _id: { $in: outboundIds } });
 
             callback?.({ status: "success", message: "Loads deleted successfully" });
@@ -298,6 +314,7 @@ module.exports = (socket, io) => {
     socket.on("load:update", async (payload, callback) => {
         try {
             const { shipmentId, ...data } = payload;
+            if (Object.keys(data).some(key => key.startsWith('checklist.'))) throw new Error('signaturePad.invalidMessage');
 
             // DMSP (FedEx/UPS parcel): no BOL — mark Completed once loaded
             if (data.checklist?.loaded?.status === true && !data.status) {
@@ -313,7 +330,7 @@ module.exports = (socket, io) => {
             const update = {};
             for (const [key, value] of Object.entries(data)) {
                 if (key === 'checklist' && value) {
-                    for (const type of ['printed', 'picked', 'labeled', 'loading', 'loaded']) {
+                    for (const type of ['printed', 'picked', 'labeled', 'inspected', 'loading', 'loaded']) {
                         if (!value[type]) continue;
                         for (const field of ['status', 'timestamp'])
                             if (Object.hasOwn(value[type], field)) update[`loads.$[target].checklist.${type}.${field}`] = value[type][field];
@@ -337,11 +354,21 @@ module.exports = (socket, io) => {
                 }
                 update['loads.$[target].bolId'] = changed.bolId || null;
             }
-            const shipment = await db.outbound.findOneAndUpdate(
-                { 'loads.shipmentId': shipmentId },
-                { $set: update },
-                { arrayFilters: [{ 'target.shipmentId': shipmentId }], new: true }
-            );
+            const anchor = await db.outbound.findOne({ 'loads.shipmentId': shipmentId }, { loads: 1 }).lean();
+            const original = anchor?.loads.find(row => row.shipmentId === shipmentId);
+            if (!original) throw new Error('signaturePad.workflowNotFound');
+            const shipment = await workflowState.run([original.loadNumber, data.loadNumber], async session => {
+                const parent = await db.outbound.findOne({ 'loads.shipmentId': shipmentId }, { loads: 1 }).session(session).lean();
+                const previous = parent?.loads.find(row => row.shipmentId === shipmentId);
+                if (!previous || previous.loadNumber !== original.loadNumber) throw new Error('signaturePad.workflowChanged');
+                const next = { ...previous, ...data, checklist: { ...previous.checklist, ...data.checklist } };
+                const rows = await workflowState.readLoad(next.loadNumber, session);
+                validateDesktopChecklist(previous, next, rows);
+                return db.outbound.findOneAndUpdate(
+                    { 'loads.shipmentId': shipmentId }, { $set: update },
+                    { session, arrayFilters: [{ 'target.shipmentId': shipmentId }], new: true }
+                );
+            });
 
             callback?.({ status: "success", message: "Load updated successfully" });
 
@@ -358,7 +385,10 @@ module.exports = (socket, io) => {
 
             await resolveBolReferences(db, [load]);
             await shipmentWorkflow.assignShipmentBarcodes([{ load }]);
-            await db.outbound.updateOne({ _id }, { $push: { loads: load } });
+            await workflowState.run([load.loadNumber], async session => {
+                validateDesktopChecklist(null, load, [...await workflowState.readLoad(load.loadNumber, session), load]);
+                await db.outbound.updateOne({ _id }, { $push: { loads: load } }, { session });
+            });
 
             callback?.({ status: "success", message: "Load added successfully" });
         } catch (error) {
@@ -383,11 +413,15 @@ module.exports = (socket, io) => {
             if (load.bol) throw new Error('Shipment updates accept BOL references only');
             delete update['loads.$[elem].bolSummary'];
 
-            const shipment = await db.outbound.findOneAndUpdate(
-                { _id, $expr: { $eq: [{ $literal: previous?.loads || [] }, '$loads'] } },
-                { $set: update },
-                { arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
-            );
+            const original = previous?.loads?.find(row => row.shipmentId === load.shipmentId);
+            const shipment = await workflowState.run([original?.loadNumber, load.loadNumber], async session => {
+                const rows = await workflowState.readLoad(load.loadNumber, session);
+                validateDesktopChecklist(original, load, rows);
+                return db.outbound.findOneAndUpdate(
+                    { _id, $expr: { $eq: [{ $literal: previous?.loads || [] }, '$loads'] } },
+                    { $set: update }, { session, arrayFilters: [{ 'elem.shipmentId': load.shipmentId }], new: true }
+                );
+            });
             if (!shipment) throw new Error('Shipment changed while saving. Refresh and try again.');
 
             callback?.({ status: "success", message: "Outbound shipment updated successfully", payload: shipment });
@@ -570,9 +604,12 @@ module.exports = (socket, io) => {
             phase = 'save';
             const saveStarted = performance.now();
             if (bulkOps.length > 0) {
-                const result = await db.outbound.bulkWrite(bulkOps);
-                if (result.matchedCount !== bulkOps.length)
-                    throw new Error('Shipments changed during sync. Sync again to apply the latest data.');
+                const numbers = [...touchedPos].flatMap(po => [...(originalLoads.get(po) || []), ...shipmentMap.get(po).loads].map(row => row.loadNumber));
+                await workflowState.run(numbers, async session => {
+                    const result = await db.outbound.bulkWrite(bulkOps, { session });
+                    if (result.matchedCount !== bulkOps.length)
+                        throw new Error('Shipments changed during sync. Sync again to apply the latest data.');
+                });
             }
             timings.saveMs = Math.round(performance.now() - saveStarted);
 
@@ -655,13 +692,15 @@ module.exports = (socket, io) => {
     socket.on("loads:update", async (payload, callback) => {
         try {
             const { loadNumber, note, operator, ...data } = payload;
+            if (Object.keys(data).some(key => key === 'checklist' || key.startsWith('checklist.')))
+                throw new Error('Use load:update for checklist changes');
             const update = Object.keys(data).reduce((acc, key) => Object.assign(acc, { [`loads.$.${key}`]: data[key] }), {});
 
             // note?.length
             //     ? await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update, $push: { memos: { content: note, createdAt: new Date, createdBy: operator } } })
             //     : 
             if (Object.keys(data).some(key => key === 'bol' || key.startsWith('bol.') || key === 'bolId' || key === 'bolSummary')) throw new Error('Use the BOL document editor');
-            await db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update });
+            await workflowState.run([loadNumber], session => db.outbound.updateMany({ 'loads.loadNumber': loadNumber }, { $set: update }, { session }));
 
             if (['Picked Up', 'Completed'].includes(data.status)) {
                 const shipments = await db.outbound.find({ 'loads.loadNumber': loadNumber });
@@ -680,13 +719,14 @@ module.exports = (socket, io) => {
         try {
             const { loadNumber, breakdown } = payload;
 
-            for (const [poNumber, { items }] of Object.entries(breakdown)) {
-                await db.outbound.updateOne(
-                    { poNumber },
-                    { $set: { 'loads.$[target].items': items } },
-                    { arrayFilters: [{ 'target.loadNumber': loadNumber }] }
-                );
-            }
+            await workflowState.run([loadNumber], async session => {
+                for (const [poNumber, { items }] of Object.entries(breakdown)) {
+                    await db.outbound.updateOne(
+                        { poNumber }, { $set: { 'loads.$[target].items': items } },
+                        { session, arrayFilters: [{ 'target.loadNumber': loadNumber }] }
+                    );
+                }
+            });
 
             callback?.({ status: "success", message: `Breakdown for load ${loadNumber} updated successfully` });
 

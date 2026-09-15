@@ -30,6 +30,7 @@ const fixture = (db, submitAsns) => {
         'node:perf_hooks': { performance: {} }, '../../utils/outboundScac': { requiresBol: () => true },
         '../../utils/outboundOrder': {}, '../../utils/edi/asn': { submitAsns },
         '../../utils/signaturePadWorkflow': require('../utils/signaturePadWorkflow'),
+        '../../utils/outboundWorkflowState': { ...require('../utils/outboundWorkflowState'), createOutboundWorkflowState: () => ({ run: (_numbers, work) => work({}), readLoad: async () => [{ shipmentId: 'SHIP1', checklist: { labeled: { status: true }, inspected: { status: true } } }] }) },
     };
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../socket/event/shipment.js'), 'utf8'), {
@@ -96,7 +97,7 @@ test('ASN submission resolves the referenced BOL document before building the re
 test('warehouse saves cannot overwrite hidden follow-up flags from a stale checklist', async () => {
     let update;
     const { handlers } = fixture({ outbound: {
-        findOne: () => ({ lean: async () => ({ loads: [{}] }) }),
+        findOne: () => ({ session() { return this; }, lean: async () => ({ loads: [{ shipmentId: 'SHIP1', loadNumber: 'LOAD1', checklist: { labeled: { status: true }, inspected: { status: true } } }] }) }),
         findOneAndUpdate: async (_query, payload) => { update = payload.$set; return {}; },
     } });
     let result;

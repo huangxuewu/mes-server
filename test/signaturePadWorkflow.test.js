@@ -9,14 +9,15 @@ const setup = () => {
             items: [{ styleCode: 'STYLE-1234', description: 'Pillow', quantity: 120, casePack: 12 }],
             checklist: { printed: { status: true, timestamp: '2026-09-01' } } }] }));
     records.push({ _id: 'other', poNumber: '12345-001', loads: [{ ...structuredClone(records[0].loads[0]), shipmentId: 'OTHER', loadNumber: 'LOAD-2' }] });
+    let states = new Map(), receipts = new Map(), events = [], notificationSequence = 0;
     let failAt = 0, writes = 0, ended = 0, sequence = 0, counterWrites = 0;
     const models = { outbound: {
         find(query) { return { session() { return this; }, lean: async () => structuredClone(records.filter(record => record.loads.some(load =>
             Object.entries(query).every(([key, value]) => key.split('.').slice(1).reduce((row, part) => row?.[part], load) === value)))) }; },
         async startSession() { return {
             async withTransaction(work) {
-                const before = structuredClone(records);
-                try { await work(); } catch (error) { records = before; throw error; }
+                const before = structuredClone(records), oldStates = structuredClone(states), oldReceipts = structuredClone(receipts), oldEvents = structuredClone(events);
+                try { await work(); } catch (error) { records = before; states = oldStates; receipts = oldReceipts; events = oldEvents; throw error; }
             },
             async endSession() { ended++; },
         }; },
@@ -37,7 +38,18 @@ const setup = () => {
             }
             return { matchedCount: 1 };
         },
-    }, counter: { async findByIdAndUpdate(id, update) {
+    }, outboundWorkflowState: {
+        async findOneAndUpdate(query, update) {
+            const row = states.get(query._id) || { _id: query._id, ...update.$setOnInsert };
+            states.set(query._id, row); return structuredClone(row);
+        },
+        async updateOne(query, update) { Object.assign(states.get(query._id), update.$set); },
+    }, signaturePadWorkflowReceipt: {
+        findById(id) { return { session() { return this; }, lean: async () => structuredClone(receipts.get(id) || null) }; },
+        async create(rows) { for (const row of rows) receipts.set(row._id, structuredClone(row)); },
+    }, signaturePadNotification: { async create(rows) { events.push(...structuredClone(rows)); } },
+    counter: { async findByIdAndUpdate(id, update) {
+        if (id === 'signature-pad-notifications') return { sequence: ++notificationSequence };
         assert.equal(id, 'signature-pad-checklist'); counterWrites++;
         sequence += update.$inc.sequence;
         return { sequence };
@@ -47,7 +59,8 @@ const setup = () => {
     const workflow = createSignaturePadWorkflow({ models, secret });
     return { workflow, device, secret, models, records: () => records, writes: () => writes, ended: () => ended,
         failAt: value => { failAt = value; }, counterWrites: () => counterWrites,
-        lookup: barcode => workflow.lookup(device, barcode),
+        events: () => events,
+        lookup: barcode => workflow.lookup(device, barcode, 2),
         confirm: (grant, shipmentIds = ['SHIP-0']) => workflow.confirm(device, { grant, shipmentIds }) };
 };
 
@@ -93,6 +106,7 @@ test('item lookup matches desktop inheritance while explicit empty allocations r
 test('picking and inspection skip closed DCs, including a closed barcode anchor, while labeling stays blocked', async () => {
     for (const [prefix, action] of [['404', 'picked'], ['402', 'inspected']]) for (const status of ['Completed', 'Cancelled']) {
         const t = setup();
+        t.records().forEach(record => record.loads[0].checklist.labeled = { status: true });
         const closed = t.records()[0].loads[0];
         closed.status = status; closed.items = [];
         closed.checklist[action] = { barcode: prefix + '000000001', barcodeLoadNumber: 'LOAD-1', status: false };
@@ -109,10 +123,11 @@ test('picking and inspection skip closed DCs, including a closed barcode anchor,
     }
 });
 
-test('inspection and labeling work independently; labels target one shipment within its load', async () => {
+test('inspection requires the whole load labeled; labels target one shipment within its load', async () => {
     const t = setup();
-    await t.confirm((await t.lookup('402LOAD-1')).grant, ['SHIP-0', 'SHIP-1']);
-    assert.ok(t.records().slice(0, 2).every(record => record.loads[0].checklist.inspected.status));
+    const blocked = await t.lookup('402LOAD-1');
+    assert.equal(blocked.available, false);
+    await assert.rejects(t.confirm(blocked.grant), /labelingRequired/);
     assert.equal(t.records()[0].loads[0].checklist.picked, undefined);
     const label = await t.lookup('403LOAD-1|SHIP-1');
     assert.equal(label.shipments.length, 1);
@@ -121,6 +136,10 @@ test('inspection and labeling work independently; labels target one shipment wit
     assert.equal(t.records()[0].loads[0].checklist.labeled, undefined);
     await assert.rejects(t.confirm(label.grant, ['SHIP-0']), /invalidMessage/);
     await assert.rejects(t.lookup('403LOAD-2|SHIP-1'), /workflowNotFound/);
+    await t.confirm((await t.lookup('403LOAD-1|SHIP-0')).grant);
+    await t.confirm((await t.lookup('402LOAD-1')).grant, ['SHIP-0', 'SHIP-1']);
+    assert.ok(t.records().slice(0, 2).every(record => record.loads[0].checklist.inspected.status));
+    assert.deepEqual(t.events().map(event => event.stage), ['labeled', 'inspected']);
 });
 
 test('invalid selections, tampered/expired grants and other devices cannot write', async () => {

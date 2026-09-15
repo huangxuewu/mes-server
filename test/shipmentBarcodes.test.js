@@ -10,21 +10,21 @@ for (const event of ['load:sync', 'load:replace']) test(`${event} rejects a stal
     const parent = await f.db.outbound.create({ poNumber: 'PO-001', items });
     const call = async (name, input) => { let result; await f.handlers[name](JSON.parse(JSON.stringify(input)), response => { result = response; }); return result; };
     assert.equal((await call('load:add', { _id: parent._id, load: { shipmentId: 'SHIP', loadNumber: 'LOAD', status: 'Pending', items } })).status, 'success');
+    await call('load:update', { shipmentId: 'SHIP', checklist: { labeled: { status: true } } });
     const before = await f.db.outbound.findById(parent._id).lean();
     const workflow = createSignaturePadWorkflow({ models: f.db, secret: 'concurrent-review-test' });
     const device = { _id: 'test-pad' };
     const { grant } = await workflow.lookup(device, before.loads[0].checklist.inspected.barcode);
-    const method = event === 'load:sync' ? 'bulkWrite' : 'findOneAndUpdate';
-    const originalWrite = f.db.outbound[method].bind(f.db.outbound);
-    let confirmed;
-    f.db.outbound[method] = async (...args) => {
-        confirmed = await workflow.confirm(device, { grant, shipmentIds: ['SHIP'] });
+    const originalWrite = f.db.outboundWorkflowState.findOneAndUpdate.bind(f.db.outboundWorkflowState);
+    let confirmed, entered = false;
+    f.db.outboundWorkflowState.findOneAndUpdate = async (...args) => {
+        if (!entered) { entered = true; confirmed = await workflow.confirm(device, { grant, shipmentIds: ['SHIP'] }); }
         return originalWrite(...args);
     };
     const load = { shipmentId: 'SHIP', loadNumber: 'LOAD', proNumber: 'NEW-PRO' };
     const input = event === 'load:sync' ? [{ poNumber: parent.poNumber, load }] : { _id: parent._id, load };
     const result = await call(event, input);
-    f.db.outbound[method] = originalWrite;
+    f.db.outboundWorkflowState.findOneAndUpdate = originalWrite;
     assert.equal(result.status, 'error'); assert.match(result.message, /changed/i);
     const after = await f.db.outbound.findById(parent._id).lean();
     assert.equal(after.loads[0].checklist.inspected.status, true);

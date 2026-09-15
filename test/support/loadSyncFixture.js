@@ -37,7 +37,9 @@ async function loadSyncFixture(uri, sources = {}) {
         '../socket/io': { io: { except: () => ({ emit() {} }) } },
         '../utils/outboundScac': require('../../utils/outboundScac') };
     const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common), bolDocument: evaluate('models/bolDocument.js', common),
-        hauler: evaluate('models/hauler.js', common), signaturePadDevice: evaluate('models/signaturePadDevice.js', common), counter: evaluate('models/counter.js', common) };
+        hauler: evaluate('models/hauler.js', common), signaturePadDevice: evaluate('models/signaturePadDevice.js', common), counter: evaluate('models/counter.js', common),
+        outboundWorkflowState: evaluate('models/outboundWorkflowState.js', common), signaturePadNotification: evaluate('models/signaturePadNotification.js', common),
+        signaturePadWorkflowReceipt: evaluate('models/signaturePadWorkflowReceipt.js', common) };
     await Promise.all(Object.values(db).map(model => model.init()));
     const handlers = {};
     evaluate('socket/event/shipment.js', { mongoose, '../../models': db, '../../utils/dayjs': dayjs,
