@@ -7,6 +7,8 @@ const schema = new mongoose.Schema({
     loadNumber: String,
     shipments: [{ _id: false, shipmentId: String, status: Boolean, timestamp: Date }],
     completedIds: [String],
+    signatureHash: String,
+    releaseRequired: Boolean,
     expiresAt: { type: Date, required: true, index: { expires: 0 } },
 });
 

@@ -1,4 +1,5 @@
 const test = require('node:test');
+const { inspectionImage } = require('./support/inspectionImage');
 const assert = require('node:assert/strict');
 const { loadSyncFixture } = require('./support/loadSyncFixture');
 const { createSignaturePadWorkflow } = require('../utils/signaturePadWorkflow');
@@ -14,11 +15,11 @@ for (const event of ['load:sync', 'load:replace']) test(`${event} rejects a stal
     const before = await f.db.outbound.findById(parent._id).lean();
     const workflow = createSignaturePadWorkflow({ models: f.db, secret: 'concurrent-review-test' });
     const device = { _id: 'test-pad' };
-    const { grant } = await workflow.lookup(device, before.loads[0].checklist.inspected.barcode);
+    const { grant } = await workflow.lookup(device, before.loads[0].checklist.inspected.barcode, 3);
     const originalWrite = f.db.outboundWorkflowState.findOneAndUpdate.bind(f.db.outboundWorkflowState);
     let confirmed, entered = false;
     f.db.outboundWorkflowState.findOneAndUpdate = async (...args) => {
-        if (!entered) { entered = true; confirmed = await workflow.confirm(device, { grant, shipmentIds: ['SHIP'] }); }
+        if (!entered) { entered = true; confirmed = await workflow.confirm(device, { grant, shipmentIds: ['SHIP'], image: inspectionImage }); }
         return originalWrite(...args);
     };
     const load = { shipmentId: 'SHIP', loadNumber: 'LOAD', proNumber: 'NEW-PRO' };

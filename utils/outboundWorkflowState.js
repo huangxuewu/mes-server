@@ -1,8 +1,19 @@
 const eligibleShipments = rows => rows.filter(row => !['Completed', 'Cancelled'].includes(row.status));
+const sameTime = (a, b) => new Date(a || 0).getTime() === new Date(b || 0).getTime();
 const getMilestones = rows => {
     const active = eligibleShipments(rows);
     const labeled = active.length > 0 && active.every(row => row.checklist?.labeled?.status === true);
-    return { labeled, inspected: labeled && active.every(row => row.checklist?.inspected?.status === true) };
+    const inspected = labeled && active.every(row => row.checklist?.inspected?.status === true);
+    const releaseId = active[0]?.inspectionRelease?.id;
+    const released = inspected && !!releaseId && active.every(row => row.inspectionRelease?.id === releaseId
+        && row.inspectionRelease.loadNumber === row.loadNumber
+        && sameTime(row.inspectionRelease.inspectedAt, row.checklist.inspected.timestamp)
+        && sameTime(row.inspectionRelease.labeledAt, row.checklist.labeled.timestamp));
+    return { labeled, inspected, released, releaseId: released ? releaseId : null };
+};
+const notificationMilestones = rows => {
+    const { labeled, released } = getMilestones(rows);
+    return { labeled, inspected: released };
 };
 
 const validateDesktopChecklist = (previous, next, rows) => {
@@ -15,7 +26,7 @@ const validateDesktopChecklist = (previous, next, rows) => {
         if (previous.checklist?.loaded?.status) throw new Error('signaturePad.undoLoadedFirst');
     }
     if (!previous?.checklist?.loaded?.status && next.checklist?.loaded?.status === true
-        && (!getMilestones(rows).inspected || next.checklist?.labeled?.status !== true || next.checklist?.inspected?.status !== true))
+        && (!getMilestones(rows).released || !getMilestones([{ ...next, status: previous?.status }]).released))
         throw new Error('signaturePad.inspectionRequired');
 };
 
@@ -36,7 +47,7 @@ const createOutboundWorkflowState = models => {
                     await session.withTransaction(async () => {
                         const states = new Map();
                         for (const number of loadNumbers) {
-                            const baseline = getMilestones(await readLoad(number, session));
+                            const baseline = notificationMilestones(await readLoad(number, session));
                             const state = await models.outboundWorkflowState.findOneAndUpdate({ _id: number },
                                 { $inc: { revision: 1 }, $setOnInsert: baseline },
                                 { session, upsert: true, new: true, setDefaultsOnInsert: false });
@@ -45,7 +56,11 @@ const createOutboundWorkflowState = models => {
                         result = await work(session);
                         for (const number of loadNumbers) {
                             const previous = states.get(number);
-                            const next = getMilestones(await readLoad(number, session));
+                            const rows = await readLoad(number, session);
+                            const next = notificationMilestones(rows);
+                            if (!getMilestones(rows).released && rows.some(row => row.inspectionRelease?.id))
+                                await models.outbound.updateMany({ 'loads.loadNumber': number }, { $unset: { 'loads.$[load].inspectionRelease': '' } },
+                                    { session, arrayFilters: [{ 'load.loadNumber': number }] });
                             const patch = { ...next };
                             for (const stage of ['labeled', 'inspected']) {
                                 if (!next[stage] || previous[stage]) continue;
@@ -74,7 +89,7 @@ const createOutboundWorkflowState = models => {
         const visible = [];
         for (const event of events) {
             const state = await models.outboundWorkflowState.findById(event.loadNumber).lean();
-            if (state?.[event.stage + 'Event'] !== event._id || !getMilestones(await readLoad(event.loadNumber))[event.stage]) continue;
+            if (state?.[event.stage + 'Event'] !== event._id || !notificationMilestones(await readLoad(event.loadNumber))[event.stage]) continue;
             visible.push({ id: event._id, loadNumber: event.loadNumber, stage: event.stage, createdAt: event.createdAt });
         }
         return { events: visible, cursor: events.at(-1)?._id ?? after };
@@ -93,7 +108,7 @@ const createOutboundWorkflowState = models => {
         }
         const saved = new Map(states.map(row => [row._id, row]));
         for (const [number, rows] of groups) {
-            const next = getMilestones(rows), previous = saved.get(number);
+            const next = notificationMilestones(rows), previous = saved.get(number);
             if (!previous || next.labeled !== previous.labeled || next.inspected !== previous.inspected)
                 await run([number], async () => {});
         }

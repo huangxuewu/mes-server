@@ -329,6 +329,7 @@ module.exports = (socket, io) => {
 
             const update = {};
             for (const [key, value] of Object.entries(data)) {
+                if (key === 'inspectionRelease' || key.startsWith('inspectionRelease.')) throw new Error('signaturePad.inspectionPadOnly');
                 if (key === 'checklist' && value) {
                     for (const type of ['printed', 'picked', 'labeled', 'inspected', 'loading', 'loaded']) {
                         if (!value[type]) continue;
@@ -692,6 +693,7 @@ module.exports = (socket, io) => {
     socket.on("loads:update", async (payload, callback) => {
         try {
             const { loadNumber, note, operator, ...data } = payload;
+            if (Object.keys(data).some(key => key === 'inspectionRelease' || key.startsWith('inspectionRelease.'))) throw new Error('signaturePad.inspectionPadOnly');
             if (Object.keys(data).some(key => key === 'checklist' || key.startsWith('checklist.')))
                 throw new Error('Use load:update for checklist changes');
             const update = Object.keys(data).reduce((acc, key) => Object.assign(acc, { [`loads.$.${key}`]: data[key] }), {});

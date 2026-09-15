@@ -3,12 +3,15 @@ const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const { createSignaturePadWorkflow, parseWorkflowBarcode } = require('../utils/signaturePadWorkflow');
 
+const { inspectionImage } = require('./support/inspectionImage');
+
 const setup = () => {
     let records = ['001', '002'].map((dc, index) => ({ _id: `record-${index}`, poNumber: `12345-${dc}`,
         loads: [{ shipmentId: `SHIP-${index}`, loadNumber: 'LOAD-1', status: 'Pending', carrierSCAC: 'ABCD',
             items: [{ styleCode: 'STYLE-1234', description: 'Pillow', quantity: 120, casePack: 12 }],
             checklist: { printed: { status: true, timestamp: '2026-09-01' } } }] }));
     records.push({ _id: 'other', poNumber: '12345-001', loads: [{ ...structuredClone(records[0].loads[0]), shipmentId: 'OTHER', loadNumber: 'LOAD-2' }] });
+    let documents = new Map();
     let states = new Map(), receipts = new Map(), events = [], notificationSequence = 0;
     let failAt = 0, writes = 0, ended = 0, sequence = 0, counterWrites = 0;
     const models = { outbound: {
@@ -16,8 +19,8 @@ const setup = () => {
             Object.entries(query).every(([key, value]) => key.split('.').slice(1).reduce((row, part) => row?.[part], load) === value)))) }; },
         async startSession() { return {
             async withTransaction(work) {
-                const before = structuredClone(records), oldStates = structuredClone(states), oldReceipts = structuredClone(receipts), oldEvents = structuredClone(events);
-                try { await work(); } catch (error) { records = before; states = oldStates; receipts = oldReceipts; events = oldEvents; throw error; }
+                const before = structuredClone(records), oldStates = structuredClone(states), oldReceipts = structuredClone(receipts), oldDocuments = structuredClone(documents), oldEvents = structuredClone(events);
+                try { await work(); } catch (error) { records = before; states = oldStates; receipts = oldReceipts; documents = oldDocuments; events = oldEvents; throw error; }
             },
             async endSession() { ended++; },
         }; },
@@ -37,6 +40,12 @@ const setup = () => {
                 }
             }
             return { matchedCount: 1 };
+        },
+    }, bolDocument: {
+        findOne(query) { return { session() { return this; }, lean: async () => structuredClone(documents.get(query.loadNumber) || null) }; },
+        async findOneAndUpdate(query, update) {
+            const doc = documents.get(query.loadNumber) || { _id: 'bol-' + query.loadNumber, loadNumber: query.loadNumber, inspectionSignatures: [] };
+            doc.inspectionSignatures.push(structuredClone(update.$push.inspectionSignatures)); documents.set(query.loadNumber, doc); return doc;
         },
     }, outboundWorkflowState: {
         async findOneAndUpdate(query, update) {
@@ -60,8 +69,8 @@ const setup = () => {
     return { workflow, device, secret, models, records: () => records, writes: () => writes, ended: () => ended,
         failAt: value => { failAt = value; }, counterWrites: () => counterWrites,
         events: () => events,
-        lookup: barcode => workflow.lookup(device, barcode, 2),
-        confirm: (grant, shipmentIds = ['SHIP-0']) => workflow.confirm(device, { grant, shipmentIds }) };
+        lookup: barcode => workflow.lookup(device, barcode, 3),
+        confirm: (grant, shipmentIds = ['SHIP-0']) => workflow.confirm(device, { grant, shipmentIds, image: inspectionImage }) };
 };
 
 test('final prefix mapping and scanner normalization are strict', () => {
@@ -139,6 +148,8 @@ test('inspection requires the whole load labeled; labels target one shipment wit
     await t.confirm((await t.lookup('403LOAD-1|SHIP-0')).grant);
     await t.confirm((await t.lookup('402LOAD-1')).grant, ['SHIP-0', 'SHIP-1']);
     assert.ok(t.records().slice(0, 2).every(record => record.loads[0].checklist.inspected.status));
+    assert.deepEqual(t.events().map(event => event.stage), ['labeled']);
+    await t.confirm((await t.lookup('402LOAD-1')).grant, ['SHIP-0', 'SHIP-1']);
     assert.deepEqual(t.events().map(event => event.stage), ['labeled', 'inspected']);
 });
 

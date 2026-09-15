@@ -9,6 +9,15 @@ const schema = new mongoose.Schema({
     uploadedAt: { type: Date, default: null },
     rawData: { type: mongoose.Schema.Types.Mixed, default: null },
     revision: { type: Number, default: 0 },
+    // Private inspection evidence; never part of the printable rawData.
+    inspectionSignatures: [{
+        _id: false,
+        submissionId: String,
+        image: String,
+        signedAt: Date,
+        deviceId: String,
+        shipments: [{ _id: false, outboundId: String, shipmentId: String, poNumber: String }],
+    }],
     migrationKey: String,
 }, { timestamps: true, strict: false });
 schema.index({ number: 1 });

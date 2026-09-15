@@ -65,6 +65,7 @@ const loadSchema = new mongoose.Schema({
         error: String,
     },
     bolId: { type: mongoose.Schema.Types.ObjectId, ref: 'bolDocument', default: null },
+    inspectionRelease: { id: String, loadNumber: String, inspectedAt: Date, labeledAt: Date },
     items: mongoose.Mixed,
     auditLog: [auditLogSchema],
     checklist: {

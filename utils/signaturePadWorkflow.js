@@ -1,5 +1,6 @@
 const { createHash, randomUUID } = require('node:crypto');
 const jwt = require('jsonwebtoken');
+const sharp = require('sharp');
 const { createOutboundWorkflowState, getMilestones } = require('./outboundWorkflowState');
 const { requiresBol } = require('./outboundScac');
 
@@ -18,7 +19,13 @@ const parseWorkflowBarcode = barcode => {
     return { action: { 402: 'inspected', 403: 'labeled', 404: 'picked' }[prefix], loadNumber: match[3], shipmentId: match[4] || '' };
 };
 
+const inspectionRevision = rows => createHash('sha256').update(JSON.stringify(rows.map(row => [row.shipmentId, row.checklist.inspected, row.checklist.labeled]))).digest('hex');
+
 const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWorkflowState(models) }) => {
+    const inspectionDocument = async (loadNumber, session) => {
+        const document = await models.bolDocument.findOne({ loadNumber }, { number: 1, rawData: 1 }).session(session || null).lean();
+        return { document, revision: createHash('sha256').update(JSON.stringify([document?.number || '', document?.rawData || null])).digest('hex') };
+    };
     const findWorkflow = async (barcode, session) => {
         const scope = parseWorkflowBarcode(barcode);
         if (scope.barcode) {
@@ -57,8 +64,9 @@ const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWork
             || item.quantity < 0 || !Number.isFinite(item.casePack) || item.casePack <= 0))) throw new Error('signaturePad.workflowNotReady');
         shipments.sort((a, b) => a.poNumber.localeCompare(b.poNumber) || a.shipmentId.localeCompare(b.shipmentId));
         const revision = createHash('sha256').update(JSON.stringify(shipments.map(({ checklist, ...row }) => row))).digest('hex');
-        const action = scope.action === 'labeled' && milestones.inspected ? 'loaded' : scope.action;
-        const available = action !== 'inspected' || milestones.labeled;
+        const action = scope.action === 'labeled' && milestones.released ? 'loaded'
+            : scope.action === 'inspected' && milestones.inspected ? 'released' : scope.action;
+        const available = action === 'released' ? !milestones.released : action !== 'inspected' || milestones.labeled;
         return { ...scope, action, shipments, revision, available, milestones };
     };
 
@@ -67,6 +75,8 @@ const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWork
             const missing = [];
             for (const { load, previous } of entries) {
                 if (!load?.shipmentId || !load.loadNumber) continue;
+                if (previous?.inspectionRelease) load.inspectionRelease = previous.inspectionRelease;
+                else delete load.inspectionRelease;
                 load.checklist = { ...previous?.checklist, ...load.checklist };
                 for (const [action, prefix] of [['picked', '404'], ['inspected', '402'], ['labeled', '403']]) {
                     const saved = previous?.checklist?.[action];
@@ -99,11 +109,15 @@ const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWork
         async lookup(device, barcode, workflowVersion = 1) {
             const workflow = await findWorkflow(barcode);
             if (workflow.action === 'loaded' && workflowVersion < 2) throw new Error('signaturePad.updateRequired');
+            if (['inspected', 'released'].includes(workflow.action) && workflowVersion < 3) throw new Error('signaturePad.updateRequired');
+            const bolRevision = workflow.action === 'released' ? (await inspectionDocument(workflow.loadNumber)).revision : undefined;
             const grant = jwt.sign({ kind: 'signature-pad-workflow', deviceId: device._id, barcode, revision: workflow.revision,
-                action: workflow.action, loadNumber: workflow.loadNumber, jti: randomUUID() },
+                action: workflow.action, loadNumber: workflow.loadNumber, bolRevision,
+                releaseId: workflow.action === 'loaded' ? workflow.milestones.releaseId : undefined,
+                inspectionRevision: workflow.action === 'released' ? inspectionRevision(workflow.shipments) : undefined, jti: randomUUID() },
                 secret, { expiresIn: '30m', algorithm: 'HS256' });
             return { action: workflow.action, loadNumber: workflow.loadNumber, grant, available: workflow.available,
-                reason: workflow.available ? null : 'signaturePad.labelingRequired',
+                reason: workflow.available ? null : workflow.action === 'released' ? 'signaturePad.alreadyReleased' : 'signaturePad.labelingRequired',
                 shipments: workflow.shipments.map(row => ({ ...row,
                     items: row.items.map(item => ({ styleCode: item.styleCode, description: item.description || '',
                         quantity: item.quantity, casePack: item.casePack, boxes: item.quantity / item.casePack }))
@@ -118,21 +132,53 @@ const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWork
             if (!Array.isArray(selected) || !selected.length || selected.some(id => typeof id !== 'string')
                 || new Set(selected).size !== selected.length) throw new Error('signaturePad.invalidMessage');
             if (!grant.action || !grant.loadNumber) throw new Error('signaturePad.scanExpired');
+            let signatureHash;
+            if (grant.action === 'released') {
+                if (!grant.bolRevision) throw new Error('signaturePad.updateRequired');
+                if (typeof input.image !== 'string' || input.image.length > 256 * 1024
+                    || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(input.image)) throw new Error('signaturePad.inspectorSignatureRequired');
+                try {
+                    const decoder = sharp(Buffer.from(input.image.slice(22), 'base64'), { limitInputPixels: 4096 * 4096 });
+                    const metadata = await decoder.metadata();
+                    if (metadata.format !== 'png') throw new Error();
+                    const { data, info } = await decoder.toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+                    let ink = 0;
+                    for (let i = 0; i < data.length; i += info.channels)
+                        if (data[i + info.channels - 1] > 32 && Math.min(data[i], data[i + 1], data[i + 2]) < 200) ink++;
+                    if (ink < 20) throw new Error();
+                } catch { throw new Error('signaturePad.invalidImage'); }
+                signatureHash = createHash('sha256').update(input.image).digest('hex');
+            }
             const receiptId = createHash('sha256').update(JSON.stringify([input.grant, [...selected].sort()])).digest('hex');
             const completedIds = new Set();
             const receipt = await state.run([grant.loadNumber], async session => {
                     completedIds.clear();
                     const previousReceipt = await models.signaturePadWorkflowReceipt.findById(receiptId).session(session).lean();
                     if (previousReceipt) {
+                        if (previousReceipt.signatureHash !== signatureHash) throw new Error('signaturePad.workflowChanged');
                         previousReceipt.completedIds.forEach(id => completedIds.add(id));
-                        return { action: previousReceipt.action, loadNumber: previousReceipt.loadNumber, shipments: previousReceipt.shipments };
+                        return { action: previousReceipt.action, loadNumber: previousReceipt.loadNumber, shipments: previousReceipt.shipments, releaseRequired: previousReceipt.releaseRequired || false };
                     }
                     const workflow = await findWorkflow(grant.barcode, session);
                     if (workflow.revision !== grant.revision || workflow.action !== grant.action || workflow.loadNumber !== grant.loadNumber) throw new Error('signaturePad.workflowChanged');
                     if (selected.some(id => !workflow.shipments.some(row => row.shipmentId === id))) throw new Error('signaturePad.invalidMessage');
-                    if (!workflow.available) throw new Error('signaturePad.labelingRequired');
-                    if (workflow.action === 'loaded' && !workflow.milestones.inspected) throw new Error('signaturePad.inspectionRequired');
+                    if (!workflow.available) throw new Error(workflow.action === 'released' ? 'signaturePad.alreadyReleased' : 'signaturePad.labelingRequired');
+                    if (workflow.action === 'loaded' && !workflow.milestones.released) throw new Error('signaturePad.inspectionRequired');
+                    if (workflow.action === 'loaded' && grant.releaseId !== workflow.milestones.releaseId) throw new Error('signaturePad.workflowChanged');
                     const timestamp = new Date();
+                    let inspectionBol;
+                    if (workflow.action === 'released') {
+                        const current = await inspectionDocument(workflow.loadNumber, session);
+                        if (current.revision !== grant.bolRevision || inspectionRevision(workflow.shipments) !== grant.inspectionRevision)
+                            throw new Error('signaturePad.workflowChanged');
+                        if (selected.length !== workflow.shipments.length || !workflow.milestones.inspected) throw new Error('signaturePad.inspectionRequired');
+                        inspectionBol = await models.bolDocument.findOneAndUpdate({ loadNumber: workflow.loadNumber }, {
+                            $setOnInsert: { loadNumber: workflow.loadNumber },
+                            $push: { inspectionSignatures: { submissionId: receiptId, image: input.image, signedAt: timestamp,
+                                deviceId: device._id, shipments: workflow.shipments.map(({ outboundId, shipmentId, poNumber }) => ({ outboundId, shipmentId, poNumber })) } },
+                            $inc: { revision: 1 },
+                        }, { session, upsert: true, new: true });
+                    }
                     const saved = [];
                     for (const row of workflow.shipments.filter(row => selected.includes(row.shipmentId))) {
                         const previous = row.checklist[workflow.action];
@@ -143,17 +189,21 @@ const createSignaturePadWorkflow = ({ models, secret, state = createOutboundWork
                         const parcelCompleted = workflow.action === 'loaded' && !requiresBol({ carrierSCAC: row.scac });
                         const result = await models.outbound.updateOne({ _id: row.outboundId,
                             loads: { $elemMatch: { shipmentId: row.shipmentId, loadNumber: workflow.loadNumber } } },
-                        { $set: { [`loads.$[target].checklist.${workflow.action}.status`]: true,
-                            [`loads.$[target].checklist.${workflow.action}.timestamp`]: timestamp,
+                        { $set: { ...(inspectionBol ? { 'loads.$[target].inspectionRelease': { id: receiptId, loadNumber: workflow.loadNumber,
+                                inspectedAt: row.checklist.inspected.timestamp || null, labeledAt: row.checklist.labeled.timestamp || null } }
+                                : { [`loads.$[target].checklist.${workflow.action}.status`]: true, [`loads.$[target].checklist.${workflow.action}.timestamp`]: timestamp }),
                             'loads.$[target].updatedAt': timestamp,
+                            ...(inspectionBol ? { 'loads.$[target].bolId': inspectionBol._id } : {}),
                             ...(parcelCompleted ? { 'loads.$[target].status': 'Completed' } : {}) } },
                         { session, arrayFilters: [{ 'target.shipmentId': row.shipmentId, 'target.loadNumber': workflow.loadNumber }] });
                         if (result.matchedCount !== 1) throw new Error('signaturePad.workflowChanged');
                         if (parcelCompleted) completedIds.add(row.outboundId);
                         saved.push({ shipmentId: row.shipmentId, status: true, timestamp });
                     }
-                    const result = { action: workflow.action, loadNumber: workflow.loadNumber, shipments: saved };
+                    const result = { action: workflow.action, loadNumber: workflow.loadNumber, shipments: saved,
+                        releaseRequired: workflow.action === 'inspected' && getMilestones(await state.readLoad(workflow.loadNumber, session)).inspected };
                     await models.signaturePadWorkflowReceipt.create([{ _id: receiptId, ...result,
+                        signatureHash,
                         completedIds: [...completedIds], expiresAt: new Date(grant.exp * 1000) }], { session });
                     return result;
             });
