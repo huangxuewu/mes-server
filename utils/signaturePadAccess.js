@@ -130,7 +130,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
             if (!signed && targets.some(target => target.status === 'Completed')) throw new Error('signaturePad.bolCompleted');
             if (!signed && targets.some(target => target.status === 'Cancelled')) throw new Error('signaturePad.bolNotReady');
             const raw = targets[0].raw;
-            const requiresShipper = !!raw.signature_pad_requires_shipper && !raw.shipper_signature;
+            const requiresShipper = !signed && !raw.shipper_signature;
             const documentId = randomUUID();
             const grant = jwt.sign({ kind: signed ? 'signature-pad-print' : 'signature-pad-bol', deviceId: device._id, number,
                 revision: signed ? printRevision : requiresShipper ? dualRevision : revision, requiresShipper, documentId }, secret, { expiresIn: '30m', algorithm: 'HS256' });
@@ -202,7 +202,7 @@ const createSignaturePadAccess = ({ models, secret, getUser }) => {
                     const { targets, revision, dualRevision } = await findBol(grant.number, session);
                     const requiresShipper = grant.requiresShipper === true;
                     if ((requiresShipper ? dualRevision : revision) !== grant.revision) throw new Error('signaturePad.bolChanged');
-                    if (targets[0].raw.signature_pad_requires_shipper && !targets[0].raw.shipper_signature && !requiresShipper) throw new Error('signaturePad.shipperRequired');
+                    if (!targets[0].raw.shipper_signature && !requiresShipper) throw new Error('signaturePad.shipperRequired');
                     if (requiresShipper && !input.shipperImage) throw new Error('signaturePad.shipperRequired');
                     if (!requiresShipper && input.shipperImage !== undefined) throw new Error('signaturePad.invalidMessage');
                     const previous = targets.filter(target => target.raw.driver_signature);

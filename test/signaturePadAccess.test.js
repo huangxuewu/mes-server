@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const sharp = require('sharp');
+const jwt = require('jsonwebtoken');
 const { createSignaturePadAccess, normalizeBolBarcode } = require('../utils/signaturePadAccess');
 const { createBolDocumentService } = require('../utils/bolDocumentService');
 const number = '84017970842360107';
@@ -215,7 +216,41 @@ test('generation and dual signature saves roll back all merged copies on failure
     await t.access.sign(t.device, input);
 });
 
-test('a document created elsewhere during generation is preserved and ordinary scans stay driver-only', async () => {
+test('existing unsigned BOLs require shipper then driver without a SignPad generation flag', async () => {
+    for (const shipperSignature of [undefined, null, '']) {
+        const t = setup();
+        if (shipperSignature === undefined) delete t.document().rawData.shipper_signature;
+        else t.document().rawData.shipper_signature = shipperSignature;
+        const found = await t.access.lookup(t.device, barcode, true, true);
+        assert.equal(found.requiresShipper, true);
+        assert.equal(found.signed, false);
+        assert.equal(found.needsGeneration, undefined);
+        assert.equal(t.writes(), 0, 'Existing BOLs are not regenerated');
+        const input = await t.input(found.grant);
+        await assert.rejects(t.access.sign(t.device, input), /shipperRequired/);
+        input.shipperImage = await image;
+        const receipt = await t.access.sign(t.device, input);
+        assert.equal(t.document().rawData.shipper_signature, input.shipperImage);
+        assert.equal(t.document().rawData.driver_signature, input.image);
+        assert.equal(t.document().rawData.shipper_signature_date, receipt.savedAt);
+        assert.deepEqual(await t.access.sign(t.device, input), receipt);
+        assert.equal(t.writes(), 1, 'Both signatures save together and retries do not rewrite them');
+        await t.access.authorize(t.user, t.device._id);
+        const printed = await t.access.printData(t.user, { grant: found.grant, deviceId: t.device._id, submissionId: input.submissionId });
+        assert.equal(printed.bol.shipper_signature, input.shipperImage);
+    }
+});
+
+test('a driver-only grant issued before the change cannot skip a missing shipper signature', async () => {
+    const t = setup();
+    delete t.document().rawData.shipper_signature;
+    const found = await t.lookup();
+    const previousGrant = jwt.sign({ ...jwt.verify(found.grant, 'test-only-signing-key'), requiresShipper: false }, 'test-only-signing-key', { algorithm: 'HS256' });
+    await assert.rejects(t.access.sign(t.device, await t.input(previousGrant)), /shipperRequired/);
+    assert.equal(t.writes(), 0);
+});
+
+test('a document created elsewhere with a shipper signature is preserved and stays driver-only', async () => {
     const t = setup(); const before = structuredClone(t.records());
     const prepared = await t.access.prepare(t.device, { barcode });
     assert.equal(prepared.requiresShipper, false); assert.equal(t.writes(), 0); assert.deepEqual(t.records(), before);
@@ -489,6 +524,7 @@ test('explicit deletion releases signed merged BOLs so a replacement can be sign
     const replacement = { ...t.raw, shipper_signature: '', carrier_name: 'Replacement carrier' };
     await t.service.save({ loadNumber:'LOAD-1', rawData:replacement });
     const next = await t.lookup();
-    await t.access.sign(t.device, await t.input(next.grant));
+    assert.equal(next.requiresShipper, true);
+    await t.access.sign(t.device, { ...await t.input(next.grant), shipperImage: await image });
     assert.ok(t.records().every(record => t.document().rawData.driver_signature));
 });
