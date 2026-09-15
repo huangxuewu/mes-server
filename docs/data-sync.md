@@ -71,6 +71,16 @@ Negotiated clients receive `{ _id, commandId, committed: true, date }`; legacy c
 
 ## Verification and operations
 
+### MES BOL document cache
+
+The outbound Pinia store preloads BOL documents for today's non-parcel shipments using the factory business date and timezone. Scheduled pickup time takes precedence over pickup date. Loads share one cache entry; unnumbered shipments use their shipment ID. Opening any shipment editor also enrolls its BOL in the cache, including historical loads outside the active outbound dataset. Cache entries remain subscribed for the signed-in session and clear when the user changes. This cache is in MES memory; it does not preload documents onto SignPad or persist BOL bodies across app restarts.
+
+The existing `bolDocuments` dependency revision drives background refresh, including edits made by SignPad and deletion/replacement. `bol-documents:sync` accepts at most 20 load/shipment identities with their cached document ID, revision and update time. It reads standalone BOL metadata in one query and fetches bodies only for changed documents in a second indexed batch. Missing records return a null document; replacement IDs are accepted even when the new document revision is lower. App BOL writers must continue incrementing `revision` and maintaining `updatedAt` so unchanged-document checks remain valid.
+
+Adding a cache target invalidates the refresh registration's acknowledged dependency revision, so a failed preload retries through the normal sync status cycle even without another BOL change. Reconnect already clears acknowledged revisions. Foreground opening shares an in-flight preload, and cached opening does not wait for a background refresh. Failed refreshes retain the previous cache and retry. Responses from an earlier user session cannot populate the new session.
+
+Drafts remain separate from synchronized documents. A draft retains the document ID and revision it was opened against; background refresh cannot advance that draft's save version. Successful writes from the same save queue advance it, and explicit conflict reload adopts the fresh version. The server rejects stale or replaced document identities. Deploy server support before the updated MES client. The SignPad APK is unchanged.
+
 `sync:status.capture.available` requires a live lease, recent successful polling, captured source time within the lag allowance, and no capture error. `pollAgeMs` measures consumer liveness separately from `lagMs`, which estimates time behind the captured source wall time (cluster timestamp fallback). The worker samples the database clock to compensate for server-clock differences. Empty polls advance the observed capture time; busy polls remain healthy when caught up, while processing old source events remains unavailable. Neither metric is end-to-end client latency. Logs report capture errors, generation resets, scanned entries, delta counts, and package bytes.
 
 Run `npm run test:data-sync` in client. Run the server suite with a disposable local replica set and `DATA_SYNC_TEST_URI=mongodb://127.0.0.1:<port>/data_sync_test_<name>?replicaSet=<name>`. The URI guard rejects non-local databases; without it integration cases are explicitly skipped. Build with `npx electron-vite build`, avoiding the packaging script's version/publishing steps.

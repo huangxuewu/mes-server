@@ -6,7 +6,28 @@ const createBolDocumentService = models => {
         return bolDocument.findOne(documentId ? { _id: documentId, ...(loadNumber ? { loadNumber } : {}) }
             : loadNumber ? { loadNumber } : { loadNumber: '', shipmentId }).lean();
     };
-    const save = async ({ loadNumber = '', shipmentId, rawData, number, url, revision, shipmentIds, clear = false }) => {
+    const sync = async ({ targets }) => {
+        if (!Array.isArray(targets) || targets.length > 20) throw new Error('Invalid BOL cache targets');
+        const selectors = targets.map(target => {
+            if (!target || typeof target !== 'object' || [target.loadNumber, target.shipmentId].some(value => value != null && (typeof value !== 'string' || value.length > 128))
+                || (!target.loadNumber && !target.shipmentId)) throw new Error('Invalid BOL identity');
+            return target.loadNumber ? { loadNumber: target.loadNumber } : { loadNumber: '', shipmentId: target.shipmentId };
+        });
+        if (!selectors.length) return [];
+        const metadata = await bolDocument.find({ $or: selectors }, { loadNumber: 1, shipmentId: 1, revision: 1, updatedAt: 1 }).lean();
+        const changed = targets.map((target, index) => {
+            const current = metadata.find(document => selectors[index].loadNumber
+                ? document.loadNumber === target.loadNumber : !document.loadNumber && document.shipmentId === target.shipmentId);
+            const unchanged = current && String(current._id) === target.documentId && current.revision === target.revision
+                && (current.updatedAt?.toISOString() || null) === (target.updatedAt || null);
+            return { current, unchanged };
+        });
+        const ids = [...new Map(changed.filter(row => row.current && !row.unchanged).map(row => [String(row.current._id), row.current._id])).values()];
+        const documents = ids.length ? await bolDocument.find({ _id: { $in: ids } }).lean() : [];
+        return changed.map(({ current, unchanged }) => unchanged ? { unchanged: true }
+            : { document: documents.find(document => String(document._id) === String(current?._id)) || null });
+    };
+    const save = async ({ loadNumber = '', shipmentId, documentId, rawData, number, url, revision, shipmentIds, clear = false }) => {
         if (typeof loadNumber !== 'string' || (!loadNumber.trim() && !shipmentId)) throw new Error('BOL load number or shipment ID is required');
         const selector = loadNumber ? { loadNumber } : { shipmentId, loadNumber: { $in: ['', null] } };
         const documentSelector = loadNumber ? { loadNumber } : { loadNumber: '', shipmentId };
@@ -19,6 +40,7 @@ const createBolDocumentService = models => {
                 if (!loads.length) throw new Error('signaturePad.bolChanged');
                 if (shipmentIds && (!Array.isArray(shipmentIds) || !shipmentIds.length || shipmentIds.some(id => !loads.some(load => load.shipmentId === id)))) throw new Error('Invalid BOL shipment selection');
                 const document = await bolDocument.findOne(documentSelector).session(session).lean();
+                if (documentId !== undefined && documentId !== (document ? String(document._id) : null)) throw new Error('signaturePad.bolChanged');
                 if (document && revision !== undefined && document.revision !== revision) throw new Error('signaturePad.bolChanged');
                 if (loads.some(load => load.bol)) throw new Error('BOL migration is required');
                 if (loads.some(load => load.bolId && String(load.bolId) !== String(document?._id))) throw new Error('signaturePad.bolChanged');
@@ -61,7 +83,7 @@ const createBolDocumentService = models => {
         } finally { await session.endSession(); }
         return saved;
     };
-    return { get, save };
+    return { get, sync, save };
 };
 
 module.exports = { createBolDocumentService };
