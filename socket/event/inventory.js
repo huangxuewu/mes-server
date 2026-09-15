@@ -2,6 +2,17 @@ const db = require("../../models");
 
 module.exports = (socket, io) => {
 
+    // Installed clients use this event and expect the array directly, unlike inventory:list.
+    socket.on('tool:fetch', async (_query, callback) => {
+        if (typeof callback !== 'function') return;
+        try {
+            const items = await db.tools.find({}).sort({ createdAt: -1 });
+            callback({ status: 'success', payload: items });
+        } catch (error) {
+            callback({ status: 'error', message: error.message });
+        }
+    });
+
     // Helper function to get the correct model based on type
     function getModelByType(type) {
         const models = {

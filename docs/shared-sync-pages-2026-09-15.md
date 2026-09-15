@@ -34,4 +34,12 @@ The full suite also covers scope rollover, retention, collection replacement, ch
 
 ## Separate timeout finding
 
-The supplied client log also includes tool:fetch. The current client production/tool store emits that event, but the current server event directory registers no matching handler. This is a separate client/server contract gap and cannot be diagnosed as slow database execution merely from its timeout message.
+The supplied client log also includes tool:fetch. The client production/tool store emits that event, but the server previously registered no matching handler (inventory:list uses a different response envelope). The inventory handler now acknowledges tool:fetch with the tools array expected by installed clients, and acknowledges database errors. A regression test checks both paths. This is a separate client/server contract gap, not evidence of slow database execution from its timeout message alone.
+
+## Initial production validation
+
+Shared pages were deployed as commit 53a2b04 / Heroku v152 at approximately 06:42:18 UTC. All 66 cache/DataSync tests passed; seven targeted checks passed after the final cursor normalization and reporting changes.
+
+At the first 30-second process checkpoint, 12 snapshots had completed with one actual order read and no remaining order reads. That cold read took 15.73 seconds, so the cold-start timeout remains a limitation. Subsequent 30-second windows reported snapshot maxima of 105 ms and 98 ms, status maxima of 81 ms and 85 ms, and sharing registration maxima of 235 ms. The cache had only two builds, nine joins and 13 hits at 06:43:54 UTC. The capture loop was the only active operation at the corresponding process checkpoints.
+
+Heroku memory settled around 391-396 MB through 06:43:52 UTC, with zero swap on the unchanged 1024 MB quota. Before deployment it was around 559-607 MB and order reads repeatedly accumulated. This is promising early recovery evidence across a restart, not yet a long-duration memory stability result or a claim that all Atlas throttling is resolved.
