@@ -26,7 +26,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 
 // View engine setup (same as app.js)
 app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'jade');
+app.set('view engine', 'pug');
 
 // Middleware
 app.use((req, res, next) => {

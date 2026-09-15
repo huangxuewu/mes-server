@@ -6,6 +6,8 @@ The investigation found several independent defects, rather than one universal m
 
 The latest completed production observation covers **06:59:00–07:14:24 UTC**, release **v155**, with 45 Heroku samples: **234.67–403.89 MB**, no swap, no R14/R15 memory errors, and no H12 request timeouts. The quota was **1024 MB** throughout this window. This establishes recovery under the observed workload; it is not a peak-capacity test or evidence that the former 512 MB tier is sufficient.
 
+The subsequent dependency review reduced the npm production advisory count from 26 to zero and passed 175 tests, including the complete sync replica-set suite. See [the dependency review](dependency-quality-review-2026-09-15.md) for versions, migration details, primary advisory sources and validation scope.
+
 ## Focused code review
 
 | Area reviewed | Assessment and action |

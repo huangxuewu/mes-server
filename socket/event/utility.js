@@ -49,7 +49,7 @@ module.exports = (socket, io) => {
 
     const renderPdfFirstPage = async (pdfBuffer) => {
         const { pdf } = await import("pdf-to-img");
-        const doc = await pdf(pdfBuffer, { scale: 1.5 });
+        const doc = await pdf(pdfBuffer, { scale: 1.5, docInitParams: { isEvalSupported: false } });
 
         try {
             const page1 = await doc.getPage(1);
