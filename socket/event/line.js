@@ -66,15 +66,12 @@ module.exports = (socket, io) => {
 
     socket.on('lines:get', async (query, callback) => {
         try {
-            db.line.find(query).then(lines => {
-                callback({ status: "success", message: "Lines fetched successfully", payload: lines })
-            }).catch(error => {
-                callback({ status: "error", message: error.message })
-            })
+            const lines = await db.line.find(query);
+            callback({ status: "success", message: "Lines fetched successfully", payload: lines });
         } catch (error) {
-            callback({ status: "error", message: error.message })
+            callback({ status: "error", message: error.message });
         }
-    })
+    });
 
     socket.on('parameter:create', async (data, callback) => {
         try {

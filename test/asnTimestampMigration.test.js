@@ -9,6 +9,7 @@ test('migration updates pass the real outbound schema and preserve conditional l
     const { EventEmitter } = require('node:events');
     let schema;
     const dependencies = { mongoose, '../socket/io': { io: {} }, '../utils/outboundScac': {},
+        '../utils/bolDocuments': { attachBolDocuments: async (_models, records) => records },
         '../config/database': { model: (_name, definition) => { schema = definition; return { watch: () => new EventEmitter(), createIndexes() {}, hooks: { pre() {} } }; } } };
     vm.runInNewContext(fs.readFileSync(require.resolve('../models/outbound'), 'utf8'), {
         module: { exports: {} }, require: name => dependencies[name],

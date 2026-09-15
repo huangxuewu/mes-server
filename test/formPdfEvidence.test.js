@@ -10,10 +10,11 @@ const document = { title: 'Inspection evidence', documentNumber: 'FORM-014' };
 
 const inspect = async buffer => {
     const { getDocument } = await import(pathToFileURL(pdfjsPath).href);
-    const pdf = await getDocument({ data: new Uint8Array(buffer),
-        standardFontDataUrl: path.resolve(path.dirname(pdfjsPath), '../../standard_fonts').split(path.sep).join('/') + '/' }).promise;
+    const loadingTask = getDocument({ data: new Uint8Array(buffer),
+        standardFontDataUrl: path.resolve(path.dirname(pdfjsPath), '../../standard_fonts').split(path.sep).join('/') + '/' });
     const pages = [];
     try {
+        const pdf = await loadingTask.promise;
         for (let index = 1; index <= pdf.numPages; index++) {
             const page = await pdf.getPage(index);
             const { items } = await page.getTextContent();
@@ -31,7 +32,7 @@ const inspect = async buffer => {
         }
         return pages;
     } finally {
-        await pdf.destroy();
+        await loadingTask.destroy();
     }
 };
 

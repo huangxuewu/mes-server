@@ -41,12 +41,13 @@ test('startup warms the release cache, refreshes without clients, and recovers f
     let failure = new Error('GitHub unavailable');
     const errors = [];
     const module = { exports: {} };
+    const releaseRequire = require('node:module').createRequire(require.resolve('../utils/stationRelease'));
     vm.runInNewContext(fs.readFileSync(require.resolve('../utils/stationRelease'), 'utf8'), {
         module, require: name => name === 'axios' ? { get: async () => {
             calls++;
             if (!latest) throw failure;
             return { data: latest };
-        } } : require(name),
+        } } : releaseRequire(name),
         setInterval: (callback, delay) => {
             assert.equal(delay, 60000);
             assert.equal(refresh, undefined);
