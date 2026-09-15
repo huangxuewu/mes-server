@@ -86,6 +86,25 @@ test('failed token rebind clears the previous account and session expiry denies 
     actor.close();
 });
 
+test('an unauthenticated request during token binding cannot cancel the pending sign-in', async () => {
+    const { connect, session, db } = fixture(), actor = connect(ids.a);
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const original = db.user.findById.bind(db.user);
+    db.user.findById = id => ({ lean: async () => { await held; return original(id).lean(); } });
+    const token = jwt.sign({ id: ids.a }, 'test-only-secret', { expiresIn: '1h' });
+    const binding = actor.call('auth:bind', { token });
+    const attempt = actor.socket.data.sessionGeneration;
+    try {
+        await assert.rejects(session.getActiveSessionUser(actor.socket), /Sign in to continue/);
+        assert.equal(actor.socket.data.sessionGeneration, attempt, 'Denied requests must not supersede a pending bind');
+    } finally { release(); }
+    const result = await binding;
+    assert.equal(result.status, 'success');
+    assert.equal(actor.socket.data.userId, ids.a);
+    actor.close();
+});
+
 test('permission changes refresh access and subscriptions without ending the session or exposing credentials', async () => {
     const { connect, session, db } = fixture(), worker = connect(ids.b);
     const roster = await worker.call('users:get', {});

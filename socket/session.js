@@ -99,7 +99,10 @@ const canManageAccount = (actor, target) => Boolean(target &&
 const getActiveSessionUser = async socket => {
     const id = getSessionUserId(socket);
     const generation = socket.data.sessionGeneration;
-    if (!id || !socket.data.expiresAt || socket.data.expiresAt <= Date.now()) {
+    // An already-unbound socket may be authenticating. Deny the request without
+    // changing its generation and accidentally cancelling that pending authentication.
+    if (!id) throw new Error('Sign in to continue');
+    if (!socket.data.expiresAt || socket.data.expiresAt <= Date.now()) {
         unbindSocketSession(socket);
         throw new Error('Sign in to continue');
     }
