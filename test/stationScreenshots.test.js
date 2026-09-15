@@ -13,6 +13,36 @@ const deferred = () => {
     const promise = new Promise(done => { resolve = done; });
     return { promise, resolve };
 };
+
+test('image validation bounds pending inputs and allows only one native decode at a time', async () => {
+    const vm = require('node:vm');
+    const filename = path.join(__dirname, '../utils/stationScreenshots.js');
+    const module = { exports: {} };
+    const held = deferred();
+    let active = 0, maximum = 0;
+    vm.runInNewContext(await fs.readFile(filename, 'utf8'), {
+        module, Buffer, setInterval, clearInterval,
+        require: name => {
+            if (name === './memoryDiagnostics') return { wrap: (_label, fn) => fn };
+            if (name === 'sharp') return () => ({
+                metadata: async () => ({ format: 'jpeg', width: 640, height: 360 }),
+                timeout() { return this; }, raw() { return this; },
+                async toBuffer() { active++; maximum = Math.max(maximum, active); await held.promise; active--; return Buffer.alloc(1); },
+            });
+            return require(name);
+        },
+    });
+    const validate = module.exports.validateImage;
+    const jobs = Array.from({ length: 32 }, () => validate(jpeg));
+    await flush();
+    assert.equal(active, 1);
+    await assert.rejects(validate(jpeg), /validation is busy/);
+    held.resolve();
+    const results = await Promise.all(jobs);
+    assert.equal(maximum, 1); assert.ok(results.every(result => result.width === 640));
+    await assert.rejects(validate(Buffer.from('corrupt')), /Invalid screenshot image/);
+    assert.equal((await validate(jpeg)).height, 360);
+});
 const fixture = async (t, options = {}) => {
     const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mes-screenshot-test-'));
     t.after(() => fs.rm(cacheDir, { recursive: true, force: true }));

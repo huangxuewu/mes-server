@@ -15,7 +15,7 @@ const imageMime = contents => contents?.subarray(0, 4).toString() === 'RIFF' && 
 const generationFilter = station => station.screenshotGeneration === undefined
     ? { screenshotGeneration: { $exists: false } } : { screenshotGeneration: station.screenshotGeneration };
 
-const validateImage = require('./memoryDiagnostics').wrap('screenshot:decode', async (contents, { allowWebp = false } = {}) => {
+const decodeImage = require('./memoryDiagnostics').wrap('screenshot:decode', async (contents, { allowWebp = false } = {}) => {
     if (!Buffer.isBuffer(contents) || !contents.length || contents.length > MAX_BYTES) throw new Error('Invalid screenshot image');
     if (imageMime(contents) === 'image/webp') {
         if (!allowWebp || contents.length < 20 || contents.readUInt32LE(4) + 8 !== contents.length) throw new Error('Invalid screenshot image');
@@ -51,6 +51,20 @@ const validateImage = require('./memoryDiagnostics').wrap('screenshot:decode', a
     await image.timeout({ seconds: 5 }).raw().toBuffer();
     return { width, height };
 });
+
+// Native image allocations are much larger than encoded uploads. Serialize full
+// decodes across capture and download requests, with a bounded queue of inputs.
+let imageValidationTail = Promise.resolve();
+let pendingImageValidations = 0;
+const validateImage = (contents, options) => {
+    if (!Buffer.isBuffer(contents) || !contents.length || contents.length > MAX_BYTES)
+        return Promise.reject(new Error('Invalid screenshot image'));
+    if (pendingImageValidations >= 32) return Promise.reject(new Error('Screenshot validation is busy; retry shortly'));
+    pendingImageValidations++;
+    const validation = imageValidationTail.then(() => decodeImage(contents, options));
+    imageValidationTail = validation.then(() => {}, () => {});
+    return validation.finally(() => { pendingImageValidations--; });
+};
 
 const createStationScreenshots = ({ io, db, getDropbox, authorize, cacheDir = path.join(os.tmpdir(), 'mes-station-screenshots'), now = Date.now }) => {
     const states = new Map();
