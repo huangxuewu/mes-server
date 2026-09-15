@@ -33,10 +33,11 @@ async function loadSyncFixture(uri, sources = {}) {
         });
         return module.exports;
     };
-    const common = { mongoose, '../config/database': database,
+    const common = { mongoose, '../config/database': database, '../utils/dayjs': dayjs,
         '../socket/io': { io: { except: () => ({ emit() {} }) } },
         '../utils/outboundScac': require('../../utils/outboundScac') };
-    const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common), bolDocument: evaluate('models/bolDocument.js', common) };
+    const db = { order: evaluate('models/order.js', common), outbound: evaluate('models/outbound.js', common), bolDocument: evaluate('models/bolDocument.js', common),
+        hauler: evaluate('models/hauler.js', common), signaturePadDevice: evaluate('models/signaturePadDevice.js', common) };
     await Promise.all(Object.values(db).map(model => model.init()));
     const handlers = {};
     evaluate('socket/event/shipment.js', { mongoose, '../../models': db, '../../utils/dayjs': dayjs,
